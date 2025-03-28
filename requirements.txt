@@ -3,4 +3,4 @@ flask_cors
 requests
 transformers
 gunicorn
-torch
+torch=2.6.0+cpu
