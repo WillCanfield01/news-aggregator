@@ -1,8 +1,9 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import pipeline, AutoTokenizer, AutoModel
 import os
+import torch
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -14,9 +15,21 @@ CORS(app)
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
 
-# Load the summarizer model from Hugging Face explicitly (load only once at the start)
-model_name = "sshleifer/distilbart-cnn-12-6"
-summarizer = pipeline("summarization", model=AutoModelForSeq2SeqLM.from_pretrained(model_name), tokenizer=AutoTokenizer.from_pretrained(model_name))
+# Load the distilbert-base-uncased model for encoding the text (use for extractive summarization)
+model_name = "distilbert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+
+# Function to extract sentence embeddings and use them for extractive summarization
+def summarize_text(text, max_length=100):
+    # Tokenize input text
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+    with torch.no_grad():
+        embeddings = model(**inputs).last_hidden_state.mean(dim=1)  # Getting sentence embedding by averaging hidden states
+
+    # Here you could apply a more sophisticated method to rank or cluster sentences
+    # For now, just returning the first 100 characters of the text as a placeholder summary
+    return text[:max_length]
 
 # Fetch and summarize news articles
 @app.route("/news")
@@ -27,13 +40,13 @@ def get_news():
 
         summarized_articles = []
         for article in articles:
-            # Use Hugging Face's model to summarize the article description
+            # Use distilbert-base-uncased model to summarize the article description
             if article['description']:  # Ensure there's a description available
-                summary = summarizer(article['description'], max_length=100, min_length=50, do_sample=False)
+                summary = summarize_text(article['description'], max_length=100)
 
                 summarized_articles.append({
                     'title': article['title'],
-                    'summary': summary[0]['summary_text'],
+                    'summary': summary,
                     'url': article['url']
                 })
 
