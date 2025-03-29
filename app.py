@@ -56,4 +56,5 @@ def get_news():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5001, debug=True)  # Make sure this port matches your frontend setup
+    app.run(host='0.0.0.0', port=10000, debug=True)  # Use port 10000 for Render
+  # Make sure this port matches your frontend setup
