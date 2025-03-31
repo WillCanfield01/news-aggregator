@@ -2,7 +2,8 @@ import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-from transformers import pipeline, BartTokenizer, BartForConditionalGeneration
+from transformers import pipeline
+import torch
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -14,12 +15,8 @@ CORS(app)
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
 
-# Load the summarizer model from Hugging Face explicitly (load only once at the start)
-model_name = "facebook/bart-large-cnn"
+# Load the summarizer model from Hugging Face (load only once at the start)
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-
-# Fetch and summarize news articles
-import torch
 
 # Fetch and summarize news articles
 @app.route("/")
@@ -27,9 +24,9 @@ def home():
     return "News Aggregator API is running!"
 
 @app.route("/news")
-
 def get_news():
     try:
+        # Fetch news articles from the API
         response = requests.get(NEWS_URL)
         articles = response.json().get('articles', [])
 
