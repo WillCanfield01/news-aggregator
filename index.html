@@ -91,7 +91,7 @@
 
     <script>
         document.addEventListener("DOMContentLoaded", function () {
-            fetch('http://127.0.0.1:5001/news')
+            fetch('/news')
                 .then(response => response.json())
                 .then(data => {
                     const articlesDiv = document.getElementById('articles');
