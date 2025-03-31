@@ -1,10 +1,5 @@
-# gunicorn.conf.py
 import os
 
-loglevel = 'debug'  # Detailed logs
-accesslog = '-'  # Logs to stdout
-errorlog = '-'  # Logs to stderr
-
-bind = f"0.0.0.0:{os.getenv('PORT', '10000')}"
+bind = f"0.0.0.0:{os.getenv('PORT', '5000')}"  # Use dynamic port from Render
 workers = 1
 timeout = 120
