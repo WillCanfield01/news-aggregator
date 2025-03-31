@@ -15,10 +15,9 @@ CORS(app)
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
 
-# Load the summarizer model from Hugging Face (load only once at the start)
+# Load the summarizer model from Hugging Face
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-# Fetch and summarize news articles
 @app.route("/")
 def home():
     return "News Aggregator API is running!"
@@ -26,20 +25,15 @@ def home():
 @app.route("/news")
 def get_news():
     try:
-        # Fetch news articles from the API
         response = requests.get(NEWS_URL)
         articles = response.json().get('articles', [])
 
         summarized_articles = []
         for article in articles:
-            if article['description']:  # Ensure there's a description available
-                # Calculate the length of the description
+            if article['description']:
                 input_length = len(article['description'].split())
+                max_length = min(100, input_length + 20)
 
-                # Set a dynamic max_length, ensuring it's not too long for short descriptions
-                max_length = min(100, input_length + 20)  # Allow for a bit more summarization if needed
-
-                # Use torch.no_grad() to save memory during inference
                 with torch.no_grad():
                     summary = summarizer(article['description'], max_length=max_length, min_length=50, do_sample=False)
 
@@ -55,6 +49,5 @@ def get_news():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))  # Default to port 5000 if PORT is not set
+    port = int(os.getenv("PORT"))  # Do not use a fallback value
     app.run(host='0.0.0.0', port=port, debug=True)
-
