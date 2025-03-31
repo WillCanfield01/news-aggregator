@@ -16,13 +16,18 @@ NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KE
 
 # Load the summarizer model from Hugging Face explicitly (load only once at the start)
 model_name = "facebook/bart-large-cnn"
-summarizer = pipeline("summarization", model=BartForConditionalGeneration.from_pretrained(model_name), tokenizer=BartTokenizer.from_pretrained(model_name))
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
 # Fetch and summarize news articles
 import torch
 
 # Fetch and summarize news articles
+@app.route("/")
+def home():
+    return "News Aggregator API is running!"
+
 @app.route("/news")
+
 def get_news():
     try:
         response = requests.get(NEWS_URL)
