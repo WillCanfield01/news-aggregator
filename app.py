@@ -2,7 +2,7 @@ import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from transformers import pipeline, BartTokenizer, BartForConditionalGeneration
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -15,8 +15,8 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
 
 # Load the summarizer model from Hugging Face explicitly (load only once at the start)
-model_name = "distilbert-base-uncased"
-summarizer = pipeline("summarization", model=AutoModelForSequenceClassification.from_pretrained(model_name), tokenizer=AutoTokenizer.from_pretrained(model_name))
+model_name = "facebook/bart-large-cnn"
+summarizer = pipeline("summarization", model=BartForConditionalGeneration.from_pretrained(model_name), tokenizer=BartTokenizer.from_pretrained(model_name))
 
 # Fetch and summarize news articles
 import torch
@@ -31,9 +31,15 @@ def get_news():
         summarized_articles = []
         for article in articles:
             if article['description']:  # Ensure there's a description available
+                # Calculate the length of the description
+                input_length = len(article['description'].split())
+
+                # Set a dynamic max_length, ensuring it's not too long for short descriptions
+                max_length = min(100, input_length + 20)  # Allow for a bit more summarization if needed
+
                 # Use torch.no_grad() to save memory during inference
                 with torch.no_grad():
-                    summary = summarizer(article['description'], max_length=100, min_length=50, do_sample=False)
+                    summary = summarizer(article['description'], max_length=max_length, min_length=50, do_sample=False)
 
                 summarized_articles.append({
                     'title': article['title'],
@@ -45,7 +51,6 @@ def get_news():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))  # Ensure it uses the PORT environment variable from Render
