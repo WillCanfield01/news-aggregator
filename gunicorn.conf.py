@@ -1,5 +1,5 @@
 import os
 
-bind = f"0.0.0.0:{os.getenv('PORT')}"  # Ensure Render assigns the correct port
+bind = f"0.0.0.0:{os.environ['PORT']}"  # Ensure it dynamically binds without fallback
 workers = 1
 timeout = 120

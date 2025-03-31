@@ -49,5 +49,6 @@ def get_news():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT"))  # Do not use a fallback value
+    port = int(os.environ["PORT"])  # Ensure PORT is always set
     app.run(host='0.0.0.0', port=port, debug=True)
+
