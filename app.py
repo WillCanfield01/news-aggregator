@@ -48,7 +48,7 @@ def get_news():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))  # Use the PORT variable from Render
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))  # Default to 5000 if PORT is not set
+    app.run(host='0.0.0.0', port=port)
 
