@@ -55,5 +55,6 @@ def get_news():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))  # Ensure it uses the PORT environment variable from Render
+    port = int(os.getenv("PORT", 5000))  # Default to port 5000 if PORT is not set
     app.run(host='0.0.0.0', port=port, debug=True)
+
