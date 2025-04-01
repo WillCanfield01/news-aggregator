@@ -21,6 +21,7 @@ networkx==3.4.2
 numpy==2.2.4
 packaging==24.2
 pathspec==0.12.1
+pip==25.0.1
 platformdirs==4.3.7
 python-dotenv==1.1.0
 PyYAML==6.0.2
