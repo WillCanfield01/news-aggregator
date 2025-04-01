@@ -1,1 +1,1 @@
-gunicorn --bind 0.0.0.0:$PORT news_aggregator.app:app
+gunicorn -b 0.0.0.0:$PORT app:app
