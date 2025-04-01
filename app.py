@@ -1,6 +1,6 @@
 import os
 import requests
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 
 # Initialize Flask app
@@ -21,7 +21,7 @@ def simple_summarize(text, max_words=50):
 
 @app.route("/")
 def home():
-    return "News Aggregator API is running!"
+    return render_template("index.html")
 
 @app.route("/news")
 def get_news():
