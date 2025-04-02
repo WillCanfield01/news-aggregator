@@ -8,11 +8,14 @@ from transformers import pipeline
 app = Flask(__name__)
 CORS(app)
 
-# Load a pre-trained Hugging Face model for zero-shot classification
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
 
-# Define the possible categories for classification
-categories = ["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"]
+def predict_category(article_text):
+    if not article_text:
+        return "Unknown"
+    
+    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    result = classifier(article_text, candidate_labels=["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"])
+    return result["labels"][0]
 
 # Fetch API key from environment variables
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
