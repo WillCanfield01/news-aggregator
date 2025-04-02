@@ -8,7 +8,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
         rel="stylesheet">
     <style>
-        /* General Reset */
         * {
             margin: 0;
             padding: 0;
@@ -18,9 +17,7 @@
         body {
             font-family: 'Roboto', sans-serif;
             background-color: #f9f3e1;
-            /* Warm light yellow background */
-            color: #333333;
-            /* Dark text for readability */
+            color: #333;
             line-height: 1.6;
             padding: 20px;
             text-align: center;
@@ -29,9 +26,26 @@
         h1 {
             font-family: 'Lora', serif;
             color: #6a4e23;
-            /* Warm brown color */
             margin-bottom: 20px;
             font-size: 2.5em;
+        }
+
+        #filter {
+            margin-bottom: 20px;
+        }
+
+        button {
+            background-color: #6a4e23;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #8a623f;
         }
 
         #articles {
@@ -53,30 +67,11 @@
             transform: scale(1.03);
         }
 
-        h2 {
-            font-size: 1.5em;
-            color: #6a4e23;
-            /* Brown headline */
-            margin-bottom: 10px;
-        }
-
-        p {
-            font-size: 1em;
-            color: #555;
-            margin-bottom: 15px;
-        }
-
-        a {
-            color: #6a4e23;
-            text-decoration: none;
+        .category {
             font-weight: bold;
+            color: #6a4e23;
         }
 
-        a:hover {
-            text-decoration: underline;
-        }
-
-        /* Small screens responsiveness */
         @media (max-width: 768px) {
             #articles {
                 grid-template-columns: 1fr;
@@ -87,29 +82,52 @@
 
 <body>
     <h1>Summarized News Articles</h1>
+    <div id="filter">
+        <button onclick="filterCategory('All')">All</button>
+        <button onclick="filterCategory('Finance')">Finance</button>
+        <button onclick="filterCategory('Sports')">Sports</button>
+        <button onclick="filterCategory('Politics')">Politics</button>
+        <button onclick="filterCategory('Entertainment')">Entertainment</button>
+        <button onclick="filterCategory('Health')">Health</button>
+        <button onclick="filterCategory('Technology')">Technology</button>
+    </div>
     <div id="articles"></div>
 
     <script>
+        let articles = [];
+
         document.addEventListener("DOMContentLoaded", function () {
             fetch('/news')
                 .then(response => response.json())
                 .then(data => {
-                    const articlesDiv = document.getElementById('articles');
-                    data.forEach(article => {
-                        const articleElement = document.createElement('div');
-                        articleElement.classList.add('article');
-                        articleElement.innerHTML = `
-                            <h2>${article.title}</h2>
-                            <p>${article.summary}</p>
-                            <a href="${article.url}" target="_blank">Read more</a>
-                        `;
-                        articlesDiv.appendChild(articleElement);
-                    });
+                    articles = data;
+                    displayArticles('All');
                 })
-                .catch(error => {
-                    console.error('Error fetching news:', error);
-                });
+                .catch(error => console.error('Error fetching news:', error));
         });
+
+        function displayArticles(category) {
+            const articlesDiv = document.getElementById('articles');
+            articlesDiv.innerHTML = '';
+
+            const filteredArticles = category === 'All' ? articles : articles.filter(a => a.category === category);
+
+            filteredArticles.forEach(article => {
+                const articleElement = document.createElement('div');
+                articleElement.classList.add('article');
+                articleElement.innerHTML = `
+                    <h2>${article.title}</h2>
+                    <p class="category">${article.category}</p>
+                    <p>${article.summary}</p>
+                    <a href="${article.url}" target="_blank">Read more</a>
+                `;
+                articlesDiv.appendChild(articleElement);
+            });
+        }
+
+        function filterCategory(category) {
+            displayArticles(category);
+        }
     </script>
 </body>
 
