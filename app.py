@@ -9,11 +9,17 @@ app = Flask(__name__)
 CORS(app)
 
 
+def get_classifier():
+    global _classifier
+    if _classifier is None:
+        _classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    return _classifier
+
 def predict_category(article_text):
     if not article_text:
         return "Unknown"
     
-    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    classifier = get_classifier()  # Load the model only once
     result = classifier(article_text, candidate_labels=["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"])
     return result["labels"][0]
 
