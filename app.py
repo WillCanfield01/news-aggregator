@@ -2,6 +2,8 @@ import os
 import requests
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import torch
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -9,49 +11,40 @@ CORS(app)
 
 # Categories for classification
 CATEGORIES = ["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"]
+LABEL_MAP = {0: "Finance", 1: "Sports", 2: "Politics", 3: "Entertainment", 4: "Health", 5: "Technology"}
 
-# Fetch API keys from environment variables
+# Fetch API key from environment variables
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-HF_API_KEY = os.getenv("HF_API_KEY")  # Hugging Face API key
-
-# API URLs
 NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}&pageSize=100"
-HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-mnli"
-
-# Headers for Hugging Face API
-HF_HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
 
 # Create a session for API requests (reduces overhead)
 session = requests.Session()
 
+# Load a lightweight transformer model
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=len(CATEGORIES))
+
 def predict_category(article_text):
-    """ Uses Hugging Face API for classification to reduce CPU load. """
+    """Predicts category using a lightweight local Transformer model."""
     if not article_text:
         return "Unknown"
     
-    data = {
-        "inputs": article_text,
-        "parameters": {"candidate_labels": CATEGORIES}
-    }
+    inputs = tokenizer(article_text, return_tensors="pt", truncation=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    predicted_label = torch.argmax(outputs.logits, dim=1).item()
     
-    try:
-        response = requests.post(HF_API_URL, headers=HF_HEADERS, json=data, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        return result.get("labels", ["Unknown"])[0]
-    except requests.RequestException as e:
-        print(f"ERROR: Hugging Face API request failed - {e}")
-        return "Unknown"
+    return LABEL_MAP.get(predicted_label, "Unknown")
 
 def simple_summarize(text, max_words=50):
-    """ Simple text summarization by truncating to max_words. """
+    """Simple text summarization by truncating to max_words."""
     if not text:
         return "No description available."
     words = text.split()
     return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
 
 def fetch_news():
-    """ Fetches news articles, classifies them, and returns structured data. """
+    """Fetches news articles, classifies them, and returns structured data."""
     try:
         print("DEBUG: Fetching news articles...")
         response = session.get(NEWS_URL, timeout=5)
