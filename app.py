@@ -8,9 +8,18 @@ from transformers import pipeline
 app = Flask(__name__)
 CORS(app)
 
-
-# Global variable but only loads when needed
+# Global classifier variable (lazy loading to prevent memory issues)
 _classifier = None
+
+# Categories for classification
+CATEGORIES = ["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"]
+
+# Fetch API key from environment variables
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}&pageSize=100"
+
+# Create a session for API requests (reduces overhead)
+session = requests.Session()
 
 def get_classifier():
     """ Lazily loads the classifier model to avoid memory issues. """
@@ -26,42 +35,28 @@ def get_classifier():
     return _classifier
 
 def predict_category(article_text):
-    """ Predicts category using the Hugging Face model. """
-    classifier = get_classifier()  # Ensure model is loaded
+    """ Predicts the category of an article using the Hugging Face model. """
+    classifier = get_classifier()
     if classifier is None:
         print("ERROR: Model not loaded. Returning 'Unknown'.")
         return "Unknown"
-
+    
     try:
-        result = classifier(article_text, candidate_labels=["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"])
+        result = classifier(article_text, candidate_labels=CATEGORIES)
         return result["labels"][0]
     except Exception as e:
         print(f"ERROR: Model inference failed - {e}")
         return "Unknown"
 
-# Fetch API key from environment variables
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-NEWS_URL = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}&pageSize=100"
-
-# Create a session for API requests (reduces overhead)
-session = requests.Session()
-
-# Simple summarization function
 def simple_summarize(text, max_words=50):
+    """ Simple text summarization by truncating to max_words. """
     if not text:
         return "No description available."
     words = text.split()
     return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
 
-# Function to predict category using Hugging Face model
-def predict_category(article_text):
-    if not article_text:
-        return "Unknown"
-    result = classifier(article_text, candidate_labels=categories)
-    return result["labels"][0]
-
-# Function to fetch news articles
 def fetch_news():
+    """ Fetches news articles, classifies them, and returns structured data. """
     try:
         print("DEBUG: Fetching news articles...")
         response = session.get(NEWS_URL, timeout=5)
@@ -72,26 +67,25 @@ def fetch_news():
         
         categorized_articles = []
         for article in articles:
-            title = article.get("title")
+            title = article.get("title", "No Title")
             description = article.get("description", "")
-
-            if title:
-                article_text = title + " " + (description if description else "")
-                category = predict_category(article_text)
-                categorized_articles.append({
-                    "title": title,
-                    "summary": simple_summarize(description, max_words=50),
-                    "url": article.get("url"),
-                    "category": category
-                })
+            article_text = title + " " + description
+            category = predict_category(article_text)
+            
+            categorized_articles.append({
+                "title": title,
+                "summary": simple_summarize(description, max_words=50),
+                "url": article.get("url"),
+                "category": category
+            })
         
         return categorized_articles
     
     except requests.RequestException as e:
-        print(f"News API request failed: {str(e)}")
+        print(f"ERROR: News API request failed - {e}")
         return []
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        print(f"ERROR: Unexpected error - {e}")
         return []
 
 @app.route("/")
