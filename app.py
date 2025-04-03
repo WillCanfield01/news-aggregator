@@ -4,8 +4,8 @@ import torch
 import numpy as np
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
-from transformers import AutoModel, AutoTokenizer
-from sklearn.linear_model import LogisticRegression
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from sklearn.preprocessing import LabelEncoder
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -23,26 +23,26 @@ session = requests.Session()
 
 # Lazy-load model variables
 _tokenizer = None
-_embedding_model = None
-_classifier = None
+_model = None
+_label_encoder = None
 
 def load_model():
-    """Loads tokenizer, embedding model, and classifier lazily to reduce memory usage."""
-    global _tokenizer, _embedding_model, _classifier
-    if _tokenizer is None or _embedding_model is None:
+    """Loads tokenizer, embedding model, and label encoder lazily to reduce memory usage."""
+    global _tokenizer, _model, _label_encoder
+    if _tokenizer is None or _model is None or _label_encoder is None:
         print("DEBUG: Loading lightweight model...")
         _tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
-        _embedding_model = AutoModel.from_pretrained("distilbert-base-uncased").to("cpu")
+        _model = AutoModelForSequenceClassification.from_pretrained(
+            "distilbert-base-uncased", num_labels=len(CATEGORIES)
+        ).to("cpu")
         
-        # Simulated lightweight classifier (logistic regression with random weights)
-        _classifier = LogisticRegression()
-        _classifier.classes_ = np.array(CATEGORIES)
-        _classifier.coef_ = np.random.randn(len(CATEGORIES), 768)  # Fake weights
-        _classifier.intercept_ = np.random.randn(len(CATEGORIES))
+        # Initialize LabelEncoder to convert categories to numerical labels
+        _label_encoder = LabelEncoder()
+        _label_encoder.fit(CATEGORIES)
         print("DEBUG: Model loaded.")
 
 def predict_category(article_text):
-    """Predicts category using a lightweight transformer model with logistic regression."""
+    """Predicts category using a fine-tuned distilbert model."""
     load_model()
     
     if not article_text:
@@ -50,12 +50,10 @@ def predict_category(article_text):
     
     inputs = _tokenizer(article_text, return_tensors="pt", truncation=True, max_length=256)
     with torch.no_grad():
-        embedding = _embedding_model(**inputs).last_hidden_state[:, 0, :].numpy()  # Extract CLS token representation
+        outputs = _model(**inputs)
+    predicted_label = torch.argmax(outputs.logits, dim=1).item()
     
-    # Predict using logistic regression
-    predicted_label = np.argmax(_classifier.predict_proba(embedding), axis=1)[0]
-    
-    return CATEGORIES[predicted_label]
+    return _label_encoder.inverse_transform([predicted_label])[0]
 
 def simple_summarize(text, max_words=50):
     """Simple text summarization by truncating to max_words."""
