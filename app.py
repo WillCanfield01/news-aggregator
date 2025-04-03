@@ -1,6 +1,7 @@
 import os
 import requests
 import torch
+import torch.nn.functional as F
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -8,10 +9,6 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
-
-# Updated category mapping (based on model labels)
-CATEGORIES = ["News", "Sports", "Politics", "Entertainment", "Health", "Technology"]
-CATEGORY_MAPPING = {i: cat for i, cat in enumerate(CATEGORIES)}
 
 # Fetch API key from environment variables
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
@@ -23,10 +20,11 @@ session = requests.Session()
 # Lazy-load model variables
 _tokenizer = None
 _model = None
+_model_labels = None  # Stores actual category labels from the model
 
 def load_model():
     """Loads tokenizer and classification model lazily to reduce memory usage."""
-    global _tokenizer, _model
+    global _tokenizer, _model, _model_labels
     if _tokenizer is None or _model is None:
         print("DEBUG: Loading news-specific model...")
         _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
@@ -35,7 +33,15 @@ def load_model():
         ).to("cpu").eval()  # Use eval mode to prevent gradient tracking
         print("DEBUG: Model loaded successfully.")
 
-def predict_category(article_text):
+        # Load actual model labels
+        _model_labels = [
+            "arts_culture", "business", "environment", "fashion", "finance", "food",
+            "health", "lifestyle", "news", "opinion", "politics", "science", "sports",
+            "technology", "travel", "wellbeing"
+        ]
+        print("DEBUG: Model labels loaded:", _model_labels)
+
+def predict_category(article_text, confidence_threshold=0.2):
     """Predicts category using a fine-tuned news classification model."""
     load_model()
     
@@ -47,9 +53,18 @@ def predict_category(article_text):
     with torch.no_grad():
         outputs = _model(**inputs)
     
-    predicted_label = torch.argmax(outputs.logits, dim=1).item()
-    
-    return CATEGORY_MAPPING.get(predicted_label, "Unknown")
+    probabilities = F.softmax(outputs.logits, dim=1)  # Convert logits to probabilities
+    predicted_index = torch.argmax(probabilities, dim=1).item()
+    confidence = probabilities[0][predicted_index].item()
+
+    predicted_label = _model_labels[predicted_index]
+
+    print(f"DEBUG: Article classified as '{predicted_label}' with confidence {confidence:.2f}")
+
+    if confidence < confidence_threshold:
+        return "Unknown"
+
+    return predicted_label
 
 def simple_summarize(text, max_words=50):
     """Simple text summarization by truncating to max_words."""
