@@ -9,8 +9,8 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 app = Flask(__name__)
 CORS(app)
 
-# Categories for classification
-CATEGORIES = ["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"]
+# Updated category mapping (based on model labels)
+CATEGORIES = ["News", "Sports", "Politics", "Entertainment", "Health", "Technology"]
 CATEGORY_MAPPING = {i: cat for i, cat in enumerate(CATEGORIES)}
 
 # Fetch API key from environment variables
@@ -29,9 +29,9 @@ def load_model():
     global _tokenizer, _model
     if _tokenizer is None or _model is None:
         print("DEBUG: Loading news-specific model...")
-        _tokenizer = AutoTokenizer.from_pretrained("bert-news-classification")
+        _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
         _model = AutoModelForSequenceClassification.from_pretrained(
-            "bert-news-classification", num_labels=len(CATEGORIES)
+            "cardiffnlp/tweet-topic-21-multi"
         ).to("cpu").eval()  # Use eval mode to prevent gradient tracking
         print("DEBUG: Model loaded successfully.")
 
@@ -42,9 +42,11 @@ def predict_category(article_text):
     if not article_text.strip():
         return "Unknown"
     
-    inputs = _tokenizer(article_text, return_tensors="pt", truncation=True, max_length=256)
+    inputs = _tokenizer(article_text, return_tensors="pt", padding=True, truncation=True, max_length=256)
+    
     with torch.no_grad():
         outputs = _model(**inputs)
+    
     predicted_label = torch.argmax(outputs.logits, dim=1).item()
     
     return CATEGORY_MAPPING.get(predicted_label, "Unknown")
@@ -70,7 +72,7 @@ def fetch_news():
         for article in articles:
             title = article.get("title") or "No Title"
             description = article.get("description") or ""
-            article_text = f"{title} {description} {description}".strip()  # Weight description higher
+            article_text = f"{title} {description}".strip()
             
             category = predict_category(article_text) if article_text else "Unknown"
 
