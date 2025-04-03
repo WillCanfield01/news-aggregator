@@ -1,11 +1,9 @@
 import os
 import requests
 import torch
-import numpy as np
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from sklearn.preprocessing import LabelEncoder
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -13,6 +11,7 @@ CORS(app)
 
 # Categories for classification
 CATEGORIES = ["Finance", "Sports", "Politics", "Entertainment", "Health", "Technology"]
+CATEGORY_MAPPING = {i: cat for i, cat in enumerate(CATEGORIES)}
 
 # Fetch API key from environment variables
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
@@ -24,28 +23,23 @@ session = requests.Session()
 # Lazy-load model variables
 _tokenizer = None
 _model = None
-_label_encoder = None
 
 def load_model():
-    """Loads tokenizer, embedding model, and label encoder lazily to reduce memory usage."""
-    global _tokenizer, _model, _label_encoder
-    if _tokenizer is None or _model is None or _label_encoder is None:
-        print("DEBUG: Loading lightweight model...")
-        _tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+    """Loads tokenizer and classification model lazily to reduce memory usage."""
+    global _tokenizer, _model
+    if _tokenizer is None or _model is None:
+        print("DEBUG: Loading news-specific model...")
+        _tokenizer = AutoTokenizer.from_pretrained("bert-news-classification")
         _model = AutoModelForSequenceClassification.from_pretrained(
-            "distilbert-base-uncased", num_labels=len(CATEGORIES)
-        ).to("cpu")
-        
-        # Initialize LabelEncoder to convert categories to numerical labels
-        _label_encoder = LabelEncoder()
-        _label_encoder.fit(CATEGORIES)
-        print("DEBUG: Model loaded.")
+            "bert-news-classification", num_labels=len(CATEGORIES)
+        ).to("cpu").eval()  # Use eval mode to prevent gradient tracking
+        print("DEBUG: Model loaded successfully.")
 
 def predict_category(article_text):
-    """Predicts category using a fine-tuned distilbert model."""
+    """Predicts category using a fine-tuned news classification model."""
     load_model()
     
-    if not article_text:
+    if not article_text.strip():
         return "Unknown"
     
     inputs = _tokenizer(article_text, return_tensors="pt", truncation=True, max_length=256)
@@ -53,7 +47,7 @@ def predict_category(article_text):
         outputs = _model(**inputs)
     predicted_label = torch.argmax(outputs.logits, dim=1).item()
     
-    return _label_encoder.inverse_transform([predicted_label])[0]
+    return CATEGORY_MAPPING.get(predicted_label, "Unknown")
 
 def simple_summarize(text, max_words=50):
     """Simple text summarization by truncating to max_words."""
@@ -74,26 +68,27 @@ def fetch_news():
         
         categorized_articles = []
         for article in articles:
-            title = article.get("title", "No Title")
-            description = article.get("description", "")
-            article_text = (title or "") + " " + (description or "")
-            category = predict_category(article_text)
+            title = article.get("title") or "No Title"
+            description = article.get("description") or ""
+            article_text = f"{title} {description} {description}".strip()  # Weight description higher
             
+            category = predict_category(article_text) if article_text else "Unknown"
+
             categorized_articles.append({
                 "title": title,
-                "summary": simple_summarize(description, max_words=50),
-                "url": article.get("url"),
+                "summary": simple_summarize(description),
+                "url": article.get("url", "#"),
                 "category": category
             })
         
         return categorized_articles
-    
+
     except requests.RequestException as e:
         print(f"ERROR: News API request failed - {e}")
-        return []
     except Exception as e:
         print(f"ERROR: Unexpected error - {e}")
-        return []
+
+    return []
 
 @app.route("/")
 def home():
@@ -104,7 +99,7 @@ def get_news():
     articles = fetch_news()
     print(f"DEBUG: Returning {len(articles)} articles.")
     return jsonify(articles)
-
+ 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
