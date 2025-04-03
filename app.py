@@ -76,7 +76,7 @@ def fetch_news():
         for article in articles:
             title = article.get("title", "No Title")
             description = article.get("description", "")
-            article_text = title + " " + description
+            article_text = (title or "") + " " + (description or "")
             category = predict_category(article_text)
             
             categorized_articles.append({
