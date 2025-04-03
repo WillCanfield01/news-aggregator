@@ -57,14 +57,16 @@ def predict_category(article_text, confidence_threshold=0.2):
     predicted_index = torch.argmax(probabilities, dim=1).item()
     confidence = probabilities[0][predicted_index].item()
 
-    predicted_label = _model_labels[predicted_index]
-
-    print(f"DEBUG: Article classified as '{predicted_label}' with confidence {confidence:.2f}")
-
-    if confidence < confidence_threshold:
+    # Validate index range before using it
+    if predicted_index >= len(_model_labels):
+        print(f"ERROR: Invalid predicted index {predicted_index}, defaulting to 'Unknown'")
         return "Unknown"
 
-    return predicted_label
+    predicted_label = _model_labels[predicted_index]
+    print(f"DEBUG: Article classified as '{predicted_label}' with confidence {confidence:.2f}")
+
+    return predicted_label if confidence >= confidence_threshold else "Unknown"
+
 
 def simple_summarize(text, max_words=50):
     """Simple text summarization by truncating to max_words."""
