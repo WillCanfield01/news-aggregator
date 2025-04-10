@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Roundup – Summarized News</title>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f9f5e9;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h1 {
+            font-family: 'Lora', serif;
+            color: #23496a;
+            margin-bottom: 20px;
+            font-size: 2.5em;
+        }
+
+        #filter {
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background-color: #23496a;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        button:hover {
+            background-color: #8a623f;
+        }
+
+        #articles {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .article {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            transition: transform 0.3s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .article:hover {
+            transform: scale(1.03);
+        }
+
+        .category {
+            font-weight: bold;
+            color: #6a4e23;
+        }
+
+        #loading {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #23496a;
+            margin-top: 20px;
+        }
+
+        .summary {
+            font-size: 1.1em;
+            margin-top: 10px;
+            color: #555;
+            line-height: 1.5;
+        }
+
+        a {
+            text-decoration: none;
+            color: #23496a;
+            margin-top: 10px;
+            display: inline-block;
+            font-weight: bold;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            #articles {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #articles {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>The Roundup</h1>
+
+    <div id="filter">
+        <button onclick="filterCategory('All')">All</button>
+        <button onclick="filterCategory('Finance')">Finance</button>
+        <button onclick="filterCategory('Sports')">Sports</button>
+        <button onclick="filterCategory('Politics')">Politics</button>
+        <button onclick="filterCategory('Entertainment')">Entertainment</button>
+        <button onclick="filterCategory('Health')">Health</button>
+        <button onclick="filterCategory('Technology')">Technology</button>
+        <button onclick="filterCategory('Education')">Education</button>
+        <button onclick="filterCategory('Lifestyle')">Lifestyle</button>
+        <button onclick="filterCategory('Unknown')">Unknown</button>
+    </div>
+
+    <div id="loading" style="display:none;">Loading...</div>
+
+    <div id="articles" aria-live="polite"></div>
+
+    <script>
+        let articles = [];
+
+        document.addEventListener("DOMContentLoaded", () => {
+            document.getElementById("loading").style.display = "block";
+
+            fetch('/news')
+                .then(response => response.json())
+                .then(data => {
+                    articles = data;
+                    displayArticles('All');
+                    document.getElementById("loading").style.display = "none";
+                })
+                .catch(error => {
+                    console.error('Error fetching news:', error);
+                    document.getElementById("loading").style.display = "none";
+                });
+        });
+
+        function displayArticles(category) {
+            const articlesDiv = document.getElementById('articles');
+            articlesDiv.innerHTML = '';
+
+            const filtered = category === 'All'
+                ? articles
+                : articles.filter(a => a.category.toLowerCase() === category.toLowerCase());
+
+            if (filtered.length === 0) {
+                articlesDiv.innerHTML = '<p>No articles found for this category.</p>';
+                return;
+            }
+
+            filtered.forEach(article => {
+                const div = document.createElement('div');
+                div.classList.add('article');
+                div.innerHTML = `
+                    <h2>${article.title}</h2>
+                    <p class="category">${article.category}</p>
+                    <p class="summary">${article.summary}</p>
+                    <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
+                `;
+                articlesDiv.appendChild(div);
+            });
+        }
+
+        function filterCategory(category) {
+            displayArticles(category);
+        }
+    </script>
+</body>
+
+</html>
