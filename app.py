@@ -11,7 +11,7 @@ from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 import openai
 
-client = openai.OpenAI(api_key="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")
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Initialize Flask app
 app = Flask(__name__)
