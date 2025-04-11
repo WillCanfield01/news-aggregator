@@ -130,9 +130,6 @@
         <button onclick="filterCategory('Entertainment')">Entertainment</button>
         <button onclick="filterCategory('Health')">Health</button>
         <button onclick="filterCategory('Technology')">Technology</button>
-        <button onclick="filterCategory('Education')">Education</button>
-        <button onclick="filterCategory('Lifestyle')">Lifestyle</button>
-        <button onclick="filterCategory('Unknown')">Unknown</button>
     </div>
 
     <div id="loading" style="display:none;">Loading...</div>
@@ -149,7 +146,7 @@
                 .then(response => response.json())
                 .then(data => {
                     articles = data;
-                    displayArticles('All');
+                    displayArticles('All');  // Display all articles on load
                     document.getElementById("loading").style.display = "none";
                 })
                 .catch(error => {
@@ -174,10 +171,12 @@
             filtered.forEach(article => {
                 const div = document.createElement('div');
                 div.classList.add('article');
+                div.id = article.id; // Use the article's unique ID
                 div.innerHTML = `
                     <h2>${article.title}</h2>
                     <p class="category">${article.category}</p>
-                    <p class="summary">${article.summary}</p>
+                    <p class="summary" id="summary-${article.id}">${article.summary}</p>
+                    <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
                     <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
                 `;
                 articlesDiv.appendChild(div);
@@ -187,6 +186,31 @@
         function filterCategory(category) {
             displayArticles(category);
         }
+
+        function regenerateSummary(articleId) {
+            console.log("DEBUG: Regenerating summary for articleId:", articleId);
+
+            const article = articles.find(a => a.id === articleId);
+            if (!article) {
+                console.error("Article not found!");
+                return;
+            }
+
+            fetch(`/regenerate-summary/${articleId}`, { method: 'GET' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log("DEBUG: New summary data:", data);
+                    if (data.summary) {
+                        const articleDiv = document.querySelector(`#${articleId}`);
+                        const summaryElement = articleDiv.querySelector('.summary');
+                        summaryElement.textContent = data.summary;  // Update summary
+                    }
+                })
+                .catch(error => {
+                    console.error('Error regenerating summary:', error);
+                });
+        }
+
     </script>
 </body>
 

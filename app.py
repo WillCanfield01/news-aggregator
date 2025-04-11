@@ -10,14 +10,13 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 import openai
+import hashlib
 
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-# RSS feed sources
 RSS_FEEDS = [
     "http://feeds.bbci.co.uk/news/rss.xml",
     "http://rss.cnn.com/rss/edition.rss",
@@ -29,17 +28,13 @@ RSS_FEEDS = [
     "https://www.espn.com/espn/rss/news",
 ]
 
-# Preload model at startup for performance
 print("DEBUG: Preloading model...")
 _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
-_model = AutoModelForSequenceClassification.from_pretrained(
-    "cardiffnlp/tweet-topic-21-multi"
-).to("cpu").eval()
+_model = AutoModelForSequenceClassification.from_pretrained("cardiffnlp/tweet-topic-21-multi").to("cpu").eval()
 config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
 _model_labels = list(config.id2label.values())
 print("DEBUG: Model and labels preloaded:", _model_labels)
 
-# Categories used for filtering
 FILTERED_CATEGORIES = set([
     "Arts_&_culture", "Business_&_entrepreneurs", "Celebrity_&_pop_culture",
     "Diaries_&_daily_life", "Family", "Fashion_&_style", "Film_tv_&_video",
@@ -101,7 +96,6 @@ def predict_category(article_text, confidence_threshold=0.5):
         return "Unknown"
 
     inputs = _tokenizer(article_text, return_tensors="pt", padding=True, truncation=True, max_length=256)
-
     with torch.no_grad():
         outputs = _model(**inputs)
 
@@ -121,7 +115,6 @@ def predict_category(article_text, confidence_threshold=0.5):
     return "Unknown"
 
 def strip_html(text):
-    # Remove HTML tags and decode HTML entities
     clean = re.sub(r"<[^>]+>", "", text)
     return unescape(clean)
 
@@ -132,30 +125,33 @@ def simple_summarize(text, max_words=50):
     words = clean_text.split()
     return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
 
-# Corrected OpenAI Summarization Function with Timeout
 def summarize_with_openai(article_text):
     try:
         completion = client.chat.completions.create(
-            model="gpt-4o",  # Use the latest model you're working with
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": f"Summarize the following article, and make sure the summary is easy to understand, also make sure the results sound human and remain politically neutral: {article_text}"}
             ],
             max_tokens=75,
             temperature=0.5,
-            timeout=30  # Set timeout for the request
+            timeout=30
         )
-
-        # Access the summary correctly using the updated API response structure
-        response_message = completion.choices[0].message.content.strip()
-        return response_message
-
+        return completion.choices[0].message.content.strip()
     except Exception as e:
         print(f"Error: {e}")
         return "Failed to summarize article."
 
-def fetch_news_from_rss():
+# Declare global articles variable
+articles = []
+
+def generate_article_id(url, index):
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"article-{url_hash}-{index}"
+
+def fetch_news_from_rss(use_ai=False):
     print("DEBUG: Fetching news from RSS feeds...")
+    global articles  # Use global articles
     all_articles = []
 
     for url in RSS_FEEDS:
@@ -163,32 +159,29 @@ def fetch_news_from_rss():
             feed = feedparser.parse(url)
             print(f"DEBUG: {len(feed.entries)} entries from {url}")
 
-            for entry in feed.entries[:10]:
+            for index, entry in enumerate(feed.entries[:10]):
                 title = entry.get("title", "No Title")
                 description = entry.get("summary", "")
                 link = entry.get("link", "#")
                 text = f"{title} {description}"
 
-                # Ensure that the description is not empty
                 if description.strip():
-                    # Predict category
                     category = predict_category(text)
-
-                    # If the category is in the allowed list, add it to the article list
                     if category in FILTERED_CATEGORIES:
-                        # Get AI Summary from OpenAI API
-                        ai_summary = summarize_with_openai(description)
+                        summary = summarize_with_openai(description) if use_ai else simple_summarize(description)
                         all_articles.append({
+                            "id": generate_article_id(url, index),
                             "title": title,
-                            "summary": ai_summary,  # Use the AI-generated summary
+                            "summary": summary,
+                            "description": description,
                             "url": link,
                             "category": category
                         })
-
         except Exception as e:
             print(f"ERROR parsing RSS feed {url}: {e}")
 
     print(f"DEBUG: Total articles from RSS: {len(all_articles)}")
+    articles = all_articles  # Update the global articles
     return all_articles
 
 @app.route("/")
@@ -197,10 +190,20 @@ def home():
 
 @app.route("/news")
 def get_news():
-    articles = fetch_news_from_rss()
+    use_ai = request.args.get("ai", "0") == "1"
+    global articles  # Ensure global articles are used
+    articles = fetch_news_from_rss(use_ai=use_ai)
     return jsonify(articles)
+
+@app.route("/regenerate-summary/<article_id>", methods=["GET"])
+def regenerate_summary(article_id):
+    print(f"DEBUG: Received request to regenerate summary for {article_id}")
+    article = next((a for a in articles if a['id'] == article_id), None)  # Use 'articles' variable
+    if article is None:
+        return jsonify({"error": "Article not found"}), 404
+    new_summary = summarize_with_openai(article["description"])
+    return jsonify({"summary": new_summary})
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
