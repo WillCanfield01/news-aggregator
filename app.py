@@ -212,11 +212,17 @@ def get_news():
     articles = fetch_news_from_rss(use_ai=use_ai)
     return jsonify(articles)
 
+@app.route("/article-ids")
+def article_ids():
+    # New endpoint to show currently cached article IDs for debugging
+    return jsonify([a['id'] for a in articles])
+
 @app.route("/regenerate-summary/<article_id>", methods=["GET"])
 def regenerate_summary(article_id):
     print(f"DEBUG: Received request to regenerate summary for {article_id}")
     article = next((a for a in articles if a['id'] == article_id), None)
     if article is None:
+        print("DEBUG: Article not found for ID:", article_id)
         return jsonify({"error": "Article not found"}), 404
     new_summary = summarize_with_openai(article["description"])
     return jsonify({"summary": new_summary})
