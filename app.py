@@ -40,15 +40,7 @@ RSS_FEEDS = [
     "https://www.espn.com/espn/rss/news",
 ]
 
-FILTERED_CATEGORIES = set([
-    "Arts_&_culture", "Business_&_entrepreneurs", "Celebrity_&_pop_culture",
-    "Diaries_&_daily_life", "Family", "Fashion_&_style", "Film_tv_&_video",
-    "Fitness_&_health", "Food_&_dining", "Gaming", "Learning_&_educational",
-    "Music", "News_&_social_concern", "Other_hobbies", "Relationships",
-    "Science_&_technology", "Sports", "Travel_&_adventure", "Youth_&_student_life",
-    "Entertainment", "Health", "Politics", "Finance", "Technology"
-    # Removed "Unknown" so it doesn't filter out everything
-])
+FILTERED_CATEGORIES = set(["Unknown"])  # Keep only Unknown out
 
 CATEGORY_MAP = {
     "arts_&_culture": "Entertainment", "fashion_&_style": "Entertainment",
@@ -130,14 +122,14 @@ def fetch_feed(url, use_ai=False):
         print(f"Fetching {url}...")
         feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
         print(f"Found {len(feed.entries)} entries in {url}")
-        for index, entry in enumerate(feed.entries[:10]):
+        for index, entry in enumerate(feed.entries):
             title = entry.get("title", "No Title")
             desc = entry.get("summary", "")
             text = f"{title} {desc}"
             if not desc.strip():
                 continue
             category = predict_category(text)
-            if category not in FILTERED_CATEGORIES:
+            if category != "Unknown":
                 summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
                 articles.append({
                     "id": generate_article_id(url, index),
@@ -147,8 +139,9 @@ def fetch_feed(url, use_ai=False):
                     "url": entry.get("link", "#"),
                     "category": category
                 })
+        print(f"✓ Added {len(articles)} articles from {url}")
     except Exception as e:
-        print(f"Failed to fetch {url}:", e)
+        print(f"⚠️ Failed to fetch {url}: {e}")
     return articles
 
 def preload_articles(use_ai=False):
