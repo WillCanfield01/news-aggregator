@@ -11,6 +11,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 import openai
 
 # Initialize OpenAI client
@@ -131,14 +132,19 @@ def fetch_feed(url, use_ai=False):
             category = predict_category(text)
             if category != "Unknown":
                 summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
+                # Extract source domain
+                parsed_url = urlparse(url)
+                source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
                 articles.append({
                     "id": generate_article_id(url, index),
                     "title": title,
                     "summary": summary,
                     "description": desc,
                     "url": entry.get("link", "#"),
-                    "category": category
+                    "category": category,
+                    "source": source  # ✅ Add source here
                 })
+                
         print(f"✓ Added {len(articles)} articles from {url}")
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
