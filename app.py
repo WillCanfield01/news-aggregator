@@ -46,7 +46,8 @@ FILTERED_CATEGORIES = set([
     "Fitness_&_health", "Food_&_dining", "Gaming", "Learning_&_educational",
     "Music", "News_&_social_concern", "Other_hobbies", "Relationships",
     "Science_&_technology", "Sports", "Travel_&_adventure", "Youth_&_student_life",
-    "Entertainment", "Health", "Politics", "Finance", "Technology", "Unknown"
+    "Entertainment", "Health", "Politics", "Finance", "Technology"
+    # Removed "Unknown" so it doesn't filter out everything
 ])
 
 CATEGORY_MAP = {
@@ -126,7 +127,9 @@ def generate_article_id(url, index):
 def fetch_feed(url, use_ai=False):
     articles = []
     try:
-        feed = feedparser.parse(url)
+        print(f"Fetching {url}...")
+        feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
+        print(f"Found {len(feed.entries)} entries in {url}")
         for index, entry in enumerate(feed.entries[:10]):
             title = entry.get("title", "No Title")
             desc = entry.get("summary", "")
@@ -134,7 +137,7 @@ def fetch_feed(url, use_ai=False):
             if not desc.strip():
                 continue
             category = predict_category(text)
-            if category in FILTERED_CATEGORIES:
+            if category not in FILTERED_CATEGORIES:
                 summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
                 articles.append({
                     "id": generate_article_id(url, index),
@@ -172,6 +175,9 @@ def regenerate_summary(article_id):
         return jsonify({"summary": article["summary"]})
     return jsonify({"error": "Article not found"}), 404
 
+# ✅ ALWAYS preload on startup (locally and on Render)
+print("Starting application...")
+preload_articles(use_ai=False)
+
 if __name__ == "__main__":
-    preload_articles(use_ai=False)  # preload at app startup
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
