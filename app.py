@@ -1,48 +1,34 @@
 import os
-import requests
-import torch
 import time
-import torch.nn.functional as F
-import feedparser
 import re
+import feedparser
+import hashlib
 import threading
+import torch
+import torch.nn.functional as F
 from html import unescape
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
+from concurrent.futures import ThreadPoolExecutor
 import openai
-import hashlib
 
+# Initialize OpenAI client
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 CORS(app)
 
-# Global lazy singleton objects
+# Global Model Cache
 _model = None
 _tokenizer = None
 _model_labels = None
 _model_lock = threading.Lock()
 
-def get_model_components():
-    global _model, _tokenizer, _model_labels
-    if _model is None or _tokenizer is None or _model_labels is None:
-        with _model_lock:
-            if _model is None or _tokenizer is None or _model_labels is None:
-                try:
-                    print("DEBUG: Lazy loading model and tokenizer...")
-                    _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
-                    _model = AutoModelForSequenceClassification.from_pretrained(
-                        "cardiffnlp/tweet-topic-21-multi"
-                    ).to("cpu").eval()
-                    config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
-                    _model_labels = list(config.id2label.values())
-                    print("DEBUG: Model loaded with labels:", _model_labels)
-                except Exception as e:
-                    print(f"ERROR loading model: {e}")
-                    raise RuntimeError("Model failed to load")
-    return _model, _tokenizer, _model_labels
+# Preloaded Articles Cache
+cached_articles = []
 
+# RSS FEEDS
 RSS_FEEDS = [
     "http://feeds.bbci.co.uk/news/rss.xml",
     "http://rss.cnn.com/rss/edition.rss",
@@ -64,142 +50,111 @@ FILTERED_CATEGORIES = set([
 ])
 
 CATEGORY_MAP = {
-    "Arts_&_culture": "Entertainment",
-    "Fashion_&_style": "Entertainment",
-    "Food_&_dining": "Entertainment",
-    "Diaries_&_daily_life": "Entertainment",
-    "Business_&_entrepreneurs": "Finance",
-    "Science_&_technology": "Technology",
-    "Sports": "Sports",
-    "Health": "Health",
-    "Politics": "Politics",
-    "News_&_social_concern": "Politics",
-    "Other_hobbies": "Entertainment",
-    "Music": "Entertainment",
-    "Travel_&_adventure": "Entertainment",
-    "Celebrity_&_pop_culture": "Entertainment",
-    "Gaming": "Entertainment",
-    "Learning_&_educational": "Education",
-    "Fitness_&_health": "Health",
-    "Youth_&_student_life": "Education",
-    "Relationships": "Lifestyle",
-    "Family": "Lifestyle"
+    "arts_&_culture": "Entertainment", "fashion_&_style": "Entertainment",
+    "food_&_dining": "Entertainment", "diaries_&_daily_life": "Entertainment",
+    "business_&_entrepreneurs": "Finance", "science_&_technology": "Technology",
+    "sports": "Sports", "health": "Health", "politics": "Politics",
+    "news_&_social_concern": "Politics", "other_hobbies": "Entertainment",
+    "music": "Entertainment", "travel_&_adventure": "Entertainment",
+    "celebrity_&_pop_culture": "Entertainment", "gaming": "Entertainment",
+    "learning_&_educational": "Education", "fitness_&_health": "Health",
+    "youth_&_student_life": "Education", "relationships": "Lifestyle",
+    "family": "Lifestyle"
 }
 
 def normalize_category(category):
-    category_map = {
-        "arts_&_culture": "Entertainment",
-        "business_&_entrepreneurs": "Finance",
-        "celebrity_&_pop_culture": "Entertainment",
-        "diaries_&_daily_life": "Entertainment",
-        "family": "Lifestyle",
-        "fashion_&_style": "Entertainment",
-        "film_tv_&_video": "Entertainment",
-        "fitness_&_health": "Health",
-        "food_&_dining": "Entertainment",
-        "gaming": "Entertainment",
-        "learning_&_educational": "Education",
-        "music": "Entertainment",
-        "news_&_social_concern": "Politics",
-        "other_hobbies": "Entertainment",
-        "relationships": "Lifestyle",
-        "science_&_technology": "Technology",
-        "sports": "Sports",
-        "travel_&_adventure": "Entertainment",
-        "youth_&_student_life": "Education"
-    }
-    return category_map.get(category.lower().replace(" ", "_"), category.title())
+    return CATEGORY_MAP.get(category.lower().replace(" ", "_"), category.title())
 
-def predict_category(article_text, confidence_threshold=0.5):
-    if not article_text.strip():
+def get_model_components():
+    global _model, _tokenizer, _model_labels
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
+                _model = AutoModelForSequenceClassification.from_pretrained(
+                    "cardiffnlp/tweet-topic-21-multi"
+                ).to("cpu").eval()
+                config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
+                _model_labels = list(config.id2label.values())
+    return _model, _tokenizer, _model_labels
+
+def predict_category(text):
+    if not text.strip():
         return "Unknown"
     try:
         model, tokenizer, labels = get_model_components()
-        inputs = tokenizer(article_text, return_tensors="pt", padding=True, truncation=True, max_length=256)
+        inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=256)
         with torch.no_grad():
-            outputs = model(**inputs)
-        probabilities = F.softmax(outputs.logits, dim=1)
-        predicted_index = torch.argmax(probabilities, dim=1).item()
-        confidence = probabilities[0][predicted_index].item()
-
-        if predicted_index >= len(labels):
+            logits = model(**inputs).logits
+        probs = F.softmax(logits, dim=1)
+        idx = torch.argmax(probs).item()
+        conf = probs[0][idx].item()
+        if idx >= len(labels) or conf < 0.5:
             return "Unknown"
-
-        raw_label = labels[predicted_index].lower().replace(" ", "_")
-        normalized_category = normalize_category(raw_label)
-
-        return normalized_category if confidence >= confidence_threshold else "Unknown"
-    except Exception as e:
-        print(f"ERROR during prediction: {e}")
+        raw = labels[idx].lower().replace(" ", "_")
+        return normalize_category(raw)
+    except:
         return "Unknown"
 
 def strip_html(text):
-    clean = re.sub(r"<[^>]+>", "", text)
-    return unescape(clean)
+    return unescape(re.sub(r"<[^>]+>", "", text))
 
 def simple_summarize(text, max_words=50):
-    if not text:
-        return "No description available."
-    clean_text = strip_html(text)
-    words = clean_text.split()
+    words = strip_html(text).split()
     return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
 
-def summarize_with_openai(article_text):
+def summarize_with_openai(text):
     try:
-        completion = client.chat.completions.create(
+        result = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": f"Summarize the following article, and make sure the summary is easy to understand, also make sure the results sound human and remain politically neutral: {article_text}"}
+                {"role": "user", "content": f"Summarize this article briefly and neutrally: {text}"}
             ],
             max_tokens=75,
             temperature=0.5,
             timeout=30
         )
-        return completion.choices[0].message.content.strip()
+        return result.choices[0].message.content.strip()
     except Exception as e:
-        print(f"Error: {e}")
-        return "Failed to summarize article."
-
-articles = []
+        print("OpenAI summarization failed:", e)
+        return "Summary not available."
 
 def generate_article_id(url, index):
-    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-    return f"article-{url_hash}-{index}"
+    return f"article-{hashlib.md5(url.encode()).hexdigest()[:8]}-{index}"
 
-def fetch_news_from_rss(use_ai=False):
-    print("DEBUG: Fetching news from RSS feeds...")
-    global articles
-    all_articles = []
+def fetch_feed(url, use_ai=False):
+    articles = []
+    try:
+        feed = feedparser.parse(url)
+        for index, entry in enumerate(feed.entries[:10]):
+            title = entry.get("title", "No Title")
+            desc = entry.get("summary", "")
+            text = f"{title} {desc}"
+            if not desc.strip():
+                continue
+            category = predict_category(text)
+            if category in FILTERED_CATEGORIES:
+                summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
+                articles.append({
+                    "id": generate_article_id(url, index),
+                    "title": title,
+                    "summary": summary,
+                    "description": desc,
+                    "url": entry.get("link", "#"),
+                    "category": category
+                })
+    except Exception as e:
+        print(f"Failed to fetch {url}:", e)
+    return articles
 
-    for url in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(url)
-            print(f"DEBUG: {len(feed.entries)} entries from {url}")
-            for index, entry in enumerate(feed.entries[:10]):
-                title = entry.get("title", "No Title")
-                description = entry.get("summary", "")
-                link = entry.get("link", "#")
-                text = f"{title} {description}"
-
-                if description.strip():
-                    category = predict_category(text)
-                    if category in FILTERED_CATEGORIES:
-                        summary = summarize_with_openai(description) if use_ai else simple_summarize(description)
-                        all_articles.append({
-                            "id": generate_article_id(url, index),
-                            "title": title,
-                            "summary": summary,
-                            "description": description,
-                            "url": link,
-                            "category": category
-                        })
-        except Exception as e:
-            print(f"ERROR parsing RSS feed {url}: {e}")
-
-    print(f"DEBUG: Total articles from RSS: {len(all_articles)}")
-    articles = all_articles
-    return all_articles
+def preload_articles(use_ai=False):
+    global cached_articles
+    print("Preloading articles...")
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = executor.map(lambda u: fetch_feed(u, use_ai), RSS_FEEDS)
+        cached_articles = [article for feed in results for article in feed]
+    print(f"Preloaded {len(cached_articles)} articles.")
 
 @app.route("/")
 def home():
@@ -207,20 +162,16 @@ def home():
 
 @app.route("/news")
 def get_news():
-    use_ai = request.args.get("ai", "0") == "1"
-    global articles
-    articles = fetch_news_from_rss(use_ai=use_ai)
-    return jsonify(articles)
+    return jsonify(cached_articles)
 
-@app.route("/regenerate-summary/<article_id>", methods=["GET"])
+@app.route("/regenerate-summary/<article_id>")
 def regenerate_summary(article_id):
-    print(f"DEBUG: Received request to regenerate summary for {article_id}")
-    article = next((a for a in articles if a['id'] == article_id), None)
-    if article is None:
-        return jsonify({"error": "Article not found"}), 404
-    new_summary = summarize_with_openai(article["description"])
-    return jsonify({"summary": new_summary})
+    article = next((a for a in cached_articles if a["id"] == article_id), None)
+    if article:
+        article["summary"] = summarize_with_openai(article["description"])
+        return jsonify({"summary": article["summary"]})
+    return jsonify({"error": "Article not found"}), 404
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    preload_articles(use_ai=False)  # preload at app startup
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
