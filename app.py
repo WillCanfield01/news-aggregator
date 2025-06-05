@@ -144,7 +144,7 @@ def fetch_feed(url, use_ai=False):
                     "category": category,
                     "source": source  # ✅ Add source here
                 })
-                
+
         print(f"✓ Added {len(articles)} articles from {url}")
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
@@ -158,13 +158,24 @@ def preload_articles(use_ai=False):
         cached_articles = [article for feed in results for article in feed]
     print(f"Preloaded {len(cached_articles)} articles.")
 
+def periodic_refresh(interval=900):  # Refresh every 15 minutes
+    while True:
+        print("Refreshing article cache...")
+        preload_articles(use_ai=False)
+        time.sleep(interval)
+
+# Start background thread
+threading.Thread(target=periodic_refresh, daemon=True).start()
+
 @app.route("/")
 def home():
     return render_template("index.html")
 
 @app.route("/news")
 def get_news():
-    return jsonify(cached_articles)
+    response = jsonify(cached_articles)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 @app.route("/regenerate-summary/<article_id>")
 def regenerate_summary(article_id):
