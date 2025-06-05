@@ -152,16 +152,22 @@ def fetch_feed(url, use_ai=False):
 
 def preload_articles(use_ai=False):
     global cached_articles
-    print("Preloading articles...")
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = executor.map(lambda u: fetch_feed(u, use_ai), RSS_FEEDS)
-        cached_articles = [article for feed in results for article in feed]
-    print(f"Preloaded {len(cached_articles)} articles.")
+    print("Fetching new articles...")
+    raw_articles = get_all_articles()
+    filtered = [a for a in raw_articles if a['category'] in FILTERED_CATEGORIES]
 
-def periodic_refresh(interval=900):  # Refresh every 15 minutes
+    if use_ai:
+        for article in filtered:
+            article['summary'] = generate_summary(article['title'], article['content'])
+
+    cached_articles = filtered  # ✅ This must replace the global cache
+    print(f"{len(cached_articles)} articles loaded.")
+
+def periodic_refresh(interval=900):
     while True:
         print("Refreshing article cache...")
         preload_articles(use_ai=False)
+        print("Refresh complete.")
         time.sleep(interval)
 
 # Start background thread
