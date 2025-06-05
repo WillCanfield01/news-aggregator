@@ -150,36 +150,13 @@ def fetch_feed(url, use_ai=False):
         print(f"⚠️ Failed to fetch {url}: {e}")
     return articles
 
-def get_all_articles(use_ai=False):
-    articles = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [executor.submit(fetch_feed, url, use_ai) for url in RSS_FEEDS]
-        for future in futures:
-            try:
-                articles.extend(future.result())
-            except Exception as e:
-                print(f"Error fetching articles: {e}")
-    return articles
-
 def preload_articles(use_ai=False):
     global cached_articles
-    print("Fetching new articles...")
-    raw_articles = get_all_articles(use_ai=use_ai)  # ✅ Now valid
-    filtered = [a for a in raw_articles if a['category'] in FILTERED_CATEGORIES]
-
-    cached_articles = filtered
-    print(f"{len(cached_articles)} articles loaded.")
-
-
-def periodic_refresh(interval=900):
-    while True:
-        print("Refreshing article cache...")
-        preload_articles(use_ai=False)
-        print("Refresh complete.")
-        time.sleep(interval)
-
-# Start background thread
-threading.Thread(target=periodic_refresh, daemon=True).start()
+    print("Preloading articles...")
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = executor.map(lambda u: fetch_feed(u, use_ai), RSS_FEEDS)
+        cached_articles = [article for feed in results for article in feed]
+    print(f"Preloaded {len(cached_articles)} articles.")
 
 @app.route("/")
 def home():
@@ -187,9 +164,7 @@ def home():
 
 @app.route("/news")
 def get_news():
-    response = jsonify(cached_articles)
-    response.headers['Cache-Control'] = 'no-store'
-    return response
+    return jsonify(cached_articles)
 
 @app.route("/regenerate-summary/<article_id>")
 def regenerate_summary(article_id):
