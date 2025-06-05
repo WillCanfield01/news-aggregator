@@ -150,18 +150,26 @@ def fetch_feed(url, use_ai=False):
         print(f"⚠️ Failed to fetch {url}: {e}")
     return articles
 
+def get_all_articles(use_ai=False):
+    articles = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(fetch_feed, url, use_ai) for url in RSS_FEEDS]
+        for future in futures:
+            try:
+                articles.extend(future.result())
+            except Exception as e:
+                print(f"Error fetching articles: {e}")
+    return articles
+
 def preload_articles(use_ai=False):
     global cached_articles
     print("Fetching new articles...")
-    raw_articles = get_all_articles()
+    raw_articles = get_all_articles(use_ai=use_ai)  # ✅ Now valid
     filtered = [a for a in raw_articles if a['category'] in FILTERED_CATEGORIES]
 
-    if use_ai:
-        for article in filtered:
-            article['summary'] = generate_summary(article['title'], article['content'])
-
-    cached_articles = filtered  # ✅ This must replace the global cache
+    cached_articles = filtered
     print(f"{len(cached_articles)} articles loaded.")
+
 
 def periodic_refresh(interval=900):
     while True:
