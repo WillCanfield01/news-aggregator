@@ -29,17 +29,23 @@ _model_lock = threading.Lock()
 # Preloaded Articles Cache
 cached_articles = []
 
-# RSS FEEDS
-RSS_FEEDS = [
-    "http://feeds.bbci.co.uk/news/rss.xml",
-    "http://rss.cnn.com/rss/edition.rss",
-    "http://feeds.reuters.com/reuters/topNews",
-    "https://feeds.npr.org/1001/rss.xml",
-    "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-    "https://www.theguardian.com/world/rss",
-    "http://feeds.feedburner.com/TechCrunch/",
-    "https://www.espn.com/espn/rss/news",
+# Split feeds into two batches to stagger updates
+RSS_FEED_BATCHES = [
+    [
+        "http://feeds.bbci.co.uk/news/rss.xml",
+        "http://rss.cnn.com/rss/edition.rss",
+        "http://feeds.reuters.com/reuters/topNews",
+        "https://feeds.npr.org/1001/rss.xml",
+    ],
+    [
+        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+        "https://www.theguardian.com/world/rss",
+        "http://feeds.feedburner.com/TechCrunch/",
+        "https://www.espn.com/espn/rss/news",
+    ]
 ]
+
+current_batch_index = 0  # Used to rotate batches
 
 FILTERED_CATEGORIES = set(["Unknown"])  # Keep only Unknown out
 
@@ -150,18 +156,23 @@ def fetch_feed(url, use_ai=False):
         print(f"⚠️ Failed to fetch {url}: {e}")
     return articles
 
-def preload_articles(use_ai=False):
+def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles
-    print("Preloading articles...")
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = executor.map(lambda u: fetch_feed(u, use_ai), RSS_FEEDS)
-        cached_articles = [article for feed in results for article in feed]
-    print(f"Preloaded {len(cached_articles)} articles.")
+    print(f"Preloading articles from {len(feed_list)} feeds...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = executor.map(lambda u: fetch_feed(u, use_ai), feed_list)
+        new_articles = [article for feed in results for article in feed]
+    # Merge new articles with existing ones
+    existing_ids = {a["id"] for a in cached_articles}
+    cached_articles.extend([a for a in new_articles if a["id"] not in existing_ids])
+    print(f"✓ Total cached articles: {len(cached_articles)}")
 
-def periodic_refresh(interval=900):  # Refresh every 15 minutes
+def periodic_refresh(interval=480):  # Every 8 minutes
+    global current_batch_index
     while True:
-        print("Refreshing article cache...")
-        preload_articles(use_ai=False)
+        print(f"\n🌀 Refreshing batch {current_batch_index + 1}...")
+        preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
+        current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
         time.sleep(interval)
 
 # Start background thread
@@ -187,7 +198,7 @@ def regenerate_summary(article_id):
 
 # ✅ ALWAYS preload on startup (locally and on Render)
 print("Starting application...")
-preload_articles(use_ai=False)
+preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
