@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 import openai
 
+MAX_CACHED_ARTICLES = 300  # or 50, or however many you want to keep live
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -162,13 +163,22 @@ def fetch_feed(url, use_ai=False):
 def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles
     print(f"Preloading articles from {len(feed_list)} feeds...")
+    
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = executor.map(lambda u: fetch_feed(u, use_ai), feed_list)
         new_articles = [article for feed in results for article in feed]
-    # Merge new articles with existing ones
+
+    # Filter duplicates
     existing_ids = {a["id"] for a in cached_articles}
-    cached_articles.extend([a for a in new_articles if a["id"] not in existing_ids])
-    print(f"✓ Total cached articles: {len(cached_articles)}")
+    unique_new = [a for a in new_articles if a["id"] not in existing_ids]
+
+    # Add new articles to the front (most recent first)
+    cached_articles = unique_new + cached_articles
+
+    # Trim to the latest MAX_CACHED_ARTICLES
+    cached_articles = cached_articles[:MAX_CACHED_ARTICLES]
+
+    print(f"✓ Total cached articles after trim: {len(cached_articles)}")
 
 def periodic_refresh(interval=480):  # Every 8 minutes
     global current_batch_index
