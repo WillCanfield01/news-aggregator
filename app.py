@@ -204,10 +204,10 @@ def manual_refresh():
     current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
     return jsonify({"status": "Refreshed", "batch": current_batch_index})
 
+# Preload articles right before the app starts (safe across all Flask versions)
+print("⚡ Preloading articles at startup...")
+preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
-@app.before_serving
-def warm_up():
-    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
 if __name__ == "__main__":
     # Only in local/dev: safe to spawn background thread
