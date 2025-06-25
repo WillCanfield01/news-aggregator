@@ -196,6 +196,15 @@ def regenerate_summary(article_id):
         return jsonify({"summary": article["summary"]})
     return jsonify({"error": "Article not found"}), 404
 
+@app.route("/refresh")
+def manual_refresh():
+    global current_batch_index
+    print(f"🔁 Manual refresh via /refresh (batch {current_batch_index + 1})...")
+    preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
+    current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
+    return jsonify({"status": "Refreshed", "batch": current_batch_index})
+
+
 # ✅ ALWAYS preload on startup (locally and on Render)
 print("Starting application...")
 preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
