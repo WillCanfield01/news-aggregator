@@ -14,6 +14,9 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 import openai
 
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Initialize OpenAI client
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -205,9 +208,9 @@ def manual_refresh():
     return jsonify({"status": "Refreshed", "batch": current_batch_index})
 
 
-# ✅ ALWAYS preload on startup (locally and on Render)
-print("Starting application...")
-preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
+@app.before_first_request
+def warm_up():
+    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
