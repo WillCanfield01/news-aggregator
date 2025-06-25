@@ -205,7 +205,7 @@ def manual_refresh():
     return jsonify({"status": "Refreshed", "batch": current_batch_index})
 
 
-@app.before_first_request
+@app.before_serving
 def warm_up():
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
