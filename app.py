@@ -33,6 +33,8 @@ _model_lock = threading.Lock()
 # Preloaded Articles Cache
 cached_articles = []
 
+new_articles_last_refresh = []
+
 # Split feeds into two batches to stagger updates
 RSS_FEED_BATCHES = [
     [
@@ -124,8 +126,8 @@ def summarize_with_openai(text):
         print("OpenAI summarization failed:", e)
         return "Summary not available."
 
-def generate_article_id(url, index):
-    return f"article-{hashlib.md5(url.encode()).hexdigest()[:8]}-{index}"
+def generate_article_id(link):
+    return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
 
 def fetch_feed(url, use_ai=False):
     articles = []
@@ -146,7 +148,7 @@ def fetch_feed(url, use_ai=False):
                 parsed_url = urlparse(url)
                 source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
                 articles.append({
-                    "id": generate_article_id(url, index),
+                    "id": generate_article_id(entry.get("link", f"{url}-{index}")),
                     "title": title,
                     "summary": summary,
                     "description": desc,
@@ -161,24 +163,24 @@ def fetch_feed(url, use_ai=False):
     return articles
 
 def preload_articles_batched(feed_list, use_ai=False):
-    global cached_articles
+    global cached_articles, new_articles_last_refresh
     print(f"Preloading articles from {len(feed_list)} feeds...")
-    
+
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = executor.map(lambda u: fetch_feed(u, use_ai), feed_list)
         new_articles = [article for feed in results for article in feed]
 
-    # Filter duplicates
     existing_ids = {a["id"] for a in cached_articles}
     unique_new = [a for a in new_articles if a["id"] not in existing_ids]
 
-    # Add new articles to the front (most recent first)
-    cached_articles = unique_new + cached_articles
+    # Save new ones for the /new endpoint
+    new_articles_last_refresh = unique_new
 
-    # Trim to the latest MAX_CACHED_ARTICLES
+    # Add new to front of cache and trim
+    cached_articles = unique_new + cached_articles
     cached_articles = cached_articles[:MAX_CACHED_ARTICLES]
 
-    print(f"✓ Total cached articles after trim: {len(cached_articles)}")
+    print(f"✓ {len(unique_new)} new articles added. Total cached: {len(cached_articles)}")
 
 def periodic_refresh(interval=480):  # Every 8 minutes
     global current_batch_index
@@ -213,6 +215,10 @@ def manual_refresh():
     preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
     current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
     return jsonify({"status": "Refreshed", "batch": current_batch_index})
+
+@app.route("/new")
+def get_new_articles():
+    return jsonify(new_articles_last_refresh)
 
 # Preload articles right before the app starts (safe across all Flask versions)
 print("⚡ Preloading articles at startup...")
