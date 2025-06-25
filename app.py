@@ -178,9 +178,6 @@ def periodic_refresh(interval=480):  # Every 8 minutes
         current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
         time.sleep(interval)
 
-# Start background thread
-threading.Thread(target=periodic_refresh, daemon=True).start()
-
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -213,4 +210,6 @@ def warm_up():
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
 if __name__ == "__main__":
+    # Only in local/dev: safe to spawn background thread
+    threading.Thread(target=periodic_refresh, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
