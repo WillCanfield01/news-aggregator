@@ -30,12 +30,9 @@ client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 CORS(app, supports_credentials=True)
 db = SQLAlchemy(app)
+
 login_manager = LoginManager()
 login_manager.init_app(app)
-
-@app.before_first_request
-def create_tables():
-    db.create_all()
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -276,11 +273,16 @@ def logout():
 def me():
     return jsonify({"username": current_user.username})
 
+with app.app_context():
+    db.create_all()
+
 print("⚡ Preloading articles at startup...")
 preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
 if __name__ == "__main__":
-    # Run this only when directly launching app.py, not when importing
     threading.Thread(target=periodic_refresh, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
+
+
 
