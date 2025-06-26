@@ -32,7 +32,9 @@
 
         #filter {
             margin-bottom: 20px;
+            display: flex;
             flex-wrap: wrap;
+            justify-content: center;
         }
 
         button {
@@ -85,7 +87,6 @@
             font-weight: bold;
             color: #6a4e23;
             text-transform: uppercase;
-            /* makes it ALL CAPS */
             display: flex;
             align-items: center;
             gap: 5px;
@@ -133,6 +134,7 @@
 </head>
 
 <body>
+    <h1>The Roundup</h1>
 
     <div style="position: absolute; top: 20px; right: 20px;">
         <div id="auth-buttons">
@@ -151,12 +153,26 @@
         </div>
     </div>
 
+    <!-- ✅ Filter Buttons -->
+    <div id="filter">
+        <button onclick="filterCategory('All')">All</button>
+        <button onclick="filterCategory('Finance')">Finance</button>
+        <button onclick="filterCategory('Sports')">Sports</button>
+        <button onclick="filterCategory('Politics')">Politics</button>
+        <button onclick="filterCategory('Entertainment')">Entertainment</button>
+        <button onclick="filterCategory('Health')">Health</button>
+        <button onclick="filterCategory('Technology')">Technology</button>
+    </div>
+
+    <!-- ✅ Loading and Articles -->
+    <div id="loading" style="display: none;">Loading...</div>
+    <div id="articles"></div>
+
     <script>
         let articles = [];
         let currentUser = null;
 
         document.addEventListener("DOMContentLoaded", () => {
-            // Load articles
             document.getElementById("loading").style.display = "block";
 
             fetch('/news')
@@ -171,7 +187,6 @@
                     document.getElementById("loading").style.display = "none";
                 });
 
-            // Check if user is logged in
             fetch("/me", { credentials: "include" })
                 .then(res => res.json())
                 .then(data => {
@@ -230,13 +245,13 @@
                 div.classList.add('article');
                 div.id = article.id;
                 div.innerHTML = `
-    <h2>${article.title}</h2>
-    <p class="category">${article.category}</p>
-    <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
-    <p class="summary" id="summary-${article.id}">${article.summary}</p>
-    <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-    <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
-    `;
+          <h2>${article.title}</h2>
+          <p class="category">${article.category}</p>
+          <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
+          <p class="summary" id="summary-${article.id}">${article.summary}</p>
+          <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
+          <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
+        `;
                 articlesDiv.appendChild(div);
             });
         }
@@ -266,7 +281,6 @@
                 });
         }
 
-        // Placeholder functions for login/signup — build these into modals or separate pages
         function openLogin() {
             alert("Login modal not yet implemented.");
         }
@@ -275,8 +289,6 @@
             alert("Signup modal not yet implemented.");
         }
     </script>
-
-
 </body>
 
 </html>
