@@ -26,16 +26,16 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-dev-key")
 
-@app.before_first_request
-def create_tables():
-    db.create_all()
-
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 CORS(app, supports_credentials=True)
 db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
+
+@app.before_first_request
+def create_tables():
+    db.create_all()
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
