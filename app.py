@@ -233,15 +233,24 @@ def get_new_articles():
 
 @app.route("/signup", methods=["POST"])
 def signup():
-    data = request.json
-    if User.query.filter_by(username=data["username"]).first():
-        return jsonify({"error": "Username already exists"}), 400
-    user = User(username=data["username"])
-    user.set_password(data["password"])
-    db.session.add(user)
-    db.session.commit()
-    login_user(user, remember=True)
-    return jsonify({"message": "Signed up and logged in!"})
+    try:
+        data = request.get_json()
+
+        if not data or not data.get("username") or not data.get("password"):
+            return jsonify({"error": "Username and password required"}), 400
+
+        if User.query.filter_by(username=data["username"]).first():
+            return jsonify({"error": "Username already exists"}), 400
+
+        user = User(username=data["username"])
+        user.set_password(data["password"])
+        db.session.add(user)
+        db.session.commit()
+        login_user(user, remember=True)
+        return jsonify({"success": True, "message": "Signed up and logged in!"})
+    except Exception as e:
+        print("Signup error:", e)
+        return jsonify({"error": "Server error", "details": str(e)}), 500
 
 @app.route("/login", methods=["POST"])
 def login():

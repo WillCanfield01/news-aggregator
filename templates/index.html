@@ -341,21 +341,26 @@
                 },
                 body: JSON.stringify({ username, email, password })
             })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        alert("Account created! Logging you in...");
-                        closeSignupModal();
-                        location.reload();
-                    } else {
-                        alert("Sign-up failed: " + data.message);
+                .then(async res => {
+                    const text = await res.text();
+                    try {
+                        const data = JSON.parse(text);
+                        if (res.ok) {
+                            alert("Account created! Logging you in...");
+                            closeSignupModal();
+                            location.reload();
+                        } else {
+                            alert("Sign-up failed: " + (data.error || "Unknown error"));
+                        }
+                    } catch (err) {
+                        console.error("Invalid JSON response:", text);
+                        alert("Unexpected server response");
                     }
                 })
                 .catch(err => {
-                    alert("Error during sign-up");
-                    console.error(err);
+                    console.error("Signup error:", err);
+                    alert("Error during sign-up: " + err.message);
                 });
-        }
 
     </script>
 
