@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from urllib.parse import quote_plus
 import openai
 
 MAX_CACHED_ARTICLES = 300
@@ -22,7 +23,13 @@ MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+uri = os.environ.get("DATABASE_URL", "")
+if uri and "sslmode" not in uri:
+    if uri.startswith("postgres://"):
+        uri = uri.replace("postgres://", "postgresql://", 1)
+    uri += "?sslmode=require"
+
+app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-dev-key")
 
