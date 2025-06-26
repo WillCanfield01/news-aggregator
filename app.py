@@ -24,14 +24,20 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 app = Flask(__name__)
 uri = os.environ.get("DATABASE_URL", "")
-if uri and "sslmode" not in uri:
-    if uri.startswith("postgres://"):
-        uri = uri.replace("postgres://", "postgresql://", 1)
+if uri.startswith("postgres://"):
+    uri = uri.replace("postgres://", "postgresql://", 1)
+if "sslmode" not in uri:
     uri += "?sslmode=require"
 
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-dev-key")
+
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax'
+)
 
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -282,9 +288,6 @@ def me():
 
 with app.app_context():
     db.create_all()
-
-print("⚡ Preloading articles at startup...")
-preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
 if __name__ == "__main__":
     threading.Thread(target=periodic_refresh, daemon=True).start()
