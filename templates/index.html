@@ -133,26 +133,30 @@
 </head>
 
 <body>
-    <h1>The Roundup</h1>
 
-    <div id="filter">
-        <button onclick="filterCategory('All')">All</button>
-        <button onclick="filterCategory('Finance')">Finance</button>
-        <button onclick="filterCategory('Sports')">Sports</button>
-        <button onclick="filterCategory('Politics')">Politics</button>
-        <button onclick="filterCategory('Entertainment')">Entertainment</button>
-        <button onclick="filterCategory('Health')">Health</button>
-        <button onclick="filterCategory('Technology')">Technology</button>
+    <div style="position: absolute; top: 20px; right: 20px;">
+        <div id="auth-buttons">
+            <button onclick="openLogin()">Login</button>
+            <button onclick="openSignup()">Sign Up</button>
+        </div>
+
+        <div id="profile-dropdown" style="display: none; position: relative;">
+            <button onclick="toggleDropdown()"
+                style="border-radius: 50%; width: 40px; height: 40px; background-color: #23496a; color: white;">👤</button>
+            <div id="dropdown-menu"
+                style="display: none; position: absolute; right: 0; background-color: white; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
+                <p id="username-display" style="margin: 0 0 10px;">User</p>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </div>
     </div>
-
-    <div id="loading" style="display:none;">Loading...</div>
-
-    <div id="articles" aria-live="polite"></div>
 
     <script>
         let articles = [];
+        let currentUser = null;
 
         document.addEventListener("DOMContentLoaded", () => {
+            // Load articles
             document.getElementById("loading").style.display = "block";
 
             fetch('/news')
@@ -166,7 +170,47 @@
                     console.error('Error fetching news:', error);
                     document.getElementById("loading").style.display = "none";
                 });
+
+            // Check if user is logged in
+            fetch("/me", { credentials: "include" })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.username) {
+                        currentUser = data.username;
+                        showProfileUI(data.username);
+                    } else {
+                        showAuthButtons();
+                    }
+                });
         });
+
+        function showProfileUI(username) {
+            document.getElementById("auth-buttons").style.display = "none";
+            document.getElementById("profile-dropdown").style.display = "block";
+            document.getElementById("username-display").textContent = username;
+        }
+
+        function showAuthButtons() {
+            document.getElementById("auth-buttons").style.display = "block";
+            document.getElementById("profile-dropdown").style.display = "none";
+        }
+
+        function toggleDropdown() {
+            const menu = document.getElementById("dropdown-menu");
+            menu.style.display = menu.style.display === "block" ? "none" : "block";
+        }
+
+        function logout() {
+            fetch("/logout", {
+                method: "POST",
+                credentials: "include"
+            })
+                .then(res => res.json())
+                .then(() => {
+                    currentUser = null;
+                    showAuthButtons();
+                });
+        }
 
         function displayArticles(category) {
             const articlesDiv = document.getElementById('articles');
@@ -186,13 +230,13 @@
                 div.classList.add('article');
                 div.id = article.id;
                 div.innerHTML = `
-                    <h2>${article.title}</h2>
-                    <p class="category">${article.category}</p>
-                    <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
-                    <p class="summary" id="summary-${article.id}">${article.summary}</p>
-                    <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-                    <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
-                `;
+    <h2>${article.title}</h2>
+    <p class="category">${article.category}</p>
+    <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
+    <p class="summary" id="summary-${article.id}">${article.summary}</p>
+    <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
+    <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
+    `;
                 articlesDiv.appendChild(div);
             });
         }
@@ -202,8 +246,6 @@
         }
 
         function regenerateSummary(articleId) {
-            console.log("DEBUG: Regenerating summary for articleId:", articleId);
-
             const article = articles.find(a => a.id === articleId);
             if (!article) {
                 console.error("Article not found!");
@@ -213,7 +255,6 @@
             fetch(`/regenerate-summary/${articleId}`, { method: 'GET' })
                 .then(response => response.json())
                 .then(data => {
-                    console.log("DEBUG: New summary data:", data);
                     if (data.summary) {
                         const articleDiv = document.querySelector(`#${articleId}`);
                         const summaryElement = articleDiv.querySelector('.summary');
@@ -225,16 +266,17 @@
                 });
         }
 
-        fetch("/login", {
-            method: "POST",
-            credentials: "include",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ username, password })
-        })
+        // Placeholder functions for login/signup — build these into modals or separate pages
+        function openLogin() {
+            alert("Login modal not yet implemented.");
+        }
 
+        function openSignup() {
+            alert("Signup modal not yet implemented.");
+        }
     </script>
+
+
 </body>
 
 </html>
