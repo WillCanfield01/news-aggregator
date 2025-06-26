@@ -12,30 +12,50 @@ from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 import openai
 
-MAX_CACHED_ARTICLES = 300  # or 50, or however many you want to keep live
+MAX_CACHED_ARTICLES = 300
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Initialize OpenAI client
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.secret_key = os.getenv("SECRET_KEY", "super-secret-dev-key")
+
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
+db = SQLAlchemy(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
 
-# Global Model Cache
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True)
+    password_hash = db.Column(db.String(200))
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
 _model = None
 _tokenizer = None
 _model_labels = None
 _model_lock = threading.Lock()
 
-# Preloaded Articles Cache
 cached_articles = []
-
 new_articles_last_refresh = []
 
-# Split feeds into two batches to stagger updates
 RSS_FEED_BATCHES = [
     [
         "http://feeds.bbci.co.uk/news/rss.xml",
@@ -51,9 +71,9 @@ RSS_FEED_BATCHES = [
     ]
 ]
 
-current_batch_index = 0  # Used to rotate batches
+current_batch_index = 0
 
-FILTERED_CATEGORIES = set(["Unknown"])  # Keep only Unknown out
+FILTERED_CATEGORIES = set(["Unknown"])
 
 CATEGORY_MAP = {
     "arts_&_culture": "Entertainment", "fashion_&_style": "Entertainment",
@@ -144,7 +164,6 @@ def fetch_feed(url, use_ai=False):
             category = predict_category(text)
             if category != "Unknown":
                 summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
-                # Extract source domain
                 parsed_url = urlparse(url)
                 source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
                 articles.append({
@@ -154,9 +173,8 @@ def fetch_feed(url, use_ai=False):
                     "description": desc,
                     "url": entry.get("link", "#"),
                     "category": category,
-                    "source": source  # ✅ Add source here
+                    "source": source
                 })
-
         print(f"✓ Added {len(articles)} articles from {url}")
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
@@ -165,24 +183,17 @@ def fetch_feed(url, use_ai=False):
 def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles, new_articles_last_refresh
     print(f"Preloading articles from {len(feed_list)} feeds...")
-
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = executor.map(lambda u: fetch_feed(u, use_ai), feed_list)
         new_articles = [article for feed in results for article in feed]
-
     existing_ids = {a["id"] for a in cached_articles}
     unique_new = [a for a in new_articles if a["id"] not in existing_ids]
-
-    # Save new ones for the /new endpoint
     new_articles_last_refresh = unique_new
-
-    # Add new to front of cache and trim
     cached_articles = unique_new + cached_articles
     cached_articles = cached_articles[:MAX_CACHED_ARTICLES]
-
     print(f"✓ {len(unique_new)} new articles added. Total cached: {len(cached_articles)}")
 
-def periodic_refresh(interval=480):  # Every 8 minutes
+def periodic_refresh(interval=480):
     global current_batch_index
     while True:
         print(f"\n🌀 Refreshing batch {current_batch_index + 1}...")
@@ -220,12 +231,43 @@ def manual_refresh():
 def get_new_articles():
     return jsonify(new_articles_last_refresh)
 
-# Preload articles right before the app starts (safe across all Flask versions)
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.json
+    if User.query.filter_by(username=data["username"]).first():
+        return jsonify({"error": "Username already exists"}), 400
+    user = User(username=data["username"])
+    user.set_password(data["password"])
+    db.session.add(user)
+    db.session.commit()
+    login_user(user, remember=True)
+    return jsonify({"message": "Signed up and logged in!"})
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.json
+    user = User.query.filter_by(username=data["username"]).first()
+    if user and user.check_password(data["password"]):
+        login_user(user, remember=True)
+        return jsonify({"message": "Logged in successfully"})
+    return jsonify({"error": "Invalid credentials"}), 401
+
+@app.route("/logout", methods=["POST"])
+@login_required
+def logout():
+    logout_user()
+    return jsonify({"message": "Logged out successfully"})
+
+@app.route("/me")
+@login_required
+def me():
+    return jsonify({"username": current_user.username})
+
 print("⚡ Preloading articles at startup...")
 preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
 
-
 if __name__ == "__main__":
-    # Only in local/dev: safe to spawn background thread
+    # Run this only when directly launching app.py, not when importing
     threading.Thread(target=periodic_refresh, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
