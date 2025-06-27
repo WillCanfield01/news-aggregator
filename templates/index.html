@@ -134,10 +134,12 @@
 </head>
 
 <body>
-    <h1>The Roundup</h1>
 
-    <div style="position: absolute; top: 20px; right: 20px;">
-        <div id="auth-buttons">
+    <div
+        style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 20px;">
+        <h1 style="margin-bottom: 10px;">The Roundup</h1>
+
+        <div id="auth-buttons" style="display: flex; gap: 10px;">
             <button onclick="openLogin()">Login</button>
             <button onclick="openSignup()">Sign Up</button>
         </div>
@@ -152,6 +154,7 @@
             </div>
         </div>
     </div>
+
 
     <!-- ✅ Filter Buttons -->
     <div id="filter">
