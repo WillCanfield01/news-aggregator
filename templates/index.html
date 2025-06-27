@@ -31,10 +31,10 @@
         }
 
         #filter {
-            margin-bottom: 20px;
             display: flex;
-            flex-wrap: wrap;
             justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
         }
 
         button {
@@ -130,21 +130,65 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        .header {
+            position: relative;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-family: 'Lora', serif;
+            font-size: 2.5em;
+            color: #23496a;
+        }
+
+        #auth-buttons,
+        #profile-dropdown {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 2;
+        }
+
+        @media (max-width: 600px) {
+
+            #auth-buttons,
+            #profile-dropdown {
+                top: 10px;
+                right: 10px;
+                flex-direction: row;
+            }
+
+            .header h1 {
+                margin: 0 auto;
+                font-family: 'Lora', serif;
+                font-size: 2.5em;
+                color: #23496a;
+                position: relative;
+                z-index: 1;
+            }
+
+            #filter {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
     </style>
 </head>
 
 <body>
 
-    <div
-        style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 20px;">
-        <h1 style="margin-bottom: 10px;">The Roundup</h1>
+    <div class="header" style="display: flex; justify-content: center; align-items: center; position: relative;">
+        <h1>The Roundup</h1>
 
-        <div id="auth-buttons" style="display: flex; gap: 10px;">
+        <div id="auth-buttons" style="position: absolute; right: 0; top: 0; display: flex; gap: 10px;">
             <button onclick="openLogin()">Login</button>
             <button onclick="openSignup()">Sign Up</button>
         </div>
 
-        <div id="profile-dropdown" style="display: none; position: relative;">
+        <div id="profile-dropdown" style="display: none; position: absolute; right: 0; top: 0;">
             <button onclick="toggleDropdown()"
                 style="border-radius: 50%; width: 40px; height: 40px; background-color: #23496a; color: white;">👤</button>
             <div id="dropdown-menu"
@@ -158,14 +202,18 @@
 
     <!-- ✅ Filter Buttons -->
     <div id="filter">
-        <button onclick="filterCategory('All')">All</button>
-        <button onclick="filterCategory('Finance')">Finance</button>
-        <button onclick="filterCategory('Sports')">Sports</button>
-        <button onclick="filterCategory('Politics')">Politics</button>
-        <button onclick="filterCategory('Entertainment')">Entertainment</button>
-        <button onclick="filterCategory('Health')">Health</button>
-        <button onclick="filterCategory('Technology')">Technology</button>
+        <select onchange="filterCategory(this.value)"
+            style="padding: 10px; font-size: 1em; border-radius: 5px; border: 1px solid #ccc;">
+            <option value="All">All</option>
+            <option value="Finance">Finance</option>
+            <option value="Sports">Sports</option>
+            <option value="Politics">Politics</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Health">Health</option>
+            <option value="Technology">Technology</option>
+        </select>
     </div>
+
 
     <!-- ✅ Loading and Articles -->
     <div id="loading" style="display: none;">Loading...</div>
