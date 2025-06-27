@@ -293,9 +293,9 @@ def me():
     return jsonify({"username": current_user.username})
 
 if __name__ == "__main__":
+    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
     threading.Thread(target=periodic_refresh, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
-
 
 
 
