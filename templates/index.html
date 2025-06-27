@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
         rel="stylesheet" />
     <style>
+        /* Your existing CSS unchanged */
         * {
             margin: 0;
             padding: 0;
@@ -239,23 +240,23 @@
         </select>
     </div>
 
-
     <!-- ✅ Loading and Articles -->
     <div id="loading" style="display: none;">Loading...</div>
     <div id="articles"></div>
 
     <script>
         function submitLogin() {
-            const email = document.getElementById("loginEmail").value;
+            const username = document.getElementById("loginUsername").value;
             const password = document.getElementById("loginPassword").value;
 
             fetch("/login", {
                 method: "POST",
-                credentials: "include",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ email, password })
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",  // include cookies for session
+                body: JSON.stringify({
+                    username: username,
+                    password: password
+                })
             })
                 .then(res => res.json())
                 .then(data => {
@@ -395,7 +396,6 @@
             document.getElementById("loginModal").style.display = "none";
         }
 
-
         function openSignup() {
             document.getElementById("signupModal").style.display = "flex";
         }
@@ -406,16 +406,16 @@
 
         function submitSignup() {
             const username = document.getElementById("signupUsername").value;
-            const email = document.getElementById("signupEmail").value;
             const password = document.getElementById("signupPassword").value;
 
             fetch("/signup", {
                 method: "POST",
+                headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ username, email, password })
+                body: JSON.stringify({
+                    username: username,
+                    password: password
+                })
             })
                 .then(async res => {
                     const text = await res.text();
@@ -446,8 +446,8 @@
         <div
             style="background-color: white; padding: 30px; border-radius: 8px; width: 300px; text-align: left; position: relative;">
             <h2 style="margin-bottom: 20px;">Login</h2>
-            <label>Email</label>
-            <input type="text" id="loginEmail" style="width: 100%; margin-bottom: 10px;" />
+            <label>Username</label>
+            <input type="text" id="loginUsername" style="width: 100%; margin-bottom: 10px;" />
             <label>Password</label>
             <input type="password" id="loginPassword" style="width: 100%; margin-bottom: 20px;" />
             <button onclick="submitLogin()">Submit</button>

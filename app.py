@@ -248,16 +248,19 @@ def get_new_articles():
 @app.route("/signup", methods=["POST"])
 def signup():
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
 
-        if not data or not data.get("username") or not data.get("password"):
-            return jsonify({"error": "Username and password required"}), 400
+        # Validate presence of username and password early
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
+        if not username or not password:
+            return jsonify({"error": "Username and password are required"}), 400
 
-        if User.query.filter_by(username=data["username"]).first():
+        if User.query.filter_by(username=username).first():
             return jsonify({"error": "Username already exists"}), 400
 
-        user = User(username=data["username"])
-        user.set_password(data["password"])
+        user = User(username=username)
+        user.set_password(password)
         db.session.add(user)
         db.session.commit()
         login_user(user, remember=True)
@@ -268,15 +271,17 @@ def signup():
 
 @app.route("/login", methods=["POST"])
 def login():
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    # Get the user by email (since that's what your frontend sends)
-    user = User.query.filter_by(email=data["email"]).first()
+    # Validate presence of username and password early
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
 
-    # Validate user and password
-    if user and check_password_hash(user.password, data["password"]):
-        # Log the user in (you can use session or tokens as needed)
-        session["user_id"] = user.id
+    user = User.query.filter_by(username=username).first()
+    if user and user.check_password(password):
+        login_user(user)
         return jsonify(success=True, username=user.username)
     else:
         return jsonify(success=False, message="Invalid credentials"), 401
