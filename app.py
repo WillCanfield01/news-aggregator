@@ -16,6 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import quote_plus
+from sqlalchemy.pool import QueuePool
 import openai
 
 MAX_CACHED_ARTICLES = 300
@@ -32,6 +33,14 @@ if "sslmode" not in uri:
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-dev-key")
+
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,     # Auto reconnect if connection drops
+    "pool_recycle": 280,       # Close stale connections (Render may idle them)
+    "pool_size": 5,
+    "max_overflow": 10,
+    "poolclass": QueuePool
+}
 
 app.config.update(
     SESSION_COOKIE_SECURE=True,
@@ -279,7 +288,12 @@ def login():
     if not username or not password:
         return jsonify({"error": "Username and password are required"}), 400
 
-    user = User.query.filter_by(username=username).first()
+    try:
+        user = User.query.filter_by(username=username).first()
+    except Exception as db_error:
+        print("Database error during login:", db_error)
+        return jsonify({"error": "Database error. Please try again shortly."}), 503  # ✅ Move return inside except
+
     if user and user.check_password(password):
         login_user(user)
         return jsonify(success=True, username=user.username)
