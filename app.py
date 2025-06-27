@@ -260,7 +260,7 @@ def signup():
         data = request.get_json() or {}
 
         # Validate presence of username and password early
-        username = data.get("username", "").strip()
+        username = data.get("username", "").strip().lower()
         password = data.get("password", "").strip()
         if not username or not password:
             return jsonify({"error": "Username and password are required"}), 400
@@ -268,7 +268,7 @@ def signup():
         if User.query.filter_by(username=username).first():
             return jsonify({"error": "Username already exists"}), 400
 
-        user = User(username=username)
+        user = User(username=username.lower())
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
@@ -310,6 +310,29 @@ def logout():
 @login_required
 def me():
     return jsonify({"username": current_user.username})
+
+@app.route("/account")
+@login_required
+def account_page():
+    return render_template("account.html", username=current_user.username)
+
+@app.route("/reset-password", methods=["POST"])
+@login_required
+def reset_password():
+    data = request.get_json() or {}
+    current = data.get("current_password", "").strip()
+    new = data.get("new_password", "").strip()
+
+    if not current_user.check_password(current):
+        return jsonify({"error": "Current password is incorrect"}), 400
+
+    if len(new) < 6:
+        return jsonify({"error": "New password must be at least 6 characters"}), 400
+
+    current_user.set_password(new)
+    db.session.commit()
+    return jsonify({"success": True, "message": "Password updated successfully"})
+
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
