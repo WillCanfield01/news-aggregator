@@ -55,6 +55,7 @@ db = SQLAlchemy(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
+login_manager.login_view = "home"
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
