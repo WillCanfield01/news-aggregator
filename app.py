@@ -7,7 +7,7 @@ import threading
 import torch
 import torch.nn.functional as F
 from html import unescape
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from concurrent.futures import ThreadPoolExecutor
@@ -268,12 +268,18 @@ def signup():
 
 @app.route("/login", methods=["POST"])
 def login():
-    data = request.json
-    user = User.query.filter_by(username=data["username"]).first()
-    if user and user.check_password(data["password"]):
-        login_user(user, remember=True)
-        return jsonify({"message": "Logged in successfully"})
-    return jsonify({"error": "Invalid credentials"}), 401
+    data = request.get_json()
+
+    # Get the user by email (since that's what your frontend sends)
+    user = User.query.filter_by(email=data["email"]).first()
+
+    # Validate user and password
+    if user and check_password_hash(user.password, data["password"]):
+        # Log the user in (you can use session or tokens as needed)
+        session["user_id"] = user.id
+        return jsonify(success=True, username=user.username)
+    else:
+        return jsonify(success=False, message="Invalid credentials"), 401
 
 @app.route("/logout", methods=["POST"])
 @login_required

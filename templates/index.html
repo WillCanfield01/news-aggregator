@@ -132,42 +132,45 @@
         }
 
         .header {
-            position: relative;
-            text-align: center;
+            width: 100%;
             margin-bottom: 20px;
         }
 
-        .header h1 {
-            margin: 0;
-            font-family: 'Lora', serif;
+        .header-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .header-inner h1 {
+            flex-grow: 1;
+            text-align: center;
             font-size: 2.5em;
-            color: #23496a;
+            margin: 0 auto;
+            white-space: nowrap;
         }
 
         #auth-buttons,
         #profile-dropdown {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            z-index: 2;
+            display: flex;
+            gap: 10px;
         }
 
         @media (max-width: 600px) {
+            .header-inner {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .header-inner h1 {
+                font-size: 2em;
+            }
 
             #auth-buttons,
             #profile-dropdown {
-                top: 10px;
-                right: 10px;
-                flex-direction: row;
-            }
-
-            .header h1 {
-                margin: 0 auto;
-                font-family: 'Lora', serif;
-                font-size: 2.5em;
-                color: #23496a;
-                position: relative;
-                z-index: 1;
+                justify-content: center;
             }
 
             #filter {
@@ -175,30 +178,52 @@
                 align-items: center;
             }
         }
+
+        .avatar-button {
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            background-color: #23496a;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        #dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 50px;
+            right: 0;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            text-align: left;
+        }
     </style>
 </head>
 
 <body>
 
-    <div class="header" style="display: flex; justify-content: center; align-items: center; position: relative;">
-        <h1>The Roundup</h1>
+    <div class="header">
+        <div class="header-inner">
+            <h1>The Roundup</h1>
 
-        <div id="auth-buttons" style="position: absolute; right: 0; top: 0; display: flex; gap: 10px;">
-            <button onclick="openLogin()">Login</button>
-            <button onclick="openSignup()">Sign Up</button>
-        </div>
+            <div id="auth-buttons">
+                <button onclick="openLogin()">Login</button>
+                <button onclick="openSignup()">Sign Up</button>
+            </div>
 
-        <div id="profile-dropdown" style="display: none; position: absolute; right: 0; top: 0;">
-            <button onclick="toggleDropdown()"
-                style="border-radius: 50%; width: 40px; height: 40px; background-color: #23496a; color: white;">👤</button>
-            <div id="dropdown-menu"
-                style="display: none; position: absolute; right: 0; background-color: white; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
-                <p id="username-display" style="margin: 0 0 10px;">User</p>
-                <button onclick="logout()">Logout</button>
+            <div id="profile-dropdown" style="display: none;">
+                <button onclick="toggleDropdown()" class="avatar-button">👤</button>
+                <div id="dropdown-menu">
+                    <p id="username-display">User</p>
+                    <button onclick="logout()">Logout</button>
+                </div>
             </div>
         </div>
     </div>
-
 
     <!-- ✅ Filter Buttons -->
     <div id="filter">
