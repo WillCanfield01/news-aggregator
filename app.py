@@ -440,6 +440,11 @@ def restricted():
         return redirect(url_for('unconfirmed_notice'))
     # proceed normally
 
+@app.route("/save", methods=["POST"])
+@login_required
+def alias_save_article():
+    return save_article()
+
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
