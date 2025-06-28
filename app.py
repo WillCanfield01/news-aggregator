@@ -298,7 +298,7 @@ def login():
     data = request.get_json() or {}
 
     # Validate presence of username and password early
-    username = data.get("username", "").strip()
+    username = data.get("username", "").strip().lower()
     password = data.get("password", "").strip()
     if not username or not password:
         return jsonify({"error": "Username and password are required"}), 400
