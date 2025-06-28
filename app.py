@@ -65,6 +65,7 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True)
     password_hash = db.Column(db.String(200))
+    saved_articles = db.relationship("SavedArticle", backref="user", lazy=True)
 
     # in your User model
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -75,6 +76,16 @@ class User(db.Model, UserMixin):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+class SavedArticle(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    article_id = db.Column(db.String(64), nullable=False)
+    title = db.Column(db.String(255))
+    url = db.Column(db.String(500))
+    summary = db.Column(db.Text)
+    source = db.Column(db.String(100))
+    category = db.Column(db.String(100))
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -329,7 +340,8 @@ def me():
 @app.route("/account")
 @login_required
 def account_page():
-    return render_template("account.html", username=current_user.username)
+    saved = SavedArticle.query.filter_by(user_id=current_user.id).all()
+    return render_template("account.html", username=current_user.username, saved_articles=saved)
 
 @app.route("/reset-password", methods=["POST"])
 @login_required
@@ -393,6 +405,34 @@ def confirm_email(token):
         user.is_confirmed = True
         db.session.commit()
         return redirect(url_for('home'))  # Or use render_template("email_confirmed.html")
+
+@app.route("/save-article", methods=["POST"])
+@login_required
+def save_article():
+    data = request.get_json() or {}
+    article_id = data.get("id")
+    title = data.get("title")
+    url = data.get("url")
+    summary = data.get("summary")
+    source = data.get("source")
+    category = data.get("category")
+
+    if SavedArticle.query.filter_by(user_id=current_user.id, article_id=article_id).first():
+        return jsonify({"error": "Article already saved"}), 400
+
+    saved = SavedArticle(
+        user_id=current_user.id,
+        article_id=article_id,
+        title=title,
+        url=url,
+        summary=summary,
+        source=source,
+        category=category
+    )
+    db.session.add(saved)
+    db.session.commit()
+
+    return jsonify({"success": True, "message": "Article saved"})
 
 @login_required
 def restricted():

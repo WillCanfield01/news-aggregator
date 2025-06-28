@@ -141,6 +141,19 @@
         });
     </script>
 
+    <h2>Saved Articles</h2>
+    <ul>
+        {% for article in saved_articles %}
+        <li>
+            <a href="{{ article.url }}" target="_blank">{{ article.title }}</a><br>
+            <small>{{ article.source }} — {{ article.category }}</small><br>
+            <p>{{ article.summary }}</p>
+        </li>
+        {% else %}
+        <li>No saved articles yet.</li>
+        {% endfor %}
+    </ul>
+
 </body>
 
 </html>

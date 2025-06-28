@@ -211,7 +211,7 @@
     <div class="header">
         <div class="header-inner">
             <!-- Left Column (empty to balance layout) -->
-            <div style="width: 100px;"></div>
+            <div style="width: 105px;"></div>
 
             <!-- Center Column (title) -->
             <h1 style="flex-grow: 1; text-align: center; margin: 0;">The Roundup</h1>
@@ -391,6 +391,7 @@
           <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
           <p class="summary" id="summary-${article.id}">${article.summary}</p>
           <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
+          <button onclick="saveArticle(article)">Save</button>
           <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
         `;
                 articlesDiv.appendChild(div);
@@ -471,6 +472,22 @@
                     console.error("Signup error:", err);
                     alert("Error during sign-up: " + err.message);
                 });
+
+            function saveArticle(article) {
+                fetch("/save-article", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    credentials: "include",
+                    body: JSON.stringify(article)
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        alert(data.message || "Saved!");
+                    });
+            }
+
         }
     </script>
 
