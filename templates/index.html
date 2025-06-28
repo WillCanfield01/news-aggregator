@@ -203,6 +203,22 @@
             z-index: 100;
             text-align: left;
         }
+
+        #toast-container {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #23496a;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 5px;
+            font-size: 1em;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            transition: opacity 0.3s ease;
+        }
     </style>
 </head>
 
@@ -211,7 +227,7 @@
     <div class="header">
         <div class="header-inner">
             <!-- Left Column (empty to balance layout) -->
-            <div style="width: 105px;"></div>
+            <div style="width: 100px;"></div>
 
             <!-- Center Column (title) -->
             <h1 style="flex-grow: 1; text-align: center; margin: 0;">The Roundup</h1>
@@ -267,15 +283,15 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        alert("Login successful!");
+                        showToast("Login successful!");
                         closeLoginModal();
                         location.reload();
                     } else {
-                        alert("Login failed: " + data.message);
+                        showToast("Login failed: " + data.message);
                     }
                 })
                 .catch(err => {
-                    alert("Login error: " + err.message);
+                    showToast("Login error: " + err.message);
                     console.error(err);
                 });
         }
@@ -296,14 +312,14 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        alert("Account created! Please check your email to verify.");
+                        showToast("Account created! Please check your email to verify.");
                         closeSignupModal();
                     } else {
-                        alert("Signup failed: " + (data.message || "Unknown error"));
+                        showToast("Signup failed: " + (data.message || "Unknown error"));
                     }
                 })
                 .catch(err => {
-                    alert("Signup error: " + err.message);
+                    showToast("Signup error: " + err.message);
                     console.error(err);
                 });
         }
@@ -391,7 +407,7 @@
           <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
           <p class="summary" id="summary-${article.id}">${article.summary}</p>
           <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-          <button onclick="saveArticle(article)">Save</button>
+          <button class="save-btn" data-article-id="${article.id}">Save</button>
           <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
         `;
                 articlesDiv.appendChild(div);
@@ -457,38 +473,72 @@
                     try {
                         const data = JSON.parse(text);
                         if (res.ok) {
-                            alert("Account created! Logging you in...");
+                            showToast("Account created! Logging you in...");
                             closeSignupModal();
                             location.reload();
                         } else {
-                            alert("Sign-up failed: " + (data.error || "Unknown error"));
+                            showToast("Sign-up failed: " + (data.error || "Unknown error"));
                         }
                     } catch (err) {
                         console.error("Invalid JSON response:", text);
-                        alert("Unexpected server response");
+                        showToast("Unexpected server response");
                     }
                 })
                 .catch(err => {
                     console.error("Signup error:", err);
-                    alert("Error during sign-up: " + err.message);
+                    showToast("Error during sign-up: " + err.message);
                 });
 
-            function saveArticle(article) {
-                fetch("/save-article", {
+        }
+        document.addEventListener("click", async function (e) {
+            if (e.target && e.target.classList.contains("save-btn")) {
+                const articleId = e.target.dataset.articleId;
+
+                // Check if user is signed in
+                const authRes = await fetch("/me", { credentials: "include" });
+                if (!authRes.ok) {
+                    showToast("Please sign in to save articles.");
+                    return;
+                }
+
+                const article = articles.find(a => a.id === articleId);
+                if (!article) {
+                    showToast("Article not found.");
+                    return;
+                }
+
+                const res = await fetch("/save", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json"
                     },
                     credentials: "include",
                     body: JSON.stringify(article)
-                })
-                    .then(res => res.json())
-                    .then(data => {
-                        alert(data.message || "Saved!");
-                    });
-            }
+                });
 
+                const data = await res.json();
+                if (data.success) {
+                    showToast("Article saved to your account.");
+                } else {
+                    showToast(data.message || "Failed to save article.");
+                }
+            }
+        });
+
+        function showToast(message, duration = 3000) {
+            const toast = document.getElementById("toast-container");
+            toast.textContent = message;
+            toast.style.display = "block";
+            toast.style.opacity = "1";
+
+            setTimeout(() => {
+                toast.style.opacity = "0";
+                setTimeout(() => {
+                    toast.style.display = "none";
+                }, 300); // matches fade-out
+            }, duration);
         }
+
     </script>
 
     <!-- Login Modal -->
@@ -526,6 +576,14 @@
                 style="background-color: gray; margin-left: 10px;">Cancel</button>
         </form>
     </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-container" style="position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background-color: #23496a; color: white; padding: 12px 20px;
+            border-radius: 5px; font-size: 1em; display: none;
+            z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+    </div>
+
 
 </body>
 
