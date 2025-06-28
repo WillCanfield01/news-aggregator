@@ -141,8 +141,8 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            flex-wrap: wrap;
             gap: 10px;
+            position: relative;
         }
 
         .header-inner h1 {
@@ -210,9 +210,14 @@
 
     <div class="header">
         <div class="header-inner">
-            <h1>The Roundup</h1>
+            <!-- Left Column (empty to balance layout) -->
+            <div style="width: 100px;"></div>
 
-            <div id="auth-buttons">
+            <!-- Center Column (title) -->
+            <h1 style="flex-grow: 1; text-align: center; margin: 0;">The Roundup</h1>
+
+            <!-- Right Column (auth buttons or profile) -->
+            <div id="auth-buttons" style="display: flex; gap: 10px;">
                 <button onclick="openLogin()">Login</button>
                 <button onclick="openSignup()">Sign Up</button>
             </div>
@@ -221,7 +226,6 @@
                 <button onclick="toggleDropdown()" class="avatar-button">👤</button>
                 <div id="dropdown-menu">
                     <p id="username-display">User</p>
-                    <!-- Only shown when logged in -->
                     <a href="/account"><button style="margin-bottom: 10px;">My Account</button></a>
                     <button onclick="logout()">Logout</button>
                 </div>
