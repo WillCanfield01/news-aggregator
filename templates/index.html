@@ -248,22 +248,18 @@
     <div id="articles"></div>
 
     <script>
-        function submitLogin() {
-            const username = document.getElementById("signupUsername").value;
-            const email = document.getElementById("signupEmail").value;
-            const password = document.getElementById("signupPassword").value;
+        function handleLogin(event) {
+            event.preventDefault();
 
-            fetch("/signup", {
+            const username = document.getElementById("loginUsername").value.trim().toLowerCase();
+            const password = document.getElementById("loginPassword").value;
+
+            fetch("/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({
-                    username: username,
-                    email: email,
-                    password: password
-                })
+                body: JSON.stringify({ username, password })
             })
-
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
@@ -275,7 +271,35 @@
                     }
                 })
                 .catch(err => {
-                    alert("Error during login");
+                    alert("Login error: " + err.message);
+                    console.error(err);
+                });
+        }
+
+        function handleSignup(event) {
+            event.preventDefault();
+
+            const username = document.getElementById("signupUsername").value.trim().toLowerCase();
+            const email = document.getElementById("signupEmail").value.trim();
+            const password = document.getElementById("signupPassword").value;
+
+            fetch("/signup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ username, email, password })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert("Account created! Please check your email to verify.");
+                        closeSignupModal();
+                    } else {
+                        alert("Signup failed: " + (data.message || "Unknown error"));
+                    }
+                })
+                .catch(err => {
+                    alert("Signup error: " + err.message);
                     console.error(err);
                 });
         }
