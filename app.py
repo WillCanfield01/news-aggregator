@@ -6,6 +6,8 @@ import hashlib
 import threading
 import torch
 import torch.nn.functional as F
+import smtplib
+import openai
 from html import unescape
 from flask import Flask, jsonify, render_template, request, session
 from flask_cors import CORS
@@ -17,11 +19,13 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import quote_plus
 from sqlalchemy.pool import QueuePool
-import openai
+from itsdangerous import URLSafeTimedSerializer
+from email.mime.text import MIMEText
+from postmarker.core import PostmarkClient
 
 MAX_CACHED_ARTICLES = 300
-
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+postmark = PostmarkClient(server_token=os.getenv("POSTMARK_SERVER_TOKEN"))
 
 app = Flask(__name__)
 uri = os.environ.get("DATABASE_URL", "")
@@ -61,6 +65,10 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True)
     password_hash = db.Column(db.String(200))
+
+    # in your User model
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    is_confirmed = db.Column(db.Boolean, default=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -225,6 +233,36 @@ def periodic_refresh(interval=480):
         current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
         time.sleep(interval)
 
+def generate_confirmation_token(email):
+    serializer = URLSafeTimedSerializer(app.secret_key)
+    return serializer.dumps(email, salt="email-confirmation-salt")
+
+def confirm_token(token, expiration=3600):  # 1 hour
+    serializer = URLSafeTimedSerializer(app.secret_key)
+    try:
+        email = serializer.loads(
+            token,
+            salt="email-confirmation-salt",
+            max_age=expiration
+        )
+    except Exception:
+        return False
+    return email
+
+def send_confirmation_email(email, username, token):
+    confirm_link = f"https://yourdomain.com/confirm/{token}"
+    postmark.emails.send(
+        From=os.getenv("EMAIL_FROM"),
+        To=email,
+        Subject='Confirm Your Email – The Roundup',
+        HtmlBody=f'''
+            <p>Hi {username},</p>
+            <p>Thanks for signing up! Please confirm your email by clicking the link below:</p>
+            <p><a href="{confirm_link}">Confirm your email</a></p>
+        ''',
+        MessageStream="outbound"
+    )
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -254,30 +292,6 @@ def manual_refresh():
 @app.route("/new")
 def get_new_articles():
     return jsonify(new_articles_last_refresh)
-
-@app.route("/signup", methods=["POST"])
-def signup():
-    try:
-        data = request.get_json() or {}
-
-        # Validate presence of username and password early
-        username = data.get("username", "").strip().lower()
-        password = data.get("password", "").strip()
-        if not username or not password:
-            return jsonify({"error": "Username and password are required"}), 400
-
-        if User.query.filter_by(username=username).first():
-            return jsonify({"error": "Username already exists"}), 400
-
-        user = User(username=username.lower())
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
-        login_user(user, remember=True)
-        return jsonify({"success": True, "message": "Signed up and logged in!"})
-    except Exception as e:
-        print("Signup error:", e)
-        return jsonify({"error": "Server error", "details": str(e)}), 500
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -334,12 +348,60 @@ def reset_password():
     db.session.commit()
     return jsonify({"success": True, "message": "Password updated successfully"})
 
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.get_json() or {}
+    username = data.get("username", "").strip().lower()
+    password = data.get("password", "").strip()
+    email = data.get("email", "").strip().lower()
+
+    if not username or not password or not email:
+        return jsonify({"error": "All fields are required"}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "Username already exists"}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "Email already registered"}), 400
+
+    try:
+        user = User(username=username, email=email)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+
+        # ✅ These lines now run only on success
+        token = generate_confirmation_token(user.email)
+        send_confirmation_email(user.email, username, token)
+
+        return jsonify({"success": True, "message": "Signup complete! Check your email to confirm."})
+    except Exception as e:
+        print("Signup error:", e)
+        db.session.rollback()
+        return jsonify({"error": "Signup failed. Please try again."}), 500
+    
+@app.route("/confirm/<token>")
+def confirm_email(token):
+    email = confirm_token(token)
+    if not email:
+        return "The confirmation link is invalid or has expired.", 400
+
+    user = User.query.filter_by(email=email).first_or_404()
+
+    if user.is_confirmed:
+        return "Account already confirmed. Please login.", 200
+    else:
+        user.is_confirmed = True
+        db.session.commit()
+        return redirect(url_for('home'))  # Or use render_template("email_confirmed.html")
+
+@login_required
+def restricted():
+    if not current_user.is_confirmed:
+        return redirect(url_for('unconfirmed_notice'))
+    # proceed normally
+
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
     threading.Thread(target=periodic_refresh, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
-
-
-
-
