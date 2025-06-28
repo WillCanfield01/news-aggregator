@@ -249,18 +249,21 @@
 
     <script>
         function submitLogin() {
-            const username = document.getElementById("loginUsername").value;
-            const password = document.getElementById("loginPassword").value;
+            const username = document.getElementById("signupUsername").value;
+            const email = document.getElementById("signupEmail").value;
+            const password = document.getElementById("signupPassword").value;
 
-            fetch("/login", {
+            fetch("/signup", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                credentials: "include",  // include cookies for session
+                credentials: "include",
                 body: JSON.stringify({
                     username: username,
+                    email: email,
                     password: password
                 })
             })
+
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
