@@ -466,6 +466,20 @@ def unsave_article():
     db.session.commit()
     return jsonify({"success": True, "message": "Article unsaved"})
 
+@app.route("/saved-articles")
+@login_required
+def saved_articles():
+    saved = SavedArticle.query.filter_by(user_id=current_user.id).all()
+    serialized = [{
+        "id": article.article_id,
+        "title": article.title,
+        "url": article.url,
+        "summary": article.summary,
+        "source": article.source,
+        "category": article.category
+    } for article in saved]
+    return jsonify(serialized)
+
 @login_manager.unauthorized_handler
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
