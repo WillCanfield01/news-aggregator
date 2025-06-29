@@ -30,6 +30,8 @@ POSTMARK_TOKEN = os.getenv("POSTMARK_SERVER_TOKEN")
 if not POSTMARK_TOKEN:
     raise RuntimeError("Missing POSTMARK_SERVER_TOKEN environment variable")
 
+postmark = PostmarkClient(server_token=POSTMARK_TOKEN)
+
 app = Flask(__name__)
 uri = os.environ.get("DATABASE_URL", "")
 if uri.startswith("postgres://"):
