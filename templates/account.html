@@ -223,42 +223,41 @@
         });
 
         // Load saved articles
-        document.addEventListener("DOMContentLoaded", () => {
-            fetch("/saved-articles", { credentials: "include" })
-                .then(res => res.json())
-                .then(data => {
-                    const container = document.getElementById("articles");
-                    container.innerHTML = "";
+        document.addEventListener("DOMContentLoaded", async () => {
+            try {
+                const res = await fetch("/saved-articles", { credentials: "include" });
+                const data = await res.json();
 
-                    if (data.length === 0) {
-                        container.innerHTML = "<p>You haven't saved any articles yet.</p>";
-                        return;
-                    }
+                const container = document.getElementById("articles");
+                container.innerHTML = "";
 
-                    data.forEach(article => {
-                        const div = document.createElement("div");
-                        div.classList.add("article");
-                        div.id = article.id;
-                        div.innerHTML = `
-    <h2>${article.title || "Untitled"}</h2>
-    <p class="category">Category: ${article.category || "General"}</p>
-    <p class="source"><strong>Source:</strong> ${article.source?.toUpperCase() || "UNKNOWN"}</p>
-    <p class="summary">${article.summary || "No summary available."}</p>
-    <div class="actions">
-        <button class="save-btn saved" aria-label="Unsave this article">Unsave</button>
-        <a href="${article.url}" target="_blank" class="read-more">Read more</a>
-    </div>
-`;
+                if (data.length === 0) {
+                    container.innerHTML = "<p>You haven't saved any articles yet.</p>";
+                    return;
+                }
 
-                        container.appendChild(div);
-                    });
-
+                data.forEach(article => {
+                    const div = document.createElement("div");
+                    div.classList.add("article");
+                    div.id = article.id;
+                    div.innerHTML = `
+                <h2>${article.title || "Untitled"}</h2>
+                <p class="category">Category: ${article.category || "General"}</p>
+                <p class="source"><strong>Source:</strong> ${article.source?.toUpperCase() || "UNKNOWN"}</p>
+                <p class="summary">${article.summary || "No summary available."}</p>
+                <div class="actions">
+                    <button class="save-btn saved" data-article-id="${article.id}" data-saved="true">Unsave</button>
+                    <a href="${article.url}" target="_blank" class="read-more">Read more</a>
+                </div>
+            `;
+                    container.appendChild(div);
                 });
-        })
-            .catch(err => {
+
+            } catch (err) {
                 console.error("Failed to fetch saved articles", err);
                 document.getElementById("articles").innerHTML = "<p>Error loading saved articles.</p>";
-            });
+            }
+        });
 
         // Save/Unsave toggle
         document.body.addEventListener("click", async function (e) {
