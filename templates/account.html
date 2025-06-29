@@ -77,40 +77,80 @@
         }
 
         .article {
-            background: #fff;
+            background-color: #fff;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
             padding: 20px;
             margin-bottom: 20px;
+            box-shadow: 0 1px 8px rgba(0, 0, 0, 0.05);
             text-align: left;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
         }
 
-        .category,
-        .source {
-            font-weight: bold;
-            color: #6a4e23;
+        .article h2 {
+            font-size: 1.3em;
+            margin-bottom: 8px;
+            color: #23496a;
         }
 
-        .summary {
+        .article .category,
+        .article .source {
+            font-size: 0.9em;
+            color: #777;
+            margin-bottom: 6px;
+        }
+
+        .article .summary {
+            font-size: 1em;
+            margin: 10px 0;
+            color: #333;
+        }
+
+        .article .actions {
+            display: flex;
+            gap: 10px;
             margin-top: 10px;
-            color: #555;
         }
 
-        .save-btn {
-            margin-top: 10px;
+        button.save-btn,
+        a.read-more {
             background-color: #23496a;
             color: white;
-            padding: 8px 12px;
-            border-radius: 4px;
             border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            text-decoration: none;
             cursor: pointer;
+            transition: background 0.2s;
+            width: auto;
         }
 
-        .save-btn.saved {
+        button.save-btn:hover,
+        a.read-more:hover {
             background-color: #8a623f;
+        }
+
+        .back-button {
+            display: inline-block;
+            margin: 30px auto;
+            padding: 8px 16px;
+            background-color: #8a623f;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .back-button:hover {
+            background-color: #6f4e32;
+        }
+
+        .article.removing {
+            opacity: 0;
+            max-height: 0;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            transition: all 0.3s ease;
         }
 
         @media (max-width: 500px) {
@@ -140,6 +180,7 @@
 <body>
 
     <h1>My Account</h1>
+    <a href="/" class="back-button">← Back to Home</a>
     <div class="info">
         Logged in as: <strong>{{ username }}</strong>
     </div>
@@ -199,21 +240,25 @@
                         div.classList.add("article");
                         div.id = article.id;
                         div.innerHTML = `
-              <h2>${article.title}</h2>
-              <p class="category">${article.category}</p>
-              <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
-              <p class="summary">${article.summary}</p>
-              <button class="save-btn saved" data-article-id="${article.id}" data-saved="true">Unsave</button>
-              <a href="${article.url}" target="_blank">Read more</a>
-            `;
+    <h2>${article.title || "Untitled"}</h2>
+    <p class="category">Category: ${article.category || "General"}</p>
+    <p class="source"><strong>Source:</strong> ${article.source?.toUpperCase() || "UNKNOWN"}</p>
+    <p class="summary">${article.summary || "No summary available."}</p>
+    <div class="actions">
+        <button class="save-btn saved" aria-label="Unsave this article">Unsave</button>
+        <a href="${article.url}" target="_blank" class="read-more">Read more</a>
+    </div>
+`;
+
                         container.appendChild(div);
                     });
-                })
-                .catch(err => {
-                    console.error("Failed to fetch saved articles", err);
-                    document.getElementById("articles").innerHTML = "<p>Error loading saved articles.</p>";
+
                 });
-        });
+        })
+            .catch(err => {
+                console.error("Failed to fetch saved articles", err);
+                document.getElementById("articles").innerHTML = "<p>Error loading saved articles.</p>";
+            });
 
         // Save/Unsave toggle
         document.body.addEventListener("click", async function (e) {
@@ -234,9 +279,9 @@
 
                     const result = await res.json();
                     if (res.ok) {
-                        btn.textContent = "Save";
-                        btn.dataset.saved = "false";
-                        btn.classList.remove("saved");
+                        btn.closest(".article").classList.add("removing");
+                        setTimeout(() => btn.closest(".article").remove(), 300);
+                        // ✅ Remove unsaved article
                     } else {
                         alert(result.error || "Failed to unsave");
                     }
@@ -246,6 +291,7 @@
                 alert("Something went wrong. Try again.");
             }
         });
+
     </script>
 </body>
 
