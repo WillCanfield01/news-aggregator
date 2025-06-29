@@ -22,10 +22,13 @@ from sqlalchemy.pool import QueuePool
 from itsdangerous import URLSafeTimedSerializer
 from email.mime.text import MIMEText
 from postmarker.core import PostmarkClient
+from functools import wraps
 
 MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-postmark = PostmarkClient(server_token=os.getenv("POSTMARK_SERVER_TOKEN"))
+POSTMARK_TOKEN = os.getenv("POSTMARK_SERVER_TOKEN")
+if not POSTMARK_TOKEN:
+    raise RuntimeError("Missing POSTMARK_SERVER_TOKEN environment variable")
 
 app = Flask(__name__)
 uri = os.environ.get("DATABASE_URL", "")
@@ -420,6 +423,10 @@ def save_article():
     if SavedArticle.query.filter_by(user_id=current_user.id, article_id=article_id).first():
         return jsonify({"error": "Article already saved"}), 400
 
+    current_saved_count = SavedArticle.query.filter_by(user_id=current_user.id).count()
+    if current_saved_count >= 10:
+        return jsonify({"error": "Save limit reached (10 articles max). Please unsave one first."}), 403
+
     saved = SavedArticle(
         user_id=current_user.id,
         article_id=article_id,
@@ -445,6 +452,23 @@ def restricted():
 def alias_save_article():
     return save_article()
 
+@app.route("/unsave-article", methods=["POST"])
+@login_required
+def unsave_article():
+    data = request.get_json() or {}
+    article_id = data.get("id")
+
+    saved = SavedArticle.query.filter_by(user_id=current_user.id, article_id=article_id).first()
+    if not saved:
+        return jsonify({"error": "Article not found in saved list"}), 404
+
+    db.session.delete(saved)
+    db.session.commit()
+    return jsonify({"success": True, "message": "Article unsaved"})
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    return jsonify({"error": "Unauthorized"}), 401
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately

@@ -191,6 +191,10 @@
             cursor: pointer;
         }
 
+        .save-btn.saved {
+            background-color: #8a623f;
+        }
+
         #dropdown-menu {
             display: none;
             position: absolute;
@@ -407,7 +411,7 @@
           <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
           <p class="summary" id="summary-${article.id}">${article.summary}</p>
           <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-          <button class="save-btn" data-article-id="${article.id}">Save</button>
+          <button class="save-btn" data-article-id="${article.id}" data-saved="false">Save</button>
           <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
         `;
                 articlesDiv.appendChild(div);
@@ -490,40 +494,6 @@
                 });
 
         }
-        document.addEventListener("click", async function (e) {
-            if (e.target && e.target.classList.contains("save-btn")) {
-                const articleId = e.target.dataset.articleId;
-
-                // Check if user is signed in
-                const authRes = await fetch("/me", { credentials: "include" });
-                if (!authRes.ok) {
-                    showToast("Please sign in to save articles.");
-                    return;
-                }
-
-                const article = articles.find(a => a.id === articleId);
-                if (!article) {
-                    showToast("Article not found.");
-                    return;
-                }
-
-                const res = await fetch("/save", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    credentials: "include",
-                    body: JSON.stringify(article)
-                });
-
-                const data = await res.json();
-                if (data.success) {
-                    showToast("Article saved to your account.");
-                } else {
-                    showToast(data.message || "Failed to save article.");
-                }
-            }
-        });
 
         function showToast(message, duration = 3000) {
             const toast = document.getElementById("toast-container");
@@ -538,6 +508,77 @@
                 }, 300); // matches fade-out
             }, duration);
         }
+
+        function getArticleDataById(articleId) {
+            return articles.find(a => a.id === articleId);
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            document.body.addEventListener("click", async (e) => {
+                if (!e.target.classList.contains("save-btn")) return;
+
+                const btn = e.target;
+                const articleId = btn.dataset.articleId;
+                const isSaved = btn.dataset.saved === "true";
+
+                // Article data from somewhere — ideally store it in data-* attributes or a map
+                const articleData = getArticleDataById(articleId); // implement this per your app
+
+                try {
+                    if (isSaved) {
+                        const res = await fetch("/unsave-article", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({ id: articleId })
+                        });
+                        const result = await res.json();
+
+                        if (res.ok) {
+                            btn.textContent = "Save";
+                            btn.dataset.saved = "false";
+                            btn.classList.toggle("saved", false);
+                            showToast("🗑️ Article removed from saved list.");
+                        } else {
+                            showToast(result.error || "⚠️ Failed to unsave.");
+                        }
+                    } else {
+                        const res = await fetch("/save-article", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            credentials: "include", // important for auth cookies
+                            body: JSON.stringify(articleData)
+                        });
+
+                        if (res.status === 401) {
+                            showToast("🔐 Please log in to save articles.");
+                            return;
+                        } else if (res.status === 403) {
+                            showToast("📧 Please confirm your email to save articles.");
+                            return;
+                        }
+
+                        const result = await res.json();
+
+                        if (res.ok) {
+                            btn.textContent = "Unsave";
+                            btn.dataset.saved = "true";
+                            btn.classList.add("saved");
+                            showToast("✅ Article saved!");
+                        } else {
+                            showToast(result.error || "⚠️ Failed to save.");
+                        }
+                    }
+
+                } catch (err) {
+                    console.error(err);
+                    alert("Something went wrong. Try again.");
+                }
+            });
+        });
 
     </script>
 
