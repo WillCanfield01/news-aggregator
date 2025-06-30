@@ -23,6 +23,7 @@ from itsdangerous import URLSafeTimedSerializer
 from email.mime.text import MIMEText
 from postmarker.core import PostmarkClient
 from functools import wraps
+from datetime import datetime, timedelta
 
 MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -203,26 +204,45 @@ def fetch_feed(url, use_ai=False):
         print(f"Fetching {url}...")
         feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
         print(f"Found {len(feed.entries)} entries in {url}")
+        cutoff = datetime.utcnow() - timedelta(days=7)  # ⏱️ Show only past 7 days
         for index, entry in enumerate(feed.entries):
             title = entry.get("title", "No Title")
             desc = entry.get("summary", "")
             text = f"{title} {desc}"
             if not desc.strip():
                 continue
+
+            # ✅ Step 1: Try to parse publish date
+            published_parsed = entry.get("published_parsed")
+            if not published_parsed:
+                continue  # Skip articles with no date
+
+            pub_date = datetime(*published_parsed[:6])
+            if pub_date < cutoff:
+                continue  # Skip old articles
+
+            # ✅ Step 2: Predict category and summarize
             category = predict_category(text)
-            if category != "Unknown":
-                summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
-                parsed_url = urlparse(url)
-                source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
-                articles.append({
-                    "id": generate_article_id(entry.get("link", f"{url}-{index}")),
-                    "title": title,
-                    "summary": summary,
-                    "description": desc,
-                    "url": entry.get("link", "#"),
-                    "category": category,
-                    "source": source
-                })
+            if category == "Unknown":
+                continue
+
+            summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
+            parsed_url = urlparse(url)
+            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
+
+            articles.append({
+                "id": generate_article_id(entry.get("link", f"{url}-{index}")),
+                "title": title,
+                "summary": summary,
+                "description": desc,
+                "url": entry.get("link", "#"),
+                "category": category,
+                "source": source,
+                "published": pub_date.isoformat()  # 🕒 Save date for sorting
+            })
+        # Sort articles by most recent first
+        articles.sort(key=lambda x: x["published"], reverse=True)
+
         print(f"✓ Added {len(articles)} articles from {url}")
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
