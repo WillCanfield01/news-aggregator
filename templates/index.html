@@ -333,33 +333,6 @@
         let articles = [];
         let currentUser = null;
 
-        document.addEventListener("DOMContentLoaded", () => {
-            document.getElementById("loading").style.display = "block";
-
-            fetch('/news')
-                .then(response => response.json())
-                .then(data => {
-                    articles = data;
-                    displayArticles('All');
-                    document.getElementById("loading").style.display = "none";
-                })
-                .catch(error => {
-                    console.error('Error fetching news:', error);
-                    document.getElementById("loading").style.display = "none";
-                });
-
-            fetch("/me", { credentials: "include" })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.username) {
-                        currentUser = data.username;
-                        showProfileUI(data.username);
-                    } else {
-                        showAuthButtons();
-                    }
-                });
-        });
-
         function showProfileUI(username) {
             document.getElementById("auth-buttons").style.display = "none";
             document.getElementById("profile-dropdown").style.display = "block";
@@ -513,32 +486,64 @@
             return articles.find(a => a.id === articleId);
         }
 
+        function checkEmailConfirmationToast() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get("confirmed") === "true") {
+                showToast("✅ Your email has been confirmed!");
+                history.replaceState({}, document.title, "/");
+            }
+        }
+
         document.addEventListener("DOMContentLoaded", () => {
+            checkEmailConfirmationToast();
+
+            document.getElementById("loading").style.display = "block";
+
+            fetch('/news')
+                .then(response => response.json())
+                .then(data => {
+                    articles = data;
+                    displayArticles('All');
+                    document.getElementById("loading").style.display = "none";
+                })
+                .catch(error => {
+                    console.error('Error fetching news:', error);
+                    document.getElementById("loading").style.display = "none";
+                });
+
+            fetch("/me", { credentials: "include" })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.username) {
+                        currentUser = data.username;
+                        showProfileUI(data.username);
+                    } else {
+                        showAuthButtons();
+                    }
+                });
+
+            // Save/unsave logic
             document.body.addEventListener("click", async (e) => {
                 if (!e.target.classList.contains("save-btn")) return;
 
                 const btn = e.target;
                 const articleId = btn.dataset.articleId;
                 const isSaved = btn.dataset.saved === "true";
-
-                // Article data from somewhere — ideally store it in data-* attributes or a map
-                const articleData = getArticleDataById(articleId); // implement this per your app
+                const articleData = getArticleDataById(articleId);
 
                 try {
                     if (isSaved) {
                         const res = await fetch("/unsave-article", {
                             method: "POST",
-                            headers: {
-                                "Content-Type": "application/json"
-                            },
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ id: articleId })
                         });
-                        const result = await res.json();
 
+                        const result = await res.json();
                         if (res.ok) {
                             btn.textContent = "Save";
                             btn.dataset.saved = "false";
-                            btn.classList.toggle("saved", false);
+                            btn.classList.remove("saved");
                             showToast("🗑️ Article removed from saved list.");
                         } else {
                             showToast(result.error || "⚠️ Failed to unsave.");
@@ -546,12 +551,12 @@
                     } else {
                         const res = await fetch("/save-article", {
                             method: "POST",
-                            headers: {
-                                "Content-Type": "application/json"
-                            },
-                            credentials: "include", // important for auth cookies
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
                             body: JSON.stringify(articleData)
                         });
+
+                        const result = await res.json();
 
                         if (res.status === 401) {
                             showToast("🔐 Please log in to save articles.");
@@ -560,8 +565,6 @@
                             showToast("📧 Please confirm your email to save articles.");
                             return;
                         }
-
-                        const result = await res.json();
 
                         if (res.ok) {
                             btn.textContent = "Unsave";
@@ -572,12 +575,20 @@
                             showToast(result.error || "⚠️ Failed to save.");
                         }
                     }
-
                 } catch (err) {
                     console.error(err);
-                    alert("Something went wrong. Try again.");
+                    showToast("Something went wrong. Try again.");
                 }
             });
+            document.addEventListener("click", (e) => {
+                const dropdown = document.getElementById("dropdown-menu");
+                const button = document.querySelector(".avatar-button");
+
+                if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+                    dropdown.style.display = "none";
+                }
+            });
+
         });
 
     </script>

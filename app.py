@@ -409,7 +409,7 @@ def confirm_email(token):
     else:
         user.is_confirmed = True
         db.session.commit()
-        return redirect(url_for('home'))  # Or use render_template("email_confirmed.html")
+        return redirect("https://therealroundup.com/?confirmed=true")
 
 @app.route("/save-article", methods=["POST"])
 @login_required
