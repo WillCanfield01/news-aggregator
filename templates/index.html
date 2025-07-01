@@ -271,17 +271,6 @@
             padding: 0 5px;
         }
 
-        .bias-meter-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.75em;
-            color: #444;
-            width: 100%;
-            max-width: 200px;
-            margin: 5px auto 0;
-            user-select: none;
-        }
-
         /* Colors for each bias */
         .bias-left-far {
             background-color: #003366;
@@ -311,6 +300,15 @@
         .bias-unknown {
             background-color: #999999;
             /* gray */
+        }
+
+        .bias-label-center {
+            position: absolute;
+            top: 105%;
+            /* Push below the dot */
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
         }
 
         #dropdown-menu {
@@ -345,6 +343,12 @@
 </head>
 
 <body>
+    <div class="bias-scale">
+        <span class="bias-label-left">Left</span>
+        <div class="bias-dot center-dot"></div>
+        <span class="bias-label-center">Center</span>
+        <span class="bias-label-right">Right</span>
+    </div>
 
     <div class="header">
         <div class="header-inner">
@@ -675,47 +679,17 @@
             return 'bias-unknown';
         }
 
-        function getBiasPositionPercent(bias) {
-            if (!bias) return 50; // Center by default
-
-            const b = bias.toLowerCase();
-
-            if (b.includes("far left")) return 5;
-            if (b.includes("left")) return 25;
-            if (b.includes("center") || b.includes("neutral")) return 50;
-            if (b.includes("right")) return 75;
-            if (b.includes("far right")) return 95;
-
-            return 50; // unknown or unclassified bias
-        }
-
-        function getBiasShortLabel(bias) {
-            if (!bias) return 'U';
-            const b = bias.toLowerCase();
-            if (b.includes('far left')) return 'FL';
-            if (b.includes('left')) return 'L';
-            if (b.includes('center') || b.includes('neutral')) return 'C';
-            if (b.includes('right')) return 'R';
-            if (b.includes('far right')) return 'FR';
-            return 'U';
-        }
-
-        function sanitizeBias(bias) {
-            if (!bias || typeof bias !== "string") return "Unknown";
-            return bias;
-        }
-
-        function getBiasShortLabel(score) {
-            if (score <= 25) return "Left";
-            if (score >= 75) return "Right";
-            return "Center";
-        }
-
         function getBiasPositionPercent(score) {
             if (typeof score !== "number") return 50;
             return Math.min(100, Math.max(0, score));
         }
 
+        function getBiasShortLabel(score) {
+            if (typeof score !== "number") return "U";
+            if (score <= 25) return "L";     // Left
+            if (score >= 75) return "R";     // Right
+            return "C";                      // Center
+        }
 
         document.addEventListener("DOMContentLoaded", () => {
             checkEmailConfirmationToast();
