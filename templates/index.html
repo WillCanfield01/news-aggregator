@@ -343,12 +343,6 @@
 </head>
 
 <body>
-    <div class="bias-scale">
-        <span class="bias-label-left">Left</span>
-        <div class="bias-dot center-dot"></div>
-        <span class="bias-label-center">Center</span>
-        <span class="bias-label-right">Right</span>
-    </div>
 
     <div class="header">
         <div class="header-inner">
@@ -501,33 +495,31 @@
                 div.classList.add('article');
                 div.id = article.id;
 
-                const safeBias = sanitizeBias(article.bias);
-                const biasPercent = getBiasPositionPercent(safeBias);
-                const biasLabel = getBiasShortLabel(safeBias);
+                const biasPercent = getBiasPositionPercent(article.bias);
+                const biasLabel = getBiasShortLabel(article.bias);
 
                 div.innerHTML = `
-            <h2>${article.title}</h2>
-            <p class="category">${article.category}</p>
+        <h2>${article.title}</h2>
+        <p class="category">${article.category}</p>
 
-            <div class="bias-meter" aria-label="Political bias meter">
-                <div class="bias-meter-marker"
-                style="left: calc(${getBiasPositionPercent(article.bias)}% - 9px);" 
-                title="Bias: ${getBiasShortLabel(article.bias)} (${article.bias})">
-                ${getBiasShortLabel(article.bias)}
+        <div class="bias-meter" aria-label="Political bias meter">
+            <div class="bias-meter-marker"
+                style="left: calc(${biasPercent}% - 9px);"
+                title="Bias: ${biasLabel} (${article.bias})">
+                ${biasLabel}
             </div>
+        </div>
+        <div class="bias-meter-labels">
+            <span>Far Left</span>
+            <span>Far Right</span>
+        </div>
 
-            </div>
-            <div class="bias-meter-labels">
-                <span>Far Left</span>
-                <span>Far Right</span>
-            </div>
-
-            <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
-            <p class="summary" id="summary-${article.id}">${article.summary}</p>
-            <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-            <button class="save-btn" data-article-id="${article.id}" data-saved="false">Save</button>
-            <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
-        `;
+        <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
+        <p class="summary" id="summary-${article.id}">${article.summary}</p>
+        <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
+        <button class="save-btn" data-article-id="${article.id}" data-saved="false">Save</button>
+        <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
+    `;
 
                 articlesDiv.appendChild(div);
             });
@@ -709,20 +701,24 @@
                 });
 
             fetch("/me", { credentials: "include" })
-                .then(res => res.json())
+                .then(res => {
+                    if (!res.ok) throw new Error("Not logged in");
+                    return res.json();
+                })
                 .then(data => {
                     if (data.username) {
                         currentUser = data.username;
                         showProfileUI(data.username);
-
-                        // Show unconfirmed message if needed
                         if (data.is_confirmed === false) {
                             document.getElementById("unconfirmed-message").style.display = "block";
                         }
-                    } else {
-                        showAuthButtons();
                     }
+                })
+                .catch(() => {
+                    // fallback for logged-out state
+                    showAuthButtons();
                 });
+
 
             // Save/unsave logic
             document.body.addEventListener("click", async (e) => {
