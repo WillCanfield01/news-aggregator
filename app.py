@@ -188,6 +188,7 @@ def summarize_with_openai(text):
                 {"role": "user", "content": f"Summarize this article briefly and neutrally: {text}"}
             ],
             max_tokens=75,
+            trunc_text = text[:1200],
             temperature=0.5,
             timeout=30
         )
@@ -233,7 +234,7 @@ def fetch_feed(url, use_ai=False):
 
             # Political bias (internal fallback inside detect_political_bias)
             article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
-            bias       = detect_political_bias(desc, article_id=article_id, source=source)
+            bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
 
             articles.append({
                 "id":          article_id,
@@ -267,16 +268,16 @@ def detect_political_bias(text, article_id=None, source=None):
     fallback_bias = KNOWN_BIAS_BY_SOURCE.get((source or "").lower(), 50)
 
     prompt = (
-        "Rate the political bias of this news article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right). "
-        "Focus on the tone, topic, and implied political perspective. "
-        "Use the examples below to help guide your score:\n\n"
-        "- An article criticizing Republican tax policies = around 20\n"
-        "- An article praising liberal climate initiatives = around 25\n"
-        "- A neutral market report or factual event summary = around 50\n"
-        "- A report favoring conservative gun rights rhetoric = 80+\n"
-        "- A strongly pro-Trump or anti-immigration stance = 90–100\n\n"
-        "Return only a number between 0 and 100."
+    "Rate the political bias of this news article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right).\n\n"
+    "Consider language, tone, and framing of issues. Even subtle preferences matter. Avoid assuming neutrality.\n\n"
+    "Examples:\n"
+    "- Praise of renewable energy and criticism of oil companies = 25\n"
+    "- Defense of gun rights or religious liberty = 75\n"
+    "- Objective economic stats without interpretation = 50\n"
+    "- Article with loaded words like 'radical left' or 'MAGA patriots' = 10 or 95\n\n"
+    "Return ONLY a number from 0 to 100."
     )
+
 
     try:
         result = client.chat.completions.create(
@@ -292,10 +293,14 @@ def detect_political_bias(text, article_id=None, source=None):
         raw = result.choices[0].message.content.strip()
         bias_score = int(re.search(r'\d+', raw).group())
 
+        if 45 <= bias_score <= 55 and source in KNOWN_BIAS_BY_SOURCE:
+                    delta = (KNOWN_BIAS_BY_SOURCE[source] - 50) * 0.3  # Apply 30% nudge
+                    bias_score += int(delta)
         bias_score = max(0, min(100, bias_score))
         if article_id:
             bias_cache[article_id] = bias_score
         return bias_score
+        
     except Exception as e:
         print("Bias detection failed:", e)
         return fallback_bias
@@ -351,16 +356,15 @@ def send_confirmation_email(email, username, token):
         MessageStream="outbound"
     )
 
-def bias_bucket(score):
-    try:
-        score = int(score)
-    except:
-        return "Center"
-    if score < 40:
-        return "Left"
-    elif score > 60:
-        return "Right"
-    return "Center"
+def serialize_article(article):
+    return {
+        "id": article.article_id,
+        "title": article.title,
+        "url": article.url,
+        "summary": article.summary,
+        "source": article.source,
+        "category": article.category
+    }
 
 @app.route("/")
 def home():
@@ -407,7 +411,9 @@ def login():
     except Exception as db_error:
         print("Database error during login:", db_error)
         return jsonify({"error": "Database error. Please try again shortly."}), 503  # ✅ Move return inside except
-
+    if user and user.check_password(password):
+            if not user.is_confirmed:
+                return jsonify({"error": "Please confirm your email first."}), 403
     if user and user.check_password(password):
         login_user(user)
         return jsonify(success=True, username=user.username)
