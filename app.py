@@ -182,12 +182,12 @@ def simple_summarize(text, max_words=50):
 def summarize_with_openai(text):
     try:
         result = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.5-preview",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": f"Summarize this article briefly and neutrally: {text}"}
             ],
-            max_tokens=75,
+            max_tokens=100,
             trunc_text = text[:1200],
             temperature=0.5,
             timeout=30
@@ -281,13 +281,13 @@ def detect_political_bias(text, article_id=None, source=None):
 
     try:
         result = client.chat.completions.create(
-            model="gpt-4.1-nano",
+            model="gpt-4.5-preview",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"Article: {text}"}
             ],
-            max_tokens=5,
-            temperature=0,
+            max_tokens=10,
+            temperature=0.3,
             timeout=10
         )
         raw = result.choices[0].message.content.strip()
