@@ -202,60 +202,58 @@ def generate_article_id(link):
 def fetch_feed(url, use_ai=False):
     articles = []
     try:
-        print(f"Fetching {url}...")
+        print(f"Fetching {url}…")
         feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
-        print(f"Found {len(feed.entries)} entries in {url}")
-        cutoff = datetime.utcnow() - timedelta(days=7)  # ⏱️ Show only past 7 days
+        cutoff = datetime.utcnow() - timedelta(days=7)
+
         for index, entry in enumerate(feed.entries):
             title = entry.get("title", "No Title")
-            desc = entry.get("summary", "")
-            text = f"{title} {desc}"
+            desc  = entry.get("summary", "")
             if not desc.strip():
                 continue
 
-            # ✅ Step 1: Try to parse publish date
-            published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-            if not published_parsed:
-                continue  # Skip articles with no date
-
-            pub_date = datetime(*published_parsed[:6])
+            # Parse publish date (allow updated if published missing)
+            parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+            if not parsed_date:
+                continue
+            pub_date = datetime(*parsed_date[:6])
             if pub_date < cutoff:
-                continue  # Skip old articles
+                continue
 
-            # ✅ Step 2: Predict category and summarize
+            # Category & summary
+            text     = f"{title} {desc}"
             category = predict_category(text)
             if category == "Unknown":
                 category = "General"
-
             summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
-            # Optional: skip articles with 'Unknown' bias fallback (e.g., 50 if detection fails)
-            if bias is None:
-                bias = 50  # Default to center if failed
-                print(f"Bias fallback applied for {title[:50]}... → 50")
 
-
+            # Source normalization
             parsed_url = urlparse(url)
-            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
-            bias = detect_political_bias(desc, article_id=generate_article_id(entry.get("link", f"{url}-{index}")), source=source)
+            source     = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
 
+            # Political bias (internal fallback inside detect_political_bias)
+            article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
+            bias       = detect_political_bias(desc, article_id=article_id, source=source)
 
             articles.append({
-                "id": generate_article_id(entry.get("link", f"{url}-{index}")),
-                "title": title,
-                "summary": summary,
+                "id":          article_id,
+                "title":       title,
+                "summary":     summary,
                 "description": desc,
-                "url": entry.get("link", "#"),
-                "category": category,
-                "source": source,
-                "published": pub_date.isoformat(),  # 🕒 Save date for sorting
-                "bias": bias
+                "url":         entry.get("link", "#"),
+                "category":    category,
+                "source":      source,
+                "published":   pub_date.isoformat(),
+                "bias":        bias
             })
-        # Sort articles by most recent first
-        articles.sort(key=lambda x: x["published"], reverse=True)
 
+        # Sort newest first
+        articles.sort(key=lambda a: a["published"], reverse=True)
         print(f"✓ Added {len(articles)} articles from {url}")
+
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
+
     return articles
 
 def detect_political_bias(text, article_id=None, source=None):
