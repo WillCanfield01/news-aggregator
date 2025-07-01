@@ -59,7 +59,7 @@ app.config.update(
 )
 
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+bias_cache = {}
 CORS(app, supports_credentials=True)
 db = SQLAlchemy(app)
 
@@ -227,6 +227,9 @@ def fetch_feed(url, use_ai=False):
                 continue
 
             summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
+            bias = detect_political_bias(desc, article_id=generate_article_id(entry.get("link", f"{url}-{index}")))
+            if bias.lower() not in {"left", "center", "right"}:
+                bias = "Unknown"
             parsed_url = urlparse(url)
             source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
 
@@ -238,7 +241,8 @@ def fetch_feed(url, use_ai=False):
                 "url": entry.get("link", "#"),
                 "category": category,
                 "source": source,
-                "published": pub_date.isoformat()  # 🕒 Save date for sorting
+                "published": pub_date.isoformat(),  # 🕒 Save date for sorting
+                "bias": bias
             })
         # Sort articles by most recent first
         articles.sort(key=lambda x: x["published"], reverse=True)
@@ -247,6 +251,28 @@ def fetch_feed(url, use_ai=False):
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
     return articles
+
+def detect_political_bias(text, article_id=None):
+    if article_id and article_id in bias_cache:
+        return bias_cache[article_id]
+    try:
+        result = client.chat.completions.create(
+            model="gpt-4.1-nano",
+            messages=[
+                {"role": "system", "content": "You are a political bias detector. You rate text as either 'Left', 'Center', or 'Right' based on political bias."},
+                {"role": "user", "content": f"Rate the political bias of the following article: {text}"}
+            ],
+            max_tokens=10,
+            temperature=0,
+            timeout=10
+        )
+        bias = result.choices[0].message.content.strip()
+        if article_id:
+            bias_cache[article_id] = bias
+        return bias
+    except Exception as e:
+        print("Bias detection failed:", e)
+        return "Unknown"
 
 def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles, new_articles_last_refresh
@@ -501,6 +527,33 @@ def saved_articles():
         "category": article.category
     } for article in saved]
     return jsonify(serialized)
+
+@app.route("/news/by-bias/<bias>")
+def news_by_bias(bias):
+    bias = bias.strip().capitalize()
+    if bias not in {"Left", "Center", "Right"}:
+        return jsonify({"error": "Invalid bias value"}), 400
+    filtered = [a for a in cached_articles if a["bias"] == bias]
+    return jsonify(filtered)
+
+@app.route("/news/by-category/<category>")
+def news_by_category(category):
+    normalized = normalize_category(category)
+    filtered = [a for a in cached_articles if a["category"] == normalized]
+    return jsonify(filtered)
+
+@app.route("/unconfirmed")
+def unconfirmed_notice():
+    return render_template("unconfirmed.html"), 403
+
+@app.route("/resend-confirmation", methods=["POST"])
+@login_required
+def resend_confirmation():
+    if current_user.is_confirmed:
+        return jsonify({"message": "Account already confirmed."}), 200
+    token = generate_confirmation_token(current_user.email)
+    send_confirmation_email(current_user.email, current_user.username, token)
+    return jsonify({"message": "Confirmation email resent."}), 200
 
 @login_manager.unauthorized_handler
 def unauthorized():

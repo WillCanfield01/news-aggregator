@@ -494,6 +494,34 @@
             }
         }
 
+        function resendConfirmationEmail() {
+            fetch("/resend-confirmation", {
+                method: "POST",
+                credentials: "include"
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast("📧 Confirmation email sent!");
+                    } else {
+                        showToast("⚠️ Failed to resend email: " + (data.message || "Unknown error"));
+                    }
+                })
+                .catch(err => {
+                    console.error("Resend error:", err);
+                    showToast("Something went wrong. Try again.");
+                });
+        }
+
+        function checkUnconfirmedToast() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get("unconfirmed") === "true") {
+                document.getElementById("unconfirmed-message").style.display = "block";
+                showToast("⚠️ Please confirm your email to unlock features.");
+                history.replaceState({}, document.title, "/");
+            }
+        }
+
         document.addEventListener("DOMContentLoaded", () => {
             checkEmailConfirmationToast();
 
@@ -517,6 +545,11 @@
                     if (data.username) {
                         currentUser = data.username;
                         showProfileUI(data.username);
+
+                        // Show unconfirmed message if needed
+                        if (data.is_confirmed === false) {
+                            document.getElementById("unconfirmed-message").style.display = "block";
+                        }
                     } else {
                         showAuthButtons();
                     }
@@ -627,6 +660,13 @@
             <button type="button" onclick="closeSignupModal()"
                 style="background-color: gray; margin-left: 10px;">Cancel</button>
         </form>
+    </div>
+
+    <div id="unconfirmed-message"
+        style="display: none; background-color: #fff8dc; color: #23496a; border: 1px solid #23496a; padding: 20px; margin: 20px auto; border-radius: 8px; width: 80%; max-width: 600px; text-align: center;">
+        <h2>📩 Please Confirm Your Email</h2>
+        <p>Before saving articles or accessing full features, confirm your email address.</p>
+        <button onclick="resendConfirmationEmail()">Resend Confirmation Email</button>
     </div>
 
     <!-- Toast Notification -->
