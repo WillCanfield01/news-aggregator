@@ -230,9 +230,8 @@ def fetch_feed(url, use_ai=False):
             bias = detect_political_bias(desc, article_id=generate_article_id(entry.get("link", f"{url}-{index}")))
 
             # Optional: skip articles with 'Unknown' bias fallback (e.g., 50 if detection fails)
-            if bias is None or not isinstance(bias, int):
-                if bias == 50:
-                    continue  # Skip if we're unsure (or log it)
+            if bias is None or (isinstance(bias, int) and bias == 50):
+                continue
 
             parsed_url = urlparse(url)
             source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
@@ -545,12 +544,24 @@ def saved_articles():
     } for article in saved]
     return jsonify(serialized)
 
+def bias_bucket(score):
+    if score < 40:
+        return "Left"
+    elif score > 60:
+        return "Right"
+    else:
+        return "Center"
+
 @app.route("/news/by-bias/<bias>")
 def news_by_bias(bias):
     bias = bias.strip().capitalize()
     if bias not in {"Left", "Center", "Right"}:
         return jsonify({"error": "Invalid bias value"}), 400
-    filtered = [a for a in cached_articles if a["bias"] == bias]
+
+    filtered = [
+        a for a in cached_articles
+        if bias_bucket(a["bias"]) == bias
+    ]
     return jsonify(filtered)
 
 @app.route("/news/by-category/<category>")
