@@ -506,11 +506,12 @@
             <p class="category">${article.category}</p>
 
             <div class="bias-meter" aria-label="Political bias meter">
-                <div class="bias-meter-marker" 
-                    style="left: calc(${biasPercent}% - 9px);" 
-                    title="Bias: ${safeBias}">
-                    ${biasLabel}
-                </div>
+                <div class="bias-meter-marker"
+                style="left: calc(${getBiasPositionPercent(article.bias)}% - 9px);" 
+                title="Bias: ${getBiasShortLabel(article.bias)} (${article.bias})">
+                ${getBiasShortLabel(article.bias)}
+            </div>
+
             </div>
             <div class="bias-meter-labels">
                 <span>Far Left</span>
@@ -703,6 +704,18 @@
             if (!bias || typeof bias !== "string") return "Unknown";
             return bias;
         }
+
+        function getBiasShortLabel(score) {
+            if (score <= 25) return "Left";
+            if (score >= 75) return "Right";
+            return "Center";
+        }
+
+        function getBiasPositionPercent(score) {
+            if (typeof score !== "number") return 50;
+            return Math.min(100, Math.max(0, score));
+        }
+
 
         document.addEventListener("DOMContentLoaded", () => {
             checkEmailConfirmationToast();

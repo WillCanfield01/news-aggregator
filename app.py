@@ -255,24 +255,37 @@ def fetch_feed(url, use_ai=False):
 def detect_political_bias(text, article_id=None):
     if article_id and article_id in bias_cache:
         return bias_cache[article_id]
+
     try:
         result = client.chat.completions.create(
             model="gpt-4.1-nano",
             messages=[
-                {"role": "system", "content": "You are a political bias detector. You rate text as either 'Left', 'Center', or 'Right' based on political bias."},
-                {"role": "user", "content": f"Rate the political bias of the following article: {text}"}
+                {
+                    "role": "system",
+                    "content": "You're a political bias detector. Rate the bias of the article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right). Only return a number."
+                },
+                {
+                    "role": "user",
+                    "content": f"Rate the political bias of this article: {text}"
+                }
             ],
-            max_tokens=10,
+            max_tokens=5,
             temperature=0,
             timeout=10
         )
-        bias = result.choices[0].message.content.strip()
+        raw = result.choices[0].message.content.strip()
+        bias_score = int(re.search(r'\d+', raw).group())
+
+        # Clamp to 0–100 range just in case
+        bias_score = max(0, min(100, bias_score))
+
+        # Cache and return
         if article_id:
-            bias_cache[article_id] = bias
-        return bias
+            bias_cache[article_id] = bias_score
+        return bias_score
     except Exception as e:
         print("Bias detection failed:", e)
-        return "Unknown"
+        return 50  # Default to Center
 
 def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles, new_articles_last_refresh
