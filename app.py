@@ -181,14 +181,14 @@ def simple_summarize(text, max_words=50):
 
 def summarize_with_openai(text):
     try:
+        text = text[:1200]  # truncate manually
         result = client.chat.completions.create(
-            model="gpt-4.5-preview",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": f"Summarize this article briefly and neutrally: {text}"}
             ],
             max_tokens=100,
-            trunc_text = text[:1200],
             temperature=0.5,
             timeout=30
         )
@@ -196,6 +196,7 @@ def summarize_with_openai(text):
     except Exception as e:
         print("OpenAI summarization failed:", e)
         return "Summary not available."
+
 
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
@@ -281,7 +282,7 @@ def detect_political_bias(text, article_id=None, source=None):
 
     try:
         result = client.chat.completions.create(
-            model="gpt-4.5-preview",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"Article: {text}"}
