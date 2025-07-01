@@ -228,8 +228,12 @@ def fetch_feed(url, use_ai=False):
 
             summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
             bias = detect_political_bias(desc, article_id=generate_article_id(entry.get("link", f"{url}-{index}")))
-            if bias.lower() not in {"left", "center", "right"}:
-                bias = "Unknown"
+
+            # Optional: skip articles with 'Unknown' bias fallback (e.g., 50 if detection fails)
+            if bias is None or not isinstance(bias, int):
+                if bias == 50:
+                    continue  # Skip if we're unsure (or log it)
+
             parsed_url = urlparse(url)
             source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
 
