@@ -181,22 +181,36 @@ def simple_summarize(text, max_words=50):
 
 def summarize_with_openai(text):
     try:
-        text = text[:1200]  # truncate manually
+        # Limit to around 3,000 tokens worth of text (OpenAI estimates 4 tokens per word avg)
+        text = text[:12000]  # roughly 3000 tokens (~9000-12000 chars)
         result = client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": f"Summarize this article briefly and neutrally: {text}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a news summarization assistant. "
+                        "Your task is to generate a concise, fact-based summary of a full news article. "
+                        "Avoid exaggeration, emotional language, or political bias. "
+                        "Remain strictly neutral, objective, and accurate. Do not speculate or editorialize."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Summarize the following news article in 2-3 sentences. "
+                        f"Focus only on the main facts and events without inserting opinion or bias:\n\n{text}"
+                    )
+                }
             ],
-            max_tokens=100,
-            temperature=0.5,
+            max_tokens=180,  # Enough for 2–3 sentence summary
+            temperature=0.3,  # Lower temperature for more factual output
             timeout=30
         )
         return result.choices[0].message.content.strip()
     except Exception as e:
         print("OpenAI summarization failed:", e)
         return "Summary not available."
-
 
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
