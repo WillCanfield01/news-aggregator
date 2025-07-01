@@ -25,6 +25,7 @@ from postmarker.core import PostmarkClient
 from functools import wraps
 from datetime import datetime, timedelta
 
+
 MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 POSTMARK_TOKEN = os.getenv("POSTMARK_SERVER_TOKEN")
@@ -213,7 +214,7 @@ def fetch_feed(url, use_ai=False):
                 continue
 
             # ✅ Step 1: Try to parse publish date
-            published_parsed = entry.get("published_parsed")
+            published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
             if not published_parsed:
                 continue  # Skip articles with no date
 
@@ -224,17 +225,19 @@ def fetch_feed(url, use_ai=False):
             # ✅ Step 2: Predict category and summarize
             category = predict_category(text)
             if category == "Unknown":
-                continue
+                category = "General"
 
             summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
-            bias = detect_political_bias(desc, article_id=generate_article_id(entry.get("link", f"{url}-{index}")))
-
             # Optional: skip articles with 'Unknown' bias fallback (e.g., 50 if detection fails)
-            if bias is None or (isinstance(bias, int) and bias == 50):
-                continue
+            if bias is None:
+                bias = 50  # Default to center if failed
+                print(f"Bias fallback applied for {title[:50]}... → 50")
+
 
             parsed_url = urlparse(url)
-            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].capitalize()
+            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+            bias = detect_political_bias(desc, article_id=generate_article_id(entry.get("link", f"{url}-{index}")), source=source)
+
 
             articles.append({
                 "id": generate_article_id(entry.get("link", f"{url}-{index}")),
@@ -255,22 +258,34 @@ def fetch_feed(url, use_ai=False):
         print(f"⚠️ Failed to fetch {url}: {e}")
     return articles
 
-def detect_political_bias(text, article_id=None):
+def detect_political_bias(text, article_id=None, source=None):
     if article_id and article_id in bias_cache:
         return bias_cache[article_id]
+
+    KNOWN_BIAS_BY_SOURCE = {
+        "guardian": 20, "cnn": 35, "foxnews": 80, "nyt": 30,
+        "reuters": 50, "npr": 45, "breitbart": 95,
+    }
+    fallback_bias = KNOWN_BIAS_BY_SOURCE.get((source or "").lower(), 50)
+
+    prompt = (
+        "Rate the political bias of this news article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right). "
+        "Focus on the tone, topic, and implied political perspective. "
+        "Use the examples below to help guide your score:\n\n"
+        "- An article criticizing Republican tax policies = around 20\n"
+        "- An article praising liberal climate initiatives = around 25\n"
+        "- A neutral market report or factual event summary = around 50\n"
+        "- A report favoring conservative gun rights rhetoric = 80+\n"
+        "- A strongly pro-Trump or anti-immigration stance = 90–100\n\n"
+        "Return only a number between 0 and 100."
+    )
 
     try:
         result = client.chat.completions.create(
             model="gpt-4.1-nano",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You're a political bias detector. Rate the bias of the article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right). Only return a number."
-                },
-                {
-                    "role": "user",
-                    "content": f"Rate the political bias of this article: {text}"
-                }
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Article: {text}"}
             ],
             max_tokens=5,
             temperature=0,
@@ -279,16 +294,13 @@ def detect_political_bias(text, article_id=None):
         raw = result.choices[0].message.content.strip()
         bias_score = int(re.search(r'\d+', raw).group())
 
-        # Clamp to 0–100 range just in case
         bias_score = max(0, min(100, bias_score))
-
-        # Cache and return
         if article_id:
             bias_cache[article_id] = bias_score
         return bias_score
     except Exception as e:
         print("Bias detection failed:", e)
-        return 50  # Default to Center
+        return fallback_bias
 
 def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles, new_articles_last_refresh
@@ -340,6 +352,17 @@ def send_confirmation_email(email, username, token):
         ''',
         MessageStream="outbound"
     )
+
+def bias_bucket(score):
+    try:
+        score = int(score)
+    except:
+        return "Center"
+    if score < 40:
+        return "Left"
+    elif score > 60:
+        return "Right"
+    return "Center"
 
 @app.route("/")
 def home():
