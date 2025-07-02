@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 import smtplib
 import openai
+import requests
 from html import unescape
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from flask_cors import CORS
@@ -73,6 +74,7 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(80), unique=True)
     password_hash = db.Column(db.String(200))
     saved_articles = db.relationship("SavedArticle", backref="user", lazy=True)
+    zipcode = db.Column(db.String(10), nullable=True)
 
     # in your User model
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -120,6 +122,22 @@ RSS_FEED_BATCHES = [
         "https://www.espn.com/espn/rss/news",
     ]
 ]
+
+ZIP_RSS_MAP = {
+    "10001": ["https://www.nydailynews.com/arcio/rss/category/news/?query=display_date:[now-7d+TO+now]"],
+    "94105": ["https://www.sfchronicle.com/default/feed/local-news"],
+    "90001": ["https://www.latimes.com/local/rss2.0.xml"],
+}
+
+CITY_RSS_MAP = {
+    "Boise, ID": ["https://www.idahopress.com/rss/news"],
+    "New York, NY": ["https://www.nydailynews.com/arcio/rss/category/news/?query=display_date:[now-7d+TO+now]"],
+    "Los Angeles, CA": ["https://www.latimes.com/local/rss2.0.xml"],
+    "San Francisco, CA": ["https://www.sfchronicle.com/default/feed/local-news"],
+    "Chicago, IL": ["https://www.chicagotribune.com/arcio/rss/category/news/?query=display_date:[now-7d+TO+now]"]
+}
+
+DEFAULT_LOCAL_FEED = ["https://news.google.com/rss/search?q=local+news&hl=en-US&gl=US&ceid=US:en"]
 
 current_batch_index = 0
 
@@ -391,15 +409,60 @@ def extract_full_article_text(url):
         print(f"⚠️ Failed to extract article text: {e}")
         return ""
 
+def resolve_zip_to_city(zipcode):
+    try:
+        response = requests.get(f"http://api.zippopotam.us/us/{zipcode}", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            city = data["places"][0]["place name"]
+            state = data["places"][0]["state abbreviation"]
+            return f"{city}, {state}"
+    except Exception as e:
+        print(f"Geolocation failed for zip {zipcode}: {e}")
+    return None
+
+zip_cache = {}
+
+def resolve_zip_to_city_cached(zipcode):
+    if zipcode in zip_cache:
+        return zip_cache[zipcode]
+    city = resolve_zip_to_city(zipcode)
+    if city:
+        zip_cache[zipcode] = city
+    return city
+
+local_feed_cache = {}
+
+def fetch_city_articles(city):
+    if city in local_feed_cache and (datetime.utcnow() - local_feed_cache[city]["time"]).seconds < 600:
+        return local_feed_cache[city]["data"]
+
+    local_articles = []
+    for url in CITY_RSS_MAP[city]:
+        local_articles += fetch_feed(url, use_ai=False)
+
+    local_feed_cache[city] = {"data": local_articles, "time": datetime.utcnow()}
+    return local_articles
+
 @app.route("/")
 def home():
     return render_template("index.html")
 
 @app.route("/news")
 def get_news():
-    response = jsonify(cached_articles)
-    response.headers['Cache-Control'] = 'no-store'
-    return response
+    articles = cached_articles
+    if current_user.is_authenticated and current_user.zipcode:
+        city = resolve_zip_to_city(current_user.zipcode)
+        if city:
+            if city in CITY_RSS_MAP:
+                local_articles = fetch_city_articles(city)
+            else:
+                local_articles = [fetch_feed(url) for url in DEFAULT_LOCAL_FEED]
+            for url in CITY_RSS_MAP[city]:
+                local_articles += fetch_feed(url, use_ai=False)
+            articles = local_articles + articles
+            articles = articles[:MAX_CACHED_ARTICLES]
+    return jsonify(articles)
 
 @app.route("/regenerate-summary/<article_id>")
 def regenerate_summary(article_id):
@@ -490,6 +553,8 @@ def signup():
     username = data.get("username", "").strip().lower()
     password = data.get("password", "").strip()
     email = data.get("email", "").strip().lower()
+    zipcode = data.get("zipcode", "").strip()
+    user = User(username=username, email=email, zipcode=zipcode)
 
     if not username or not password or not email:
         return jsonify({"error": "All fields are required"}), 400
@@ -500,7 +565,7 @@ def signup():
         return jsonify({"error": "Email already registered"}), 400
 
     try:
-        user = User(username=username, email=email)
+        user = User(username=username, email=email, zipcode=zipcode)
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
@@ -639,6 +704,15 @@ def resend_confirmation():
     token = generate_confirmation_token(current_user.email)
     send_confirmation_email(current_user.email, current_user.username, token)
     return jsonify({"message": "Confirmation email resent."}), 200
+
+@app.route("/news/local")
+@login_required
+def local_news():
+    city = resolve_zip_to_city(current_user.zipcode)
+    if city and city in CITY_RSS_MAP:
+        local_articles = fetch_city_articles(city)
+        return jsonify(local_articles)
+    return jsonify([])  # or fallback default
 
 @login_manager.unauthorized_handler
 def unauthorized():
