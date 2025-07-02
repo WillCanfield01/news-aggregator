@@ -437,12 +437,18 @@ def fetch_city_articles(city):
     if city in local_feed_cache and (datetime.utcnow() - local_feed_cache[city]["time"]).seconds < 600:
         return local_feed_cache[city]["data"]
 
+    # Use manual sources if defined
+    urls = CITY_RSS_MAP.get(city)
+    if not urls:
+        urls = [build_google_local_rss(city)]
+
     local_articles = []
-    for url in CITY_RSS_MAP[city]:
+    for url in urls:
         local_articles += fetch_feed(url, use_ai=False)
 
     local_feed_cache[city] = {"data": local_articles, "time": datetime.utcnow()}
     return local_articles
+
 
 @app.route("/")
 def home():
@@ -454,14 +460,9 @@ def get_news():
     if current_user.is_authenticated and current_user.zipcode:
         city = resolve_zip_to_city(current_user.zipcode)
         if city:
-            if city in CITY_RSS_MAP:
-                local_articles = fetch_city_articles(city)
-            else:
-                local_articles = [fetch_feed(url) for url in DEFAULT_LOCAL_FEED]
-            for url in CITY_RSS_MAP[city]:
-                local_articles += fetch_feed(url, use_ai=False)
-            articles = local_articles + articles
-            articles = articles[:MAX_CACHED_ARTICLES]
+            local_articles = fetch_city_articles(city)
+        articles = local_articles + articles
+        articles = articles[:MAX_CACHED_ARTICLES]
     return jsonify(articles)
 
 @app.route("/regenerate-summary/<article_id>")
@@ -505,13 +506,11 @@ def login():
         print("Database error during login:", db_error)
         return jsonify({"error": "Database error. Please try again shortly."}), 503  # ✅ Move return inside except
     if user and user.check_password(password):
-            if not user.is_confirmed:
-                return jsonify({"error": "Please confirm your email first."}), 403
-    if user and user.check_password(password):
+        if not user.is_confirmed:
+            return jsonify({"error": "Please confirm your email first."}), 403
         login_user(user)
-        return jsonify(success=True, username=user.username)
-    else:
-        return jsonify(success=False, message="Invalid credentials"), 401
+        return jsonify({"success": True})
+    return jsonify({"error": "Invalid credentials"}), 401
 
 @app.route("/logout", methods=["POST"])
 @login_required
@@ -579,6 +578,10 @@ def signup():
         print("Signup error:", e)
         db.session.rollback()
         return jsonify({"error": "Signup failed. Please try again."}), 500
+    
+def build_google_local_rss(city_state):
+    encoded = quote_plus(f"{city_state} local news")
+    return f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
     
 @app.route("/confirm/<token>")
 def confirm_email(token):
