@@ -24,7 +24,7 @@ from email.mime.text import MIMEText
 from postmarker.core import PostmarkClient
 from functools import wraps
 from datetime import datetime, timedelta
-
+from newspaper import Article
 
 MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -381,6 +381,16 @@ def serialize_article(article):
         "category": article.category
     }
 
+def extract_full_article_text(url):
+    try:
+        article = Article(url)
+        article.download()
+        article.parse()
+        return article.text
+    except Exception as e:
+        print(f"⚠️ Failed to extract article text: {e}")
+        return ""
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -395,7 +405,12 @@ def get_news():
 def regenerate_summary(article_id):
     article = next((a for a in cached_articles if a["id"] == article_id), None)
     if article:
-        article["summary"] = summarize_with_openai(article["description"])
+        full_text = extract_full_article_text(article["url"])
+        if not full_text:
+            print(f"🟡 Falling back to RSS description for {article['url']}")
+            full_text = article["description"]
+
+        article["summary"] = summarize_with_openai(full_text)
         return jsonify({"summary": article["summary"]})
     return jsonify({"error": "Article not found"}), 404
 
