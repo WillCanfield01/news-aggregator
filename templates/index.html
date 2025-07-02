@@ -536,7 +536,29 @@
         }
 
         function filterCategory(category) {
-            displayArticles(category);
+            const header = document.getElementById('dynamic-header');
+            header.innerHTML = '';
+            const articlesDiv = document.getElementById('articles');
+            articlesDiv.innerHTML = '';
+
+            if (category === 'Local') {
+                document.getElementById("loading").style.display = "block";
+
+                fetch('/news/local')
+                    .then(response => response.json())
+                    .then(localArticles => {
+                        articles = localArticles;
+                        displayArticles('All');
+                        document.getElementById("loading").style.display = "none";
+                    })
+                    .catch(error => {
+                        console.error("Error fetching local news:", error);
+                        articlesDiv.innerHTML = '<p>⚠️ Failed to load local news.</p>';
+                        document.getElementById("loading").style.display = "none";
+                    });
+            } else {
+                displayArticles(category);
+            }
         }
 
         function regenerateSummary(articleId) {
