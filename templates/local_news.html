@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
         rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 </head>
 
 <body>
@@ -143,6 +144,16 @@
 
         document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("loading").style.display = "block";
+            fetch("/me", { credentials: "include" })
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    if (data?.username) {
+                        document.getElementById("username-display").textContent = data.username;
+                    }
+                })
+                .catch(() => {
+                    window.location.href = "/";
+                });
 
             fetch("/news/local", { credentials: "include" })
                 .then(res => res.json())
@@ -230,7 +241,7 @@
             border: 1px solid #ccc;
             padding: 10px;
             border-radius: 5px;
-            z-index: 100;
+            z-index: 500;
             text-align: left;
         }
 
