@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Local News – The Roundup</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+    <div class="header">
+        <div class="header-inner">
+            <div style="width: 100px;"></div>
+            <h1 style="flex-grow: 1; text-align: center;">📍 Local News</h1>
+            <div id="profile-dropdown">
+                <button onclick="toggleDropdown()" class="avatar-button">👤</button>
+                <div id="dropdown-menu">
+                    <p id="username-display">User</p>
+                    <button onclick="window.location.href='/account'">My Account</button>
+                    <a href="/"><button style="margin-bottom: 10px;">Home</button></a>
+                    <button onclick="logout()">Logout</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✅ Local Category Filter -->
+    <div id="filter">
+        <select id="local-category-select" style="padding: 10px; font-size: 1em; border-radius: 5px;">
+            <option value="All">All</option>
+            <option value="Finance">Finance</option>
+            <option value="Sports">Sports</option>
+            <option value="Politics">Politics</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Health">Health</option>
+            <option value="Technology">Technology</option>
+        </select>
+    </div>
+
+    <div id="loading" style="display: none;">Loading local news...</div>
+    <h2 id="dynamic-header" style="margin-top: 20px;"></h2>
+    <div id="articles"></div>
+
+
+    <!-- ✅ Toast Notification -->
+    <div id="toast-container"></div>
+
+    <!-- ✅ Main JS -->
+    <script>
+        let localArticles = [];
+
+        function getBiasPositionPercent(score) {
+            if (typeof score !== "number") return 50;
+            return Math.min(100, Math.max(0, score));
+        }
+
+        function getBiasShortLabel(score) {
+            if (typeof score !== "number") return "U";
+            return score <= 25 ? "L" : score >= 75 ? "R" : "C";
+        }
+
+        function toggleDropdown() {
+            const menu = document.getElementById("dropdown-menu");
+            menu.style.display = menu.style.display === "block" ? "none" : "block";
+        }
+
+        function logout() {
+            fetch("/logout", { method: "POST", credentials: "include" })
+                .then(() => {
+                    window.location.href = "/";
+                });
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById("toast-container");
+            toast.textContent = message;
+            toast.style.display = "block";
+            toast.style.opacity = "1";
+
+            setTimeout(() => {
+                toast.style.opacity = "0";
+                setTimeout(() => {
+                    toast.style.display = "none";
+                }, 300);
+            }, 3000);
+        }
+
+        function displayArticles(category) {
+            const articlesDiv = document.getElementById("articles");
+            const header = document.getElementById("dynamic-header");
+            articlesDiv.innerHTML = '';
+            header.textContent = '';
+
+            const filtered = category === 'All'
+                ? localArticles
+                : localArticles.filter(a => a.category.toLowerCase() === category.toLowerCase());
+
+            if (filtered.length && filtered[0].zip_code) {
+                header.textContent = `Local news for ${filtered[0].city || filtered[0].zip_code}`;
+            }
+
+            if (filtered.length === 0) {
+                articlesDiv.innerHTML = "<p>No local news found in this category.</p>";
+                return;
+            }
+
+            filtered.forEach(article => {
+                const div = document.createElement("div");
+                div.className = "article";
+                div.id = article.id;
+
+                const biasPercent = getBiasPositionPercent(article.bias);
+                const biasLabel = getBiasShortLabel(article.bias);
+
+                div.innerHTML = `
+                    <h2>${article.title}</h2>
+                    <p class="category">${article.category} - ${article.zip_code}</p>
+
+                    <div class="bias-meter">
+                        <div class="bias-meter-marker" 
+                            style="left: calc(${biasPercent}% - 9px);" 
+                            title="Bias: ${biasLabel} (${article.bias})">
+                            ${biasLabel}
+                        </div>
+                    </div>
+                    <div class="bias-meter-labels">
+                        <span>Far Left</span>
+                        <span>Far Right</span>
+                    </div>
+
+                    <p class="source">Source: ${article.source}</p>
+                    <p class="summary">${article.summary}</p>
+                    <a href="${article.url}" target="_blank">Read more</a>
+                `;
+
+                articlesDiv.appendChild(div);
+            });
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            document.getElementById("loading").style.display = "block";
+
+            fetch("/news/local", { credentials: "include" })
+                .then(res => res.json())
+                .then(data => {
+                    localArticles = data;
+                    displayArticles("All");
+                    document.getElementById("loading").style.display = "none";
+                })
+                .catch(err => {
+                    console.error("Failed to fetch local news:", err);
+                    showToast("⚠️ Could not load local news.");
+                    document.getElementById("loading").style.display = "none";
+                });
+
+            document.getElementById("local-category-select").addEventListener("change", (e) => {
+                displayArticles(e.target.value);
+            });
+
+            document.addEventListener("click", (e) => {
+                const dropdown = document.getElementById("dropdown-menu");
+                const button = document.querySelector(".avatar-button");
+                if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+                    dropdown.style.display = "none";
+                }
+            });
+        });
+    </script>
+
+    <!-- ✅ Bias styles + Layout -->
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f9f5e9;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header {
+            margin-bottom: 20px;
+        }
+
+        .header-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        #articles {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .article {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        @media (max-width: 768px) {
+            #articles {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .avatar-button {
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            background-color: #23496a;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        #dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 50px;
+            right: 10px;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            text-align: left;
+        }
+
+        .bias-meter {
+            position: relative;
+            width: 100%;
+            max-width: 200px;
+            height: 20px;
+            background: linear-gradient(to right,
+                    #003366 0%, #3399ff 25%, #4caf50 50%, #ff9966 75%, #cc3300 100%);
+            border-radius: 10px;
+            margin: 10px auto 10px;
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .bias-meter-marker {
+            position: absolute;
+            top: -8px;
+            width: 18px;
+            height: 18px;
+            background: #222;
+            border-radius: 50%;
+            border: 3px solid white;
+            cursor: default;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+
+        .bias-meter-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8em;
+            color: #444;
+            max-width: 200px;
+            margin: 0 auto;
+            user-select: none;
+        }
+
+        #toast-container {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #23496a;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 5px;
+            font-size: 1em;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            transition: opacity 0.3s ease;
+        }
+    </style>
+</body>
+
+</html>

@@ -10,7 +10,7 @@ import smtplib
 import openai
 import requests
 from html import unescape
-from flask import Flask, jsonify, render_template, request, session, redirect, url_for
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for, flash
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from concurrent.futures import ThreadPoolExecutor
@@ -715,7 +715,15 @@ def local_news():
     if city and city in CITY_RSS_MAP:
         local_articles = fetch_city_articles(city)
         return jsonify(local_articles)
-    return jsonify([])  # or fallback default
+    return jsonify(fetch_feed(DEFAULT_LOCAL_FEED[0]))  # ⬅️ Optional fallback
+
+@app.route("/local-news")
+@login_required
+def local_news_page():
+    if not current_user.is_authenticated:
+        flash("Please log in to view local news.", "warning")
+        return redirect(url_for("login"))  # Or home page with modal
+    return render_template("local_news.html")
 
 @login_manager.unauthorized_handler
 def unauthorized():
