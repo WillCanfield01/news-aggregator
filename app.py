@@ -164,11 +164,11 @@ def get_model_components():
     if _model is None:
         with _model_lock:
             if _model is None:
-                _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
-                _model = AutoModelForSequenceClassification.from_pretrained(
-                    "cardiffnlp/tweet-topic-21-multi"
-                ).to("cpu").eval()
-                config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
+                is_render = os.getenv("RENDER", "false").lower() == "true"
+                model_path = "cardiffnlp/tweet-topic-21-multi" if is_render else "./models/cardiffnlp/tweet-topic-21-multi"
+                _tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=not is_render)
+                _model = AutoModelForSequenceClassification.from_pretrained(model_path, local_files_only=not is_render).to("cpu").eval()
+                config = AutoConfig.from_pretrained(model_path, local_files_only=not is_render)
                 _model_labels = list(config.id2label.values())
     return _model, _tokenizer, _model_labels
 
