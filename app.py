@@ -729,7 +729,7 @@ def local_news_page():
     # If user is logged in but has no zipcode saved
     if not hasattr(current_user, "zipcode") or not current_user.zipcode:
         print("No zip code found for user.")
-        return redirect(url_for("account"))  # or return a friendly page suggesting they add one
+        return redirect(url_for("account_page"))  # ✅ works
 
     print("Fetching local news for:", current_user.zipcode)
     return render_template("local_news.html")

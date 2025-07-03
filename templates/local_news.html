@@ -100,8 +100,8 @@
                 ? localArticles
                 : localArticles.filter(a => a.category.toLowerCase() === category.toLowerCase());
 
-            if (filtered.length && filtered[0].zip_code) {
-                header.textContent = `Local news for ${filtered[0].city || filtered[0].zip_code}`;
+            if (filtered.length && filtered[0].zipcode) {
+                header.textContent = `Local news for ${filtered[0].city || filtered[0].zipcode}`;
             }
 
             if (filtered.length === 0) {
@@ -119,7 +119,7 @@
 
                 div.innerHTML = `
                     <h2>${article.title}</h2>
-                    <p class="category">${article.category} - ${article.zip_code}</p>
+                    <p class="category">${article.category} - ${article.zipcode}</p>
 
                     <div class="bias-meter">
                         <div class="bias-meter-marker" 
