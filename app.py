@@ -67,7 +67,7 @@ db = SQLAlchemy(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = "home"
+login_manager.login_view = "login_page"  # if you have a login page route
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -739,11 +739,10 @@ def local_news_page():
     z = current_user.zipcode
     city = resolve_zip_to_city(z) if z else None
     if not city or city not in CITY_RSS_MAP:
-        flash("Local news requires a valid ZIP code. Please update your ZIP below.")
-        return redirect(url_for("account_page"))
-    return render_template("local_news.html")
-
-from flask import flash, redirect, url_for, request
+        # Render page with fallback and show message instead of redirect
+        flash("Local news requires a valid ZIP code in supported areas. Showing default local news feed.")
+        return render_template("local_news.html", use_default_feed=True)
+    return render_template("local_news.html", city=city, use_default_feed=False)
 
 @app.route("/update-zipcode", methods=["POST"])
 @login_required
@@ -751,9 +750,13 @@ def update_zipcode():
     zip_code = request.form.get("zipcode", "").strip()
 
     if zip_code and zip_code.isdigit() and 4 <= len(zip_code) <= 10:
-        current_user.zipcode = zip_code
-        db.session.commit()
-        flash("ZIP code updated!")
+        city = resolve_zip_to_city(zip_code)
+        if city and city in CITY_RSS_MAP:
+            current_user.zipcode = zip_code
+            db.session.commit()
+            flash("ZIP code updated!")
+        else:
+            flash("ZIP code not supported for local news. Please enter a different ZIP.")
     else:
         flash("Invalid ZIP code. Please enter a valid number.")
 
@@ -761,7 +764,8 @@ def update_zipcode():
 
 @login_manager.unauthorized_handler
 def unauthorized():
-    return jsonify({"error": "Unauthorized"}), 401
+    # Redirect unauthorized users to the login page
+    return redirect(url_for("login"))
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
