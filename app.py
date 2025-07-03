@@ -111,8 +111,8 @@ new_articles_last_refresh = []
 RSS_FEED_BATCHES = [
     [
         "http://feeds.bbci.co.uk/news/rss.xml",
-        "http://rss.cnn.com/rss/edition.rss",
-        "http://feeds.reuters.com/reuters/topNews",
+        "https://rss.cnn.com/rss/edition.rss",
+        "https://www.reutersagency.com/feed/?best-topics=top-news&post_type=best",
         "https://feeds.npr.org/1001/rss.xml",
     ],
     [
@@ -278,11 +278,12 @@ def fetch_feed(url, use_ai=False):
                 "category":    category,
                 "source":      source,
                 "published":   pub_date.isoformat(),
+                "published_dt": pub_date,
                 "bias":        bias
             })
 
         # Sort newest first
-        articles.sort(key=lambda a: a["published"], reverse=True)
+        articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
         print(f"✓ Added {len(articles)} articles from {url}")
 
     except Exception as e:
@@ -464,9 +465,11 @@ def get_news():
         city = resolve_zip_to_city(current_user.zipcode)
         if city:
             local_articles = fetch_city_articles(city)
-        articles = local_articles + articles
-        articles = articles[:MAX_CACHED_ARTICLES]
-    return jsonify(articles)
+            articles = local_articles + articles
+    articles = articles[:MAX_CACHED_ARTICLES]
+
+    # Strip published_dt if leaking to frontend
+    return jsonify([{k: v for k, v in a.items() if k != "published_dt"} for a in articles])
 
 @app.route("/regenerate-summary/<article_id>")
 def regenerate_summary(article_id):
@@ -530,7 +533,14 @@ def me():
 @login_required
 def account_page():
     saved = SavedArticle.query.filter_by(user_id=current_user.id).all()
-    return render_template("account.html", username=current_user.username, saved_articles=saved)
+    missing_zip = not current_user.zipcode
+    return render_template(
+        "account.html",
+        username=current_user.username,
+        saved_articles=saved,
+        missing_zip=missing_zip,
+        current_zip=current_user.zipcode  # Pass the current ZIP
+    )
 
 @app.route("/reset-password", methods=["POST"])
 @login_required
@@ -726,13 +736,28 @@ from flask import redirect, url_for
 @app.route("/local-news")
 @login_required
 def local_news_page():
-    # If user is logged in but has no zipcode saved
-    if not hasattr(current_user, "zipcode") or not current_user.zipcode:
-        print("No zip code found for user.")
-        return redirect(url_for("account_page"))  # ✅ works
-
-    print("Fetching local news for:", current_user.zipcode)
+    z = current_user.zipcode
+    city = resolve_zip_to_city(z) if z else None
+    if not city or city not in CITY_RSS_MAP:
+        flash("Local news requires a valid ZIP code. Please update your ZIP below.")
+        return redirect(url_for("account_page"))
     return render_template("local_news.html")
+
+from flask import flash, redirect, url_for, request
+
+@app.route("/update-zipcode", methods=["POST"])
+@login_required
+def update_zipcode():
+    zip_code = request.form.get("zipcode", "").strip()
+
+    if zip_code and zip_code.isdigit() and 4 <= len(zip_code) <= 10:
+        current_user.zipcode = zip_code
+        db.session.commit()
+        flash("ZIP code updated!")
+    else:
+        flash("Invalid ZIP code. Please enter a valid number.")
+
+    return redirect(url_for("account_page"))
 
 @login_manager.unauthorized_handler
 def unauthorized():

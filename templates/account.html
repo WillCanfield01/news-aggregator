@@ -185,12 +185,35 @@
         Logged in as: <strong>{{ username }}</strong>
     </div>
 
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="msg" style="color: green; font-weight: bold; margin-bottom: 20px;">
+        {% for message in messages %}
+        {{ message }}
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
     <form id="passwordForm">
         <h2>Change Password</h2>
         <input type="password" placeholder="Current Password" id="currentPassword" required />
         <input type="password" placeholder="New Password" id="newPassword" required />
         <button type="submit">Update Password</button>
         <div class="msg" id="message"></div>
+    </form>
+
+    {% if missing_zip %}
+    <div class="msg" style="color: #b33; font-weight: bold; margin-bottom: 20px;">
+        Local news requires a ZIP code. Please enter yours below.
+    </div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('update_zipcode') }}">
+        <h2>Update ZIP Code</h2>
+        <input type="text" name="zipcode" placeholder="ZIP Code" value="{{ current_zip or '' }}" maxlength="10"
+            required />
+        <button type="submit">Save ZIP Code</button>
     </form>
 
     <h2>Saved Articles</h2>
