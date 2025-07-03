@@ -720,6 +720,7 @@ def local_news():
 @app.route("/local-news")
 @login_required
 def local_news_page():
+    print("Fetching local news for:", current_user.zip_code)
     if not current_user.is_authenticated:
         flash("Please log in to view local news.", "warning")
         return redirect(url_for("login"))  # Or home page with modal
