@@ -437,17 +437,20 @@ def fetch_city_articles(city):
     if city in local_feed_cache and (datetime.utcnow() - local_feed_cache[city]["time"]).seconds < 600:
         return local_feed_cache[city]["data"]
 
-    # Use manual sources if defined
     urls = CITY_RSS_MAP.get(city)
     if not urls:
-        urls = [build_google_local_rss(city)]
+        urls = [build_google_local_rss(city)]  # fallback if not in manual map
 
     local_articles = []
     for url in urls:
-        local_articles += fetch_feed(url, use_ai=False)
+        local_articles += fetch_feed(url, use_ai=False)  # <== only summary, no bias detection
 
-    local_feed_cache[city] = {"data": local_articles, "time": datetime.utcnow()}
+    local_feed_cache[city] = {
+        "data": local_articles,
+        "time": datetime.utcnow()
+    }
     return local_articles
+
 
 
 @app.route("/")
