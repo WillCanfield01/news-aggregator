@@ -726,12 +726,12 @@ from flask import redirect, url_for
 @app.route("/local-news")
 @login_required
 def local_news_page():
-    # If user is logged in but has no zip_code saved
-    if not hasattr(current_user, "zipcode") or not current_user.zip_code:
+    # If user is logged in but has no zipcode saved
+    if not hasattr(current_user, "zipcode") or not current_user.zipcode:
         print("No zip code found for user.")
         return redirect(url_for("account"))  # or return a friendly page suggesting they add one
 
-    print("Fetching local news for:", current_user.zip_code)
+    print("Fetching local news for:", current_user.zipcode)
     return render_template("local_news.html")
 
 @login_manager.unauthorized_handler
