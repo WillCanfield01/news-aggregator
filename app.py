@@ -233,8 +233,9 @@ def summarize_with_openai(text):
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
 
-def fetch_feed(url, use_ai=False):
+def fetch_feed(url, use_ai=False, use_bias=True):
     articles = []
+    bias = detect_political_bias(...) if use_bias else 50
     try:
         print(f"Fetching {url}…")
         feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
@@ -721,11 +722,14 @@ def resend_confirmation():
 @app.route("/news/local")
 @login_required
 def local_news():
-    city = resolve_zip_to_city(current_user.zipcode)
-    if city and city in CITY_RSS_MAP:
-        local_articles = fetch_city_articles(city)
-        return jsonify(local_articles)
-    return jsonify(fetch_feed(DEFAULT_LOCAL_FEED[0]))  # ⬅️ Optional fallback
+    user = current_user
+    zip_code = user.zip_code or "83646"
+    feed_urls = LOCAL_FEED_MAP.get(zip_code, DEFAULT_LOCAL_FEED)
+
+    articles = []
+    for url in feed_urls:
+        articles.extend(fetch_feed(url, use_ai=True, use_bias=False))  # ❌ No GPT calls
+    return jsonify(articles)
 
 from flask_login import login_required, current_user
 from flask import redirect, url_for
