@@ -724,7 +724,7 @@ def resend_confirmation():
 def local_news():
     user = current_user
     zipcode = user.zipcode or "83646"
-    feed_urls = LOCAL_FEED_MAP.get(zipcode, DEFAULT_LOCAL_FEED)
+    feed_urls = ZIP_RSS_MAP.get(zipcode, DEFAULT_LOCAL_FEED)
 
     articles = []
     for url in feed_urls:
