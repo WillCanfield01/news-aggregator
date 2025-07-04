@@ -724,12 +724,15 @@ def resend_confirmation():
 def local_news():
     user = current_user
     zipcode = user.zipcode or "83646"
-    feed_urls = ZIP_RSS_MAP.get(zipcode, DEFAULT_LOCAL_FEED)
+    feed_urls = LOCAL_FEED_MAP.get(zipcode, DEFAULT_LOCAL_FEED)
 
     articles = []
     for url in feed_urls:
-        articles.extend(fetch_feed(url, use_ai=True, use_bias=False))  # ❌ No GPT calls
-    return jsonify(articles)
+        articles.extend(fetch_feed(url, use_ai=True, use_bias=True))
+
+    # ✅ Limit to 10 most recent articles
+    articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
+    return jsonify(articles[:10])
 
 from flask_login import login_required, current_user
 from flask import redirect, url_for
