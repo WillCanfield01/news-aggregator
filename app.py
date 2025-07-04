@@ -723,8 +723,8 @@ def resend_confirmation():
 @login_required
 def local_news():
     user = current_user
-    zip_code = user.zip_code or "83646"
-    feed_urls = LOCAL_FEED_MAP.get(zip_code, DEFAULT_LOCAL_FEED)
+    zipcode = user.zipcode or "83646"
+    feed_urls = LOCAL_FEED_MAP.get(zipcode, DEFAULT_LOCAL_FEED)
 
     articles = []
     for url in feed_urls:
@@ -748,12 +748,12 @@ def local_news_page():
 @app.route("/update-zipcode", methods=["POST"])
 @login_required
 def update_zipcode():
-    zip_code = request.form.get("zipcode", "").strip()
+    zipcode = request.form.get("zipcode", "").strip()
 
-    if zip_code and zip_code.isdigit() and 4 <= len(zip_code) <= 10:
-        city = resolve_zip_to_city(zip_code)
+    if zipcode and zipcode.isdigit() and 4 <= len(zipcode) <= 10:
+        city = resolve_zip_to_city(zipcode)
         if city and city in CITY_RSS_MAP:
-            current_user.zipcode = zip_code
+            current_user.zipcode = zipcode
             db.session.commit()
             flash("ZIP code updated!")
         else:
