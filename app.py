@@ -241,45 +241,42 @@ def fetch_feed(url, use_ai=False):
         cutoff = datetime.utcnow() - timedelta(days=7)
 
         for index, entry in enumerate(feed.entries):
-            title = entry.get("title", "No Title")
-            desc  = entry.get("summary", "")
-            if not desc.strip():
+            title = entry.get("title", "No Title").strip()
+            desc = entry.get("summary", "").strip() or entry.get("description", "").strip()
+            link = entry.get("link", "").strip()
+
+            # Skip if no title or link
+            if not title or not link:
                 continue
 
-            # Parse publish date (allow updated if published missing)
+            # Fallback: Google News often lacks publish date — default to now
             parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
-            if not parsed_date:
-                continue
-            pub_date = datetime(*parsed_date[:6])
+            pub_date = datetime(*parsed_date[:6]) if parsed_date else datetime.utcnow()
             if pub_date < cutoff:
                 continue
 
-            # Category & summary
-            text     = f"{title} {desc}"
+            text = f"{title} {desc}"
             category = predict_category(text)
             if category == "Unknown":
                 category = "General"
-            summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
 
-            # Source normalization
+            summary = summarize_with_openai(desc or title) if use_ai else simple_summarize(desc or title)
             parsed_url = urlparse(url)
-            source     = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
-
-            # Political bias (internal fallback inside detect_political_bias)
-            article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
+            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+            article_id = generate_article_id(link or f"{url}-{index}")
             bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
 
             articles.append({
-                "id":          article_id,
-                "title":       title,
-                "summary":     summary,
+                "id": article_id,
+                "title": title,
+                "summary": summary,
                 "description": desc,
-                "url":         entry.get("link", "#"),
-                "category":    category,
-                "source":      source,
-                "published":   pub_date.isoformat(),
+                "url": link,
+                "category": category,
+                "source": source,
+                "published": pub_date.isoformat(),
                 "published_dt": pub_date,
-                "bias":        bias
+                "bias": bias
             })
 
         # Sort newest first
@@ -440,7 +437,7 @@ def fetch_city_articles(city):
 
     urls = CITY_RSS_MAP.get(city)
     if not urls:
-        urls = [build_google_local_rss(city)]  # fallback if not in manual map
+        return []
 
     local_articles = []
     for url in urls:
