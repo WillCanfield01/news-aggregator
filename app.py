@@ -1,3 +1,4 @@
+
 import os
 import time
 import re
@@ -8,11 +9,8 @@ import torch
 import torch.nn.functional as F
 import smtplib
 import openai
-import requests
-import asyncio
-import aiohttp
 from html import unescape
-from flask import Flask, jsonify, render_template, request, session, redirect, url_for, flash
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from concurrent.futures import ThreadPoolExecutor
@@ -69,14 +67,13 @@ db = SQLAlchemy(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = "login_page"  # if you have a login page route
+login_manager.login_view = "home"
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True)
     password_hash = db.Column(db.String(200))
     saved_articles = db.relationship("SavedArticle", backref="user", lazy=True)
-    zipcode = db.Column(db.String(10), nullable=True)
 
     # in your User model
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -113,8 +110,8 @@ new_articles_last_refresh = []
 RSS_FEED_BATCHES = [
     [
         "http://feeds.bbci.co.uk/news/rss.xml",
-        "https://rss.cnn.com/rss/edition.rss",
-        "https://www.reutersagency.com/feed/?best-topics=top-news&post_type=best",
+        "http://rss.cnn.com/rss/edition.rss",
+        "http://feeds.reuters.com/reuters/topNews",
         "https://feeds.npr.org/1001/rss.xml",
     ],
     [
@@ -124,22 +121,6 @@ RSS_FEED_BATCHES = [
         "https://www.espn.com/espn/rss/news",
     ]
 ]
-
-ZIP_RSS_MAP = {
-    "10001": ["https://www.nydailynews.com/arcio/rss/category/news/?query=display_date:[now-7d+TO+now]"],
-    "94105": ["https://www.sfchronicle.com/default/feed/local-news"],
-    "90001": ["https://www.latimes.com/local/rss2.0.xml"],
-}
-
-CITY_RSS_MAP = {
-    "Boise, ID": ["https://www.idahopress.com/rss/news"],
-    "New York, NY": ["https://www.nydailynews.com/arcio/rss/category/news/?query=display_date:[now-7d+TO+now]"],
-    "Los Angeles, CA": ["https://www.latimes.com/local/rss2.0.xml"],
-    "San Francisco, CA": ["https://www.sfchronicle.com/default/feed/local-news"],
-    "Chicago, IL": ["https://www.chicagotribune.com/arcio/rss/category/news/?query=display_date:[now-7d+TO+now]"]
-}
-
-DEFAULT_LOCAL_FEED = ["https://news.google.com/rss/search?q=local+news&hl=en-US&gl=US&ceid=US:en"]
 
 current_batch_index = 0
 
@@ -166,11 +147,11 @@ def get_model_components():
     if _model is None:
         with _model_lock:
             if _model is None:
-                is_render = os.getenv("RENDER", "false").lower() == "true"
-                model_path = "cardiffnlp/tweet-topic-21-multi" if is_render else "./models/cardiffnlp/tweet-topic-21-multi"
-                _tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=not is_render)
-                _model = AutoModelForSequenceClassification.from_pretrained(model_path, local_files_only=not is_render).to("cpu").eval()
-                config = AutoConfig.from_pretrained(model_path, local_files_only=not is_render)
+                _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
+                _model = AutoModelForSequenceClassification.from_pretrained(
+                    "cardiffnlp/tweet-topic-21-multi"
+                ).to("cpu").eval()
+                config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
                 _model_labels = list(config.id2label.values())
     return _model, _tokenizer, _model_labels
 
@@ -235,58 +216,61 @@ def summarize_with_openai(text):
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
 
-async def fetch_feed_async(session, url, use_ai=False, use_bias=True):
+def fetch_feed(url, use_ai=False):
     articles = []
-    bias = 50  # default fallback
     try:
-        async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=aiohttp.ClientTimeout(total=10)) as response:
-            content = await response.read()
-            feed = feedparser.parse(content)
+        print(f"Fetching {url}…")
+        feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
+        cutoff = datetime.utcnow() - timedelta(days=7)
 
-            cutoff = datetime.utcnow() - timedelta(days=7)
+        for index, entry in enumerate(feed.entries):
+            title = entry.get("title", "No Title")
+            desc  = entry.get("summary", "")
+            if not desc.strip():
+                continue
+
+            # Parse publish date (allow updated if published missing)
+            parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+            if not parsed_date:
+                continue
+            pub_date = datetime(*parsed_date[:6])
+            if pub_date < cutoff:
+                continue
+
+            # Category & summary
+            text     = f"{title} {desc}"
+            category = predict_category(text)
+            if category == "Unknown":
+                category = "General"
+            summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
+
+            # Source normalization
             parsed_url = urlparse(url)
-            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+            source     = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
 
-            for index, entry in enumerate(feed.entries):
-                title = entry.get("title", "No Title").strip()
-                desc = entry.get("summary", "").strip() or entry.get("description", "").strip()
-                link = entry.get("link", "").strip()
+            # Political bias (internal fallback inside detect_political_bias)
+            article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
+            bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
 
-                if not title or not link:
-                    continue
+            articles.append({
+                "id":          article_id,
+                "title":       title,
+                "summary":     summary,
+                "description": desc,
+                "url":         entry.get("link", "#"),
+                "category":    category,
+                "source":      source,
+                "published":   pub_date.isoformat(),
+                "bias":        bias
+            })
 
-                parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
-                pub_date = datetime(*parsed_date[:6]) if parsed_date else datetime.utcnow()
-                if pub_date < cutoff:
-                    continue
+        # Sort newest first
+        articles.sort(key=lambda a: a["published"], reverse=True)
+        print(f"✓ Added {len(articles)} articles from {url}")
 
-                text = f"{title} {desc}"
-                category = predict_category(text)
-                if category == "Unknown":
-                    category = "General"
-
-                summary = summarize_with_openai(desc or title) if use_ai else simple_summarize(desc or title)
-                article_id = generate_article_id(link or f"{url}-{index}")
-                if use_bias:
-                    bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
-
-                articles.append({
-                    "id": article_id,
-                    "title": title,
-                    "summary": summary,
-                    "description": desc,
-                    "url": link,
-                    "category": category,
-                    "source": source,
-                    "published": pub_date.isoformat(),
-                    "published_dt": pub_date,
-                    "bias": bias
-                })
-
-            articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
-            print(f"✓ [Async] Added {len(articles)} from {url}")
     except Exception as e:
-        print(f"⚠️ [Async] Failed to fetch {url}: {e}")
+        print(f"⚠️ Failed to fetch {url}: {e}")
+
     return articles
 
 def detect_political_bias(text, article_id=None, source=None):
@@ -337,35 +321,26 @@ def detect_political_bias(text, article_id=None, source=None):
         print("Bias detection failed:", e)
         return fallback_bias
 
-async def preload_articles_batched_async(feed_list, use_ai=False, use_bias=True):
+def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles, new_articles_last_refresh
-    print(f"⚡ Async preloading from {len(feed_list)} feeds...")
-    new_articles = []
-
-    async with aiohttp.ClientSession() as session:
-        tasks = [
-            fetch_feed_async(session, url, use_ai=use_ai, use_bias=use_bias)
-            for url in feed_list
-        ]
-        results = await asyncio.gather(*tasks)
-
-        for result in results:
-            new_articles.extend(result)
-
+    print(f"Preloading articles from {len(feed_list)} feeds...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = executor.map(lambda u: fetch_feed(u, use_ai), feed_list)
+        new_articles = [article for feed in results for article in feed]
     existing_ids = {a["id"] for a in cached_articles}
     unique_new = [a for a in new_articles if a["id"] not in existing_ids]
     new_articles_last_refresh = unique_new
     cached_articles = unique_new + cached_articles
     cached_articles = cached_articles[:MAX_CACHED_ARTICLES]
-    print(f"✓ Async added {len(unique_new)} new articles. Total cached: {len(cached_articles)}")
+    print(f"✓ {len(unique_new)} new articles added. Total cached: {len(cached_articles)}")
 
-async def periodic_refresh_async(interval=480):
+def periodic_refresh(interval=480):
     global current_batch_index
     while True:
-        print(f"\n🌀 [Async] Refreshing batch {current_batch_index + 1}...")
-        await preload_articles_batched_async(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
+        print(f"\n🌀 Refreshing batch {current_batch_index + 1}...")
+        preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
         current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
-        await asyncio.sleep(interval)
+        time.sleep(interval)
 
 def generate_confirmation_token(email):
     serializer = URLSafeTimedSerializer(app.secret_key)
@@ -417,66 +392,15 @@ def extract_full_article_text(url):
         print(f"⚠️ Failed to extract article text: {e}")
         return ""
 
-def resolve_zip_to_city(zipcode):
-    try:
-        response = requests.get(f"http://api.zippopotam.us/us/{zipcode}", timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            city = data["places"][0]["place name"]
-            state = data["places"][0]["state abbreviation"]
-            return f"{city}, {state}"
-    except Exception as e:
-        print(f"Geolocation failed for zip {zipcode}: {e}")
-    return None
-
-zip_cache = {}
-
-def resolve_zip_to_city_cached(zipcode):
-    if zipcode in zip_cache:
-        return zip_cache[zipcode]
-    city = resolve_zip_to_city(zipcode)
-    if city:
-        zip_cache[zipcode] = city
-    return city
-
-local_feed_cache = {}
-
-async def fetch_city_articles(city):
-    if city in local_feed_cache and (datetime.utcnow() - local_feed_cache[city]["time"]).seconds < 600:
-        return local_feed_cache[city]["data"]
-
-    urls = CITY_RSS_MAP.get(city)
-    if not urls:
-        return []
-
-    local_articles = []
-    async with aiohttp.ClientSession() as session:
-        for url in urls:
-            articles = await fetch_feed_async(session, url, use_ai=False, use_bias=True)
-            local_articles.extend(articles)
-
-    local_feed_cache[city] = {
-        "data": local_articles,
-        "time": datetime.utcnow()
-    }
-    return local_articles
-
 @app.route("/")
 def home():
     return render_template("index.html")
 
-import asyncio
-
 @app.route("/news")
 def get_news():
-    articles = cached_articles
-    if current_user.is_authenticated and current_user.zipcode:
-        city = resolve_zip_to_city(current_user.zipcode)
-        if city:
-            local_articles = asyncio.run(fetch_city_articles(city))  # ⬅ Run the async method
-            articles = local_articles + articles
-    articles = articles[:MAX_CACHED_ARTICLES]
-    return jsonify([{k: v for k, v in a.items() if k != "published_dt"} for a in articles])
+    response = jsonify(cached_articles)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 @app.route("/regenerate-summary/<article_id>")
 def regenerate_summary(article_id):
@@ -495,7 +419,7 @@ def regenerate_summary(article_id):
 def manual_refresh():
     global current_batch_index
     print(f"🔁 Manual refresh via /refresh (batch {current_batch_index + 1})...")
-    asyncio.run(preload_articles_batched_async(RSS_FEED_BATCHES[current_batch_index], use_ai=False))
+    preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
     current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
     return jsonify({"status": "Refreshed", "batch": current_batch_index})
 
@@ -519,11 +443,13 @@ def login():
         print("Database error during login:", db_error)
         return jsonify({"error": "Database error. Please try again shortly."}), 503  # ✅ Move return inside except
     if user and user.check_password(password):
-        if not user.is_confirmed:
-            return jsonify({"error": "Please confirm your email first."}), 403
+            if not user.is_confirmed:
+                return jsonify({"error": "Please confirm your email first."}), 403
+    if user and user.check_password(password):
         login_user(user)
-        return jsonify({"success": True})
-    return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify(success=True, username=user.username)
+    else:
+        return jsonify(success=False, message="Invalid credentials"), 401
 
 @app.route("/logout", methods=["POST"])
 @login_required
@@ -540,14 +466,7 @@ def me():
 @login_required
 def account_page():
     saved = SavedArticle.query.filter_by(user_id=current_user.id).all()
-    missing_zip = not current_user.zipcode
-    return render_template(
-        "account.html",
-        username=current_user.username,
-        saved_articles=saved,
-        missing_zip=missing_zip,
-        current_zip=current_user.zipcode  # Pass the current ZIP
-    )
+    return render_template("account.html", username=current_user.username, saved_articles=saved)
 
 @app.route("/reset-password", methods=["POST"])
 @login_required
@@ -572,8 +491,6 @@ def signup():
     username = data.get("username", "").strip().lower()
     password = data.get("password", "").strip()
     email = data.get("email", "").strip().lower()
-    zipcode = data.get("zipcode", "").strip()
-    user = User(username=username, email=email, zipcode=zipcode)
 
     if not username or not password or not email:
         return jsonify({"error": "All fields are required"}), 400
@@ -584,7 +501,7 @@ def signup():
         return jsonify({"error": "Email already registered"}), 400
 
     try:
-        user = User(username=username, email=email, zipcode=zipcode)
+        user = User(username=username, email=email)
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
@@ -598,10 +515,6 @@ def signup():
         print("Signup error:", e)
         db.session.rollback()
         return jsonify({"error": "Signup failed. Please try again."}), 500
-    
-def build_google_local_rss(city_state):
-    encoded = quote_plus(f"{city_state} local news")
-    return f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
     
 @app.route("/confirm/<token>")
 def confirm_email(token):
@@ -728,73 +641,11 @@ def resend_confirmation():
     send_confirmation_email(current_user.email, current_user.username, token)
     return jsonify({"message": "Confirmation email resent."}), 200
 
-@app.route("/news/local")
-@login_required
-def local_news():
-    zipcode = current_user.zipcode or "83646"
-    city = resolve_zip_to_city_cached(zipcode)
-
-    if city and city in CITY_RSS_MAP:
-        feed_urls = CITY_RSS_MAP[city]
-    else:
-        feed_urls = DEFAULT_LOCAL_FEED
-
-    articles = []
-    for url in feed_urls:
-        fetched = asyncio.run(fetch_from_single_url(url))
-        articles.extend(fetched)
-
-    articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
-    return jsonify(articles[:10])
-
-async def fetch_from_single_url(url):
-    async with aiohttp.ClientSession() as session:
-        return await fetch_feed_async(session, url, use_ai=True, use_bias=True)
-
-from flask_login import login_required, current_user
-from flask import redirect, url_for
-
-@app.route("/local-news")
-@login_required
-def local_news_page():
-    z = current_user.zipcode
-    city = resolve_zip_to_city(z) if z else None
-    if not city or city not in CITY_RSS_MAP:
-        # Render page with fallback and show message instead of redirect
-        flash("Local news requires a valid ZIP code in supported areas. Showing default local news feed.")
-        return render_template("local_news.html", use_default_feed=True)
-    return render_template("local_news.html", city=city, use_default_feed=False)
-
-@app.route("/update-zipcode", methods=["POST"])
-@login_required
-def update_zipcode():
-    zipcode = request.form.get("zipcode", "").strip()
-
-    if zipcode and zipcode.isdigit() and 4 <= len(zipcode) <= 10:
-        city = resolve_zip_to_city(zipcode)
-        if city and city in CITY_RSS_MAP:
-            current_user.zipcode = zipcode
-            db.session.commit()
-            flash("ZIP code updated!")
-        else:
-            flash("ZIP code not supported for local news. Please enter a different ZIP.")
-    else:
-        flash("Invalid ZIP code. Please enter a valid number.")
-
-    return redirect(url_for("account_page"))
-
 @login_manager.unauthorized_handler
 def unauthorized():
-    # Redirect unauthorized users to the login page
-    return redirect(url_for("login"))
-
-def start_background_tasks():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(preload_articles_batched_async(RSS_FEED_BATCHES[0], use_ai=False))
-    loop.create_task(periodic_refresh_async())
-    loop.run_forever()
+    return jsonify({"error": "Unauthorized"}), 401
 
 if __name__ == "__main__":
-    threading.Thread(target=start_background_tasks, daemon=True).start()
+    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
+    threading.Thread(target=periodic_refresh, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
