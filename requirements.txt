@@ -78,3 +78,4 @@ psycopg2-binary>=2.9
 postmarker==1.0
 lxml[html_clean]>=4.9.3
 newspaper3k>=0.2.8
+aiohttp==3.9.5
