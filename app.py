@@ -1,4 +1,3 @@
-
 import os
 import time
 import re
@@ -34,6 +33,10 @@ if not POSTMARK_TOKEN:
     raise RuntimeError("Missing POSTMARK_SERVER_TOKEN environment variable")
 
 postmark = PostmarkClient(server_token=POSTMARK_TOKEN)
+DEFAULT_LOCAL_FEEDS = ["https://news.google.com/rss/search?q=local+news&hl=en-US&gl=US&ceid=US:en"]
+local_articles_cache = {}
+default_local_feed_cache = []
+local_cache_lock = threading.Lock()
 
 app = Flask(__name__)
 uri = os.environ.get("DATABASE_URL", "")
@@ -74,6 +77,7 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(80), unique=True)
     password_hash = db.Column(db.String(200))
     saved_articles = db.relationship("SavedArticle", backref="user", lazy=True)
+    zipcode = db.Column(db.String(10))
 
     # in your User model
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -392,6 +396,17 @@ def extract_full_article_text(url):
         print(f"⚠️ Failed to extract article text: {e}")
         return ""
 
+def periodic_default_local_refresh(interval=600):
+    global default_local_feed_cache
+    while True:
+        print("🟢 Refreshing default local feed...")
+        articles = []
+        for url in DEFAULT_LOCAL_FEEDS:
+            articles.extend(fetch_feed(url, use_ai=False))
+        with local_cache_lock:
+            default_local_feed_cache = articles[:100]
+        time.sleep(interval)
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -501,8 +516,8 @@ def signup():
         return jsonify({"error": "Email already registered"}), 400
 
     try:
-        user = User(username=username, email=email)
-        user.set_password(password)
+        zipcode_input = data.get("zipcode", "").strip()
+        user = User(username=username, email=email, zipcode=zipcode_input)
         db.session.add(user)
         db.session.commit()
 
@@ -641,11 +656,23 @@ def resend_confirmation():
     send_confirmation_email(current_user.email, current_user.username, token)
     return jsonify({"message": "Confirmation email resent."}), 200
 
+@app.route("/news/local")
+@login_required
+def get_local_news():
+    zipcode = current_user.zipcode
+    with local_cache_lock:
+        articles = local_articles_cache.get(zipcode)
+        if not articles:
+            print(f"No cached feed for ZIP {zipcode}, using fallback.")
+            articles = default_local_feed_cache
+    return jsonify(articles)
+
 @login_manager.unauthorized_handler
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
 if __name__ == "__main__":
-    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
+    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
     threading.Thread(target=periodic_refresh, daemon=True).start()
+    threading.Thread(target=periodic_default_local_refresh, daemon=True).start()  # ✅ Add this line
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
