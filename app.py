@@ -9,6 +9,8 @@ import torch.nn.functional as F
 import smtplib
 import openai
 import requests
+import asyncio
+import aiohttp
 from html import unescape
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for, flash
 from flask_cors import CORS
@@ -233,60 +235,58 @@ def summarize_with_openai(text):
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
 
-def fetch_feed(url, use_ai=False, use_bias=True):
+async def fetch_feed_async(session, url, use_ai=False, use_bias=True):
     articles = []
-    bias = detect_political_bias(...) if use_bias else 50
+    bias = 50  # default fallback
     try:
-        print(f"Fetching {url}…")
-        feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
-        cutoff = datetime.utcnow() - timedelta(days=7)
+        async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            content = await response.read()
+            feed = feedparser.parse(content)
 
-        for index, entry in enumerate(feed.entries):
-            title = entry.get("title", "No Title").strip()
-            desc = entry.get("summary", "").strip() or entry.get("description", "").strip()
-            link = entry.get("link", "").strip()
-
-            # Skip if no title or link
-            if not title or not link:
-                continue
-
-            # Fallback: Google News often lacks publish date — default to now
-            parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
-            pub_date = datetime(*parsed_date[:6]) if parsed_date else datetime.utcnow()
-            if pub_date < cutoff:
-                continue
-
-            text = f"{title} {desc}"
-            category = predict_category(text)
-            if category == "Unknown":
-                category = "General"
-
-            summary = summarize_with_openai(desc or title) if use_ai else simple_summarize(desc or title)
+            cutoff = datetime.utcnow() - timedelta(days=7)
             parsed_url = urlparse(url)
             source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
-            article_id = generate_article_id(link or f"{url}-{index}")
-            bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
 
-            articles.append({
-                "id": article_id,
-                "title": title,
-                "summary": summary,
-                "description": desc,
-                "url": link,
-                "category": category,
-                "source": source,
-                "published": pub_date.isoformat(),
-                "published_dt": pub_date,
-                "bias": bias
-            })
+            for index, entry in enumerate(feed.entries):
+                title = entry.get("title", "No Title").strip()
+                desc = entry.get("summary", "").strip() or entry.get("description", "").strip()
+                link = entry.get("link", "").strip()
 
-        # Sort newest first
-        articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
-        print(f"✓ Added {len(articles)} articles from {url}")
+                if not title or not link:
+                    continue
 
+                parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+                pub_date = datetime(*parsed_date[:6]) if parsed_date else datetime.utcnow()
+                if pub_date < cutoff:
+                    continue
+
+                text = f"{title} {desc}"
+                category = predict_category(text)
+                if category == "Unknown":
+                    category = "General"
+
+                summary = summarize_with_openai(desc or title) if use_ai else simple_summarize(desc or title)
+                article_id = generate_article_id(link or f"{url}-{index}")
+                if use_bias:
+                    bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
+
+                articles.append({
+                    "id": article_id,
+                    "title": title,
+                    "summary": summary,
+                    "description": desc,
+                    "url": link,
+                    "category": category,
+                    "source": source,
+                    "published": pub_date.isoformat(),
+                    "published_dt": pub_date,
+                    "bias": bias
+                })
+
+            articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
+            print(f"✓ [Async] Added {len(articles)} from {url}")
     except Exception as e:
-        print(f"⚠️ Failed to fetch {url}: {e}")
-
+        print(f"⚠️ [Async] Failed to fetch {url}: {e}")
     return articles
 
 def detect_political_bias(text, article_id=None, source=None):
@@ -337,26 +337,35 @@ def detect_political_bias(text, article_id=None, source=None):
         print("Bias detection failed:", e)
         return fallback_bias
 
-def preload_articles_batched(feed_list, use_ai=False):
+async def preload_articles_batched_async(feed_list, use_ai=False, use_bias=True):
     global cached_articles, new_articles_last_refresh
-    print(f"Preloading articles from {len(feed_list)} feeds...")
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = executor.map(lambda u: fetch_feed(u, use_ai), feed_list)
-        new_articles = [article for feed in results for article in feed]
+    print(f"⚡ Async preloading from {len(feed_list)} feeds...")
+    new_articles = []
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            fetch_feed_async(session, url, use_ai=use_ai, use_bias=use_bias)
+            for url in feed_list
+        ]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            new_articles.extend(result)
+
     existing_ids = {a["id"] for a in cached_articles}
     unique_new = [a for a in new_articles if a["id"] not in existing_ids]
     new_articles_last_refresh = unique_new
     cached_articles = unique_new + cached_articles
     cached_articles = cached_articles[:MAX_CACHED_ARTICLES]
-    print(f"✓ {len(unique_new)} new articles added. Total cached: {len(cached_articles)}")
+    print(f"✓ Async added {len(unique_new)} new articles. Total cached: {len(cached_articles)}")
 
-def periodic_refresh(interval=480):
+async def periodic_refresh_async(interval=480):
     global current_batch_index
     while True:
-        print(f"\n🌀 Refreshing batch {current_batch_index + 1}...")
-        preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
+        print(f"\n🌀 [Async] Refreshing batch {current_batch_index + 1}...")
+        await preload_articles_batched_async(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
         current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
-        time.sleep(interval)
+        await asyncio.sleep(interval)
 
 def generate_confirmation_token(email):
     serializer = URLSafeTimedSerializer(app.secret_key)
@@ -432,7 +441,7 @@ def resolve_zip_to_city_cached(zipcode):
 
 local_feed_cache = {}
 
-def fetch_city_articles(city):
+async def fetch_city_articles(city):
     if city in local_feed_cache and (datetime.utcnow() - local_feed_cache[city]["time"]).seconds < 600:
         return local_feed_cache[city]["data"]
 
@@ -441,8 +450,10 @@ def fetch_city_articles(city):
         return []
 
     local_articles = []
-    for url in urls:
-        local_articles += fetch_feed(url, use_ai=False)  # <== only summary, no bias detection
+    async with aiohttp.ClientSession() as session:
+        for url in urls:
+            articles = await fetch_feed_async(session, url, use_ai=False, use_bias=True)
+            local_articles.extend(articles)
 
     local_feed_cache[city] = {
         "data": local_articles,
@@ -450,11 +461,11 @@ def fetch_city_articles(city):
     }
     return local_articles
 
-
-
 @app.route("/")
 def home():
     return render_template("index.html")
+
+import asyncio
 
 @app.route("/news")
 def get_news():
@@ -462,11 +473,9 @@ def get_news():
     if current_user.is_authenticated and current_user.zipcode:
         city = resolve_zip_to_city(current_user.zipcode)
         if city:
-            local_articles = fetch_city_articles(city)
+            local_articles = asyncio.run(fetch_city_articles(city))  # ⬅ Run the async method
             articles = local_articles + articles
     articles = articles[:MAX_CACHED_ARTICLES]
-
-    # Strip published_dt if leaking to frontend
     return jsonify([{k: v for k, v in a.items() if k != "published_dt"} for a in articles])
 
 @app.route("/regenerate-summary/<article_id>")
@@ -486,7 +495,7 @@ def regenerate_summary(article_id):
 def manual_refresh():
     global current_batch_index
     print(f"🔁 Manual refresh via /refresh (batch {current_batch_index + 1})...")
-    preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
+    asyncio.run(preload_articles_batched_async(RSS_FEED_BATCHES[current_batch_index], use_ai=False))
     current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
     return jsonify({"status": "Refreshed", "batch": current_batch_index})
 
@@ -732,10 +741,15 @@ def local_news():
 
     articles = []
     for url in feed_urls:
-        articles.extend(fetch_feed(url, use_ai=True, use_bias=True))
+        fetched = asyncio.run(fetch_from_single_url(url))
+        articles.extend(fetched)
 
     articles.sort(key=lambda a: a.get("published_dt", datetime.min), reverse=True)
     return jsonify(articles[:10])
+
+async def fetch_from_single_url(url):
+    async with aiohttp.ClientSession() as session:
+        return await fetch_feed_async(session, url, use_ai=True, use_bias=True)
 
 from flask_login import login_required, current_user
 from flask import redirect, url_for
@@ -774,7 +788,13 @@ def unauthorized():
     # Redirect unauthorized users to the login page
     return redirect(url_for("login"))
 
+def start_background_tasks():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(preload_articles_batched_async(RSS_FEED_BATCHES[0], use_ai=False))
+    loop.create_task(periodic_refresh_async())
+    loop.run_forever()
+
 if __name__ == "__main__":
-    preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)  # 🧠 Preload once immediately
-    threading.Thread(target=periodic_refresh, daemon=True).start()
+    threading.Thread(target=start_background_tasks, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
