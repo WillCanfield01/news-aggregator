@@ -1,3 +1,4 @@
+from curses import flash
 import os
 import time
 import re
@@ -666,6 +667,18 @@ def get_local_news():
             print(f"No cached feed for ZIP {zipcode}, using fallback.")
             articles = default_local_feed_cache
     return jsonify(articles)
+
+@app.route("/update-zipcode", methods=["POST"])
+@login_required
+def update_zipcode():
+    data = request.form.get("zip")
+    if data and re.match(r"^\d{5}$", data):
+        current_user.zipcode = data
+        db.session.commit()
+        flash("ZIP code updated successfully!", "success")
+    else:
+        flash("Invalid ZIP code format.", "error")
+    return redirect("/account")
 
 @login_manager.unauthorized_handler
 def unauthorized():
