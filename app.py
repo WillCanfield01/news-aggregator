@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import smtplib
 import openai
 from html import unescape
-from flask import Flask, jsonify, render_template, request, session, redirect, url_for
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for, flash
 from flask_cors import CORS
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from concurrent.futures import ThreadPoolExecutor
@@ -671,14 +671,17 @@ def get_local_news():
 @app.route("/update-zipcode", methods=["POST"])
 @login_required
 def update_zipcode():
-    data = request.form.get("zip")
-    if data and re.match(r"^\d{5}$", data):
-        current_user.zipcode = data
+    # Works with either form-encoded or JSON requests
+    zip_input = request.form.get("zip") or (request.get_json() or {}).get("zip", "").strip()
+
+    if zip_input and re.match(r"^\d{5}$", zip_input):
+        current_user.zipcode = zip_input
         db.session.commit()
         flash("ZIP code updated successfully!", "success")
     else:
-        flash("Invalid ZIP code format.", "error")
-    return redirect("/account")
+        flash("Invalid ZIP code format. Please enter a 5-digit U.S. ZIP.", "error")
+
+    return redirect(url_for("account_page"))
 
 @login_manager.unauthorized_handler
 def unauthorized():
