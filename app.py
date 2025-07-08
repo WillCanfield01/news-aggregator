@@ -753,17 +753,31 @@ def update_zipcode():
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
+async def refresh_zip_feed(zip_code):
+    feed_url = f"https://news.google.com/rss/search?q={zip_code}&hl=en-US&gl=US&ceid=US:en"
+    articles = await fetch_single_feed(feed_url, limit=50)
+    with local_cache_lock:
+        local_articles_cache[zip_code] = articles
+    print(f"✅ Refreshed ZIP {zip_code} with {len(articles)} articles")
+
 def periodic_local_refresh_by_zip(interval=600):
-    while True:
-        print("🟠 Refreshing local feeds by ZIP...")
-        users = User.query.filter(User.zipcode.isnot(None)).all()
-        with local_cache_lock:
+    async def refresh_all_zips():
+        while True:
+            print("🟠 Refreshing local feeds by ZIP...")
+            users = User.query.filter(User.zipcode.isnot(None)).all()
+            tasks = []
+            seen_zips = set()
+
             for user in users:
-                zip_code = user.zipcode
-                if re.match(r"^\d{5}$", zip_code):
-                    feed_url = f"https://news.google.com/rss/search?q={zip_code}&hl=en-US&gl=US&ceid=US:en"
-                    local_articles_cache[zip_code] = fetch_feed(feed_url, use_ai=False)[:100]
-        time.sleep(interval)
+                zip_code = user.zipcode.strip()
+                if re.match(r"^\d{5}$", zip_code) and zip_code not in seen_zips:
+                    seen_zips.add(zip_code)
+                    tasks.append(refresh_zip_feed(zip_code))
+
+            await asyncio.gather(*tasks)
+            await asyncio.sleep(interval)
+
+    threading.Thread(target=lambda: asyncio.run(refresh_all_zips()), daemon=True).start()
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
