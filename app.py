@@ -454,11 +454,18 @@ def periodic_default_local_refresh(interval=600):
     global default_local_feed_cache
     while True:
         print("🟢 Refreshing default local feed...")
-        articles = []
-        for url in DEFAULT_LOCAL_FEEDS:
-            articles.extend(asyncio.run(fetch_single_feed(url)))
-        with local_cache_lock:
-            default_local_feed_cache = articles[:100]
+
+        async def load_default_feed():
+            return await fetch_single_feed(DEFAULT_LOCAL_FEEDS[0], limit=50)
+
+        try:
+            articles = asyncio.run(load_default_feed())
+            with local_cache_lock:
+                default_local_feed_cache = articles
+            print(f"✓ Default local feed updated: {len(default_local_feed_cache)} articles")
+        except Exception as e:
+            print("⚠️ Error loading default local feed:", e)
+
         time.sleep(interval)
 
 @app.route("/")
@@ -759,7 +766,8 @@ def periodic_local_refresh_by_zip(interval=600):
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
+    default_local_feed_cache = asyncio.run(fetch_single_feed(DEFAULT_LOCAL_FEEDS[0], limit=50))  # ✅
     threading.Thread(target=periodic_refresh, daemon=True).start()
     threading.Thread(target=periodic_default_local_refresh, daemon=True).start()
-    threading.Thread(target=periodic_local_refresh_by_zip, daemon=True).start()  # ✅ NEW
+    threading.Thread(target=periodic_local_refresh_by_zip, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
