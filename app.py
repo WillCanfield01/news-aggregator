@@ -759,7 +759,7 @@ def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
 async def fetch_google_local_feed(zipcode: str, limit: int = 50):
-    url = f"https://news.google.com/rss/search?q={zipcode}&hl=en-US&gl=US&ceid=US:en"
+    url = f"https://news.google.com/rss/search?q={zipcode}+Meridian&hl=en-US&gl=US&ceid=US:en"
     return await fetch_single_feed(url, limit=limit)
 
 async def refresh_zip_feed(zipcode):
