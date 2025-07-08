@@ -659,7 +659,12 @@ def resend_confirmation():
 
 @app.route("/news/local")
 @login_required
-def get_local_news():
+def local_news_page():
+    return render_template("local_news.html")
+
+@app.route("/api/news/local")
+@login_required
+def get_local_news_data():
     zipcode = current_user.zipcode
     with local_cache_lock:
         articles = local_articles_cache.get(zipcode)
