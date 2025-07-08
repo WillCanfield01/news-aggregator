@@ -36,9 +36,7 @@ if not POSTMARK_TOKEN:
     raise RuntimeError("Missing POSTMARK_SERVER_TOKEN environment variable")
 
 postmark = PostmarkClient(server_token=POSTMARK_TOKEN)
-DEFAULT_LOCAL_FEEDS = ["https://news.google.com/rss/search?q=local+news&hl=en-US&gl=US&ceid=US:en"]
 local_articles_cache = {}
-default_local_feed_cache = []
 local_cache_lock = threading.Lock()
 
 app = Flask(__name__)
@@ -724,14 +722,21 @@ def local_news_page():
 
 @app.route("/api/news/local")
 @login_required
-def get_local_news_data():
-    zipcode = current_user.zipcode
+def get_local_news():
+    zip_code = current_user.zipcode.strip()
+    if not zip_code or not re.match(r"^\d{5}$", zip_code):
+        return jsonify([])
+
     with local_cache_lock:
-        articles = local_articles_cache.get(zipcode)
-        if not articles:
-            print(f"No cached feed for ZIP {zipcode}, using fallback.")
-            articles = default_local_feed_cache
-    print(f"Returning {len(articles)} local articles to user {current_user.username}")
+        articles = local_articles_cache.get(zip_code)
+
+    if not articles:
+        print(f"⚠️ No cached feed for ZIP {zip_code}, attempting live fetch...")
+        articles = asyncio.run(fetch_google_local_feed(zip_code, limit=50))
+        with local_cache_lock:
+            local_articles_cache[zip_code] = articles
+
+    print(f"✅ Returning {len(articles)} local articles to user {current_user.username}")
     return jsonify(articles)
 
 @app.route("/update-zipcode", methods=["POST"])
@@ -753,43 +758,37 @@ def update_zipcode():
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
-async def refresh_zip_feed(zip_code):
-    feed_url = f"https://news.google.com/rss/search?q={zip_code}&hl=en-US&gl=US&ceid=US:en"
-    articles = await fetch_single_feed(feed_url, limit=50)
-    with local_cache_lock:
-        local_articles_cache[zip_code] = articles
-    print(f"✅ Refreshed ZIP {zip_code} with {len(articles)} articles")
+async def fetch_google_local_feed(zipcode: str, limit: int = 50):
+    url = f"https://news.google.com/rss/search?q={zipcode}&hl=en-US&gl=US&ceid=US:en"
+    return await fetch_single_feed(url, limit=limit)
 
-def periodic_local_refresh_by_zip(interval=600):
-    async def refresh_all_zips():
+async def refresh_zip_feed(zipcode):
+    articles = await fetch_google_local_feed(zipcode, limit=50)
+    with local_cache_lock:
+        local_articles_cache[zipcode] = articles
+    print(f"✅ Refreshed ZIP {zipcode} with {len(articles)} articles")
+
+def periodic_local_refresh_by_zip(interval=900):  # 15 minutes
+    async def refresh_loop():
         while True:
-            print("🟠 Refreshing local feeds by ZIP...")
+            print("🔄 Refreshing local feeds from Google News RSS...")
             users = User.query.filter(User.zipcode.isnot(None)).all()
-            tasks = []
             seen_zips = set()
+            tasks = []
 
             for user in users:
-                zip_code = user.zipcode.strip()
-                if re.match(r"^\d{5}$", zip_code) and zip_code not in seen_zips:
-                    seen_zips.add(zip_code)
-                    tasks.append(refresh_zip_feed(zip_code))
+                zip_clean = user.zipcode.strip()
+                if re.match(r"^\d{5}$", zip_clean) and zip_clean not in seen_zips:
+                    seen_zips.add(zip_clean)
+                    tasks.append(refresh_zip_feed(zip_clean))
 
             await asyncio.gather(*tasks)
             await asyncio.sleep(interval)
 
-    threading.Thread(target=lambda: asyncio.run(refresh_all_zips()), daemon=True).start()
+    threading.Thread(target=lambda: asyncio.run(refresh_loop()), daemon=True).start()
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
-
-    # Preload default local news immediately
-    try:
-        print("🔰 Preloading fallback local feed...")
-        default_local_feed_cache = asyncio.run(fetch_single_feed(DEFAULT_LOCAL_FEEDS[0], limit=50))
-        print(f"✓ Preloaded {len(default_local_feed_cache)} fallback local articles")
-    except Exception as e:
-        print("❌ Failed to preload fallback local feed:", e)
-
     threading.Thread(target=periodic_refresh, daemon=True).start()
     threading.Thread(target=periodic_default_local_refresh, daemon=True).start()
     threading.Thread(target=periodic_local_refresh_by_zip, daemon=True).start()
