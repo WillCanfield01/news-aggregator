@@ -28,6 +28,7 @@ from postmarker.core import PostmarkClient
 from functools import wraps
 from datetime import datetime, timedelta
 from newspaper import Article
+from uszipcode import SearchEngine
 
 MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -758,8 +759,25 @@ def update_zipcode():
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
+zip_search = SearchEngine(simple_zipcode=True)
+
+def get_city_state_from_zip(zipcode):
+    result = zip_search.by_zipcode(zipcode)
+    if result and result.major_city and result.state:
+        return result.major_city, result.state
+    return None, None
+
 async def fetch_google_local_feed(zipcode: str, limit: int = 50):
-    url = f"https://news.google.com/rss/search?q={zipcode}+Meridian&hl=en-US&gl=US&ceid=US:en"
+    city, state = get_city_state_from_zip(zipcode)
+    if not city or not state:
+        print(f"⚠️ Could not resolve ZIP {zipcode} to city/state")
+        return []
+
+    query = f"{city} {state} local news"
+    encoded_query = quote_plus(query)
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+
+    print(f"📡 Fetching Google News RSS for: {query}")
     return await fetch_single_feed(url, limit=limit)
 
 async def refresh_zip_feed(zipcode):
