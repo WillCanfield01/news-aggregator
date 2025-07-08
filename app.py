@@ -687,8 +687,21 @@ def update_zipcode():
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
+def periodic_local_refresh_by_zip(interval=600):
+    while True:
+        print("🟠 Refreshing local feeds by ZIP...")
+        users = User.query.filter(User.zipcode.isnot(None)).all()
+        with local_cache_lock:
+            for user in users:
+                zip_code = user.zipcode
+                if re.match(r"^\d{5}$", zip_code):
+                    feed_url = f"https://news.google.com/rss/search?q={zip_code}&hl=en-US&gl=US&ceid=US:en"
+                    local_articles_cache[zip_code] = fetch_feed(feed_url, use_ai=False)[:100]
+        time.sleep(interval)
+
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
     threading.Thread(target=periodic_refresh, daemon=True).start()
-    threading.Thread(target=periodic_default_local_refresh, daemon=True).start()  # ✅ Add this line
+    threading.Thread(target=periodic_default_local_refresh, daemon=True).start()
+    threading.Thread(target=periodic_local_refresh_by_zip, daemon=True).start()  # ✅ NEW
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
