@@ -9,6 +9,8 @@ import torch
 import torch.nn.functional as F
 import smtplib
 import openai
+import aiohttp
+import asyncio
 from html import unescape
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for, flash
 from flask_cors import CORS
@@ -278,6 +280,57 @@ def fetch_feed(url, use_ai=False):
 
     return articles
 
+async def fetch_single_feed(url, limit=50):
+    articles = []
+    try:
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            async with session.get(url, timeout=20) as response:
+                raw_data = await response.read()
+        feed = feedparser.parse(raw_data)
+        cutoff = datetime.utcnow() - timedelta(days=7)
+
+        for index, entry in enumerate(feed.entries[:limit]):
+            title = entry.get("title", "No Title")
+            desc = entry.get("summary", "")
+            if not desc.strip():
+                continue
+
+            parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+            if not parsed_date:
+                continue
+            pub_date = datetime(*parsed_date[:6])
+            if pub_date < cutoff:
+                continue
+
+            text = f"{title} {desc}"
+            category = predict_category(text)
+            if category == "Unknown":
+                category = "General"
+            summary = simple_summarize(desc)
+
+            parsed_url = urlparse(url)
+            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+            article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
+            bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
+
+            articles.append({
+                "id": article_id,
+                "title": title,
+                "summary": summary,
+                "description": desc,
+                "url": entry.get("link", "#"),
+                "category": category,
+                "source": source,
+                "published": pub_date.isoformat(),
+                "bias": bias
+            })
+
+        articles.sort(key=lambda a: a["published"], reverse=True)
+        print(f"✓ (async) {len(articles)} from {url}")
+    except Exception as e:
+        print(f"⚠️ (async) Failed to fetch {url}: {e}")
+    return articles
+
 def detect_political_bias(text, article_id=None, source=None):
     if article_id and article_id in bias_cache:
         return bias_cache[article_id]
@@ -403,7 +456,7 @@ def periodic_default_local_refresh(interval=600):
         print("🟢 Refreshing default local feed...")
         articles = []
         for url in DEFAULT_LOCAL_FEEDS:
-            articles.extend(fetch_feed(url, use_ai=False))
+            articles.extend(asyncio.run(fetch_single_feed(url)))
         with local_cache_lock:
             default_local_feed_cache = articles[:100]
         time.sleep(interval)
