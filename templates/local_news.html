@@ -155,7 +155,7 @@
                     window.location.href = "/";
                 });
 
-            fetch("/news/local", { credentials: "include" })
+            fetch("/api/news/local", { credentials: "include" })
                 .then(res => res.json())
                 .then(data => {
                     localArticles = data;
