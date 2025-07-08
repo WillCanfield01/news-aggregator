@@ -731,6 +731,7 @@ def get_local_news_data():
         if not articles:
             print(f"No cached feed for ZIP {zipcode}, using fallback.")
             articles = default_local_feed_cache
+    print(f"Returning {len(articles)} local articles to user {current_user.username}")
     return jsonify(articles)
 
 @app.route("/update-zipcode", methods=["POST"])
@@ -766,7 +767,15 @@ def periodic_local_refresh_by_zip(interval=600):
 
 if __name__ == "__main__":
     preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
-    default_local_feed_cache = asyncio.run(fetch_single_feed(DEFAULT_LOCAL_FEEDS[0], limit=50))  # ✅
+
+    # Preload default local news immediately
+    try:
+        print("🔰 Preloading fallback local feed...")
+        default_local_feed_cache = asyncio.run(fetch_single_feed(DEFAULT_LOCAL_FEEDS[0], limit=50))
+        print(f"✓ Preloaded {len(default_local_feed_cache)} fallback local articles")
+    except Exception as e:
+        print("❌ Failed to preload fallback local feed:", e)
+
     threading.Thread(target=periodic_refresh, daemon=True).start()
     threading.Thread(target=periodic_default_local_refresh, daemon=True).start()
     threading.Thread(target=periodic_local_refresh_by_zip, daemon=True).start()
