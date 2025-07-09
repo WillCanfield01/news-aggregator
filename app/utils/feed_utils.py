@@ -16,26 +16,32 @@ from app.models import User  # make sure your models are accessible
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ==========
-# MODEL LOAD
-# ==========
-
 _model = None
 _tokenizer = None
 _model_labels = None
+_model_lock = threading.Lock()
 
-def get_model_components():
-    global _model, _tokenizer, _model_labels
-    if _model is None:
-        _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
-        _model = AutoModelForSequenceClassification.from_pretrained("cardiffnlp/tweet-topic-21-multi").to("cpu").eval()
-        config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
-        _model_labels = list(config.id2label.values())
-    return _model, _tokenizer, _model_labels
+cached_articles = []
+new_articles_last_refresh = []
 
-# ==================
-# CATEGORY MAPPING
-# ==================
+RSS_FEED_BATCHES = [
+    [
+        "http://feeds.bbci.co.uk/news/rss.xml",
+        "http://rss.cnn.com/rss/edition.rss",
+        "http://feeds.reuters.com/reuters/topNews",
+        "https://feeds.npr.org/1001/rss.xml",
+    ],
+    [
+        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+        "https://www.theguardian.com/world/rss",
+        "http://feeds.feedburner.com/TechCrunch/",
+        "https://www.espn.com/espn/rss/news",
+    ]
+]
+
+current_batch_index = 0
+
+FILTERED_CATEGORIES = set(["Unknown"])
 
 CATEGORY_MAP = {
     "arts_&_culture": "Entertainment", "fashion_&_style": "Entertainment",
@@ -49,6 +55,19 @@ CATEGORY_MAP = {
     "youth_&_student_life": "Education", "relationships": "Lifestyle",
     "family": "Lifestyle"
 }
+
+def get_model_components():
+    global _model, _tokenizer, _model_labels
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                _tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/tweet-topic-21-multi")
+                _model = AutoModelForSequenceClassification.from_pretrained(
+                    "cardiffnlp/tweet-topic-21-multi"
+                ).to("cpu").eval()
+                config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
+                _model_labels = list(config.id2label.values())
+    return _model, _tokenizer, _model_labels
 
 def normalize_category(category):
     return CATEGORY_MAP.get(category.lower().replace(" ", "_"), category.title())
@@ -68,8 +87,7 @@ def predict_category(text):
             return "Unknown"
         raw = labels[idx].lower().replace(" ", "_")
         return normalize_category(raw)
-    except Exception as e:
-        print("Category prediction failed:", e)
+    except:
         return "Unknown"
 
 # =====================
@@ -88,22 +106,35 @@ def simple_summarize(text, max_words=50):
 
 def summarize_with_openai(text):
     try:
-        text = text[:12000]
+        # Limit to around 3,000 tokens worth of text (OpenAI estimates 4 tokens per word avg)
+        text = text[:12000]  # roughly 3000 tokens (~9000-12000 chars)
         result = client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": (
-                    "You are a news summarization assistant. Generate a concise, factual summary. "
-                    "Avoid bias, speculation, or exaggeration.")},
-                {"role": "user", "content": f"Summarize in 2-3 sentences:\n\n{text}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a news summarization assistant. "
+                        "Your task is to generate a concise, fact-based summary of a full news article. "
+                        "Avoid exaggeration, emotional language, or political bias. "
+                        "Remain strictly neutral, objective, and accurate. Do not speculate or editorialize."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Summarize the following news article in 2-3 sentences. "
+                        f"Focus only on the main facts and events without inserting opinion or bias:\n\n{text}"
+                    )
+                }
             ],
-            max_tokens=180,
-            temperature=0.3,
+            max_tokens=180,  # Enough for 2–3 sentence summary
+            temperature=0.3,  # Lower temperature for more factual output
             timeout=30
         )
         return result.choices[0].message.content.strip()
     except Exception as e:
-        print("Summarization failed:", e)
+        print("OpenAI summarization failed:", e)
         return "Summary not available."
 
 def extract_full_article_text(url):
@@ -113,42 +144,69 @@ def extract_full_article_text(url):
         article.parse()
         return article.text
     except Exception as e:
-        print("Full article extraction failed:", e)
+        print(f"⚠️ Failed to extract article text: {e}")
         return ""
 
 # ================
 # MAIN PAGE FEEDS
 # ================
 
-def fetch_feed(url):
+def fetch_feed(url, use_ai=False):
+    articles = []
     try:
-        parsed = feedparser.parse(url)
-        articles = []
-        for entry in parsed.entries:
-            link = entry.get("link")
-            if not link:
+        print(f"Fetching {url}…")
+        feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
+        cutoff = datetime.utcnow() - timedelta(days=7)
+
+        for index, entry in enumerate(feed.entries):
+            title = entry.get("title", "No Title")
+            desc  = entry.get("summary", "")
+            if not desc.strip():
                 continue
-            article_id = generate_article_id(link)
-            title = strip_html(entry.get("title", "No Title"))
-            summary = strip_html(entry.get("summary", ""))
-            summary = simple_summarize(summary)
-            category = predict_category(f"{title} {summary}")
-            full_text = extract_full_article_text(link)
-            bias_input = full_text if full_text.strip() else f"{title} {summary}"
-            bias = detect_political_bias(bias_input)
+
+            # Parse publish date (allow updated if published missing)
+            parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+            if not parsed_date:
+                continue
+            pub_date = datetime(*parsed_date[:6])
+            if pub_date < cutoff:
+                continue
+
+            # Category & summary
+            text     = f"{title} {desc}"
+            category = predict_category(text)
+            if category == "Unknown":
+                category = "General"
+            summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
+
+            # Source normalization
+            parsed_url = urlparse(url)
+            source     = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+
+            # Political bias (internal fallback inside detect_political_bias)
+            article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
+            bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
+
             articles.append({
-                "id": article_id,
-                "title": title,
-                "link": link,
-                "summary": summary,
-                "published": entry.get("published", ""),
-                "category": category,
-                "bias": bias
+                "id":          article_id,
+                "title":       title,
+                "summary":     summary,
+                "description": desc,
+                "url":         entry.get("link", "#"),
+                "category":    category,
+                "source":      source,
+                "published":   pub_date.isoformat(),
+                "bias":        bias
             })
-        return articles
+
+        # Sort newest first
+        articles.sort(key=lambda a: a["published"], reverse=True)
+        print(f"✓ Added {len(articles)} articles from {url}")
+
     except Exception as e:
-        print("Failed to fetch feed:", e)
-        return []
+        print(f"⚠️ Failed to fetch {url}: {e}")
+
+    return articles
 
 def fetch_live_articles():
     feeds = [

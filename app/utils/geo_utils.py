@@ -12,12 +12,15 @@ def get_city_state_from_zip(zipcode):
         return info.place_name, info.state_name
     return None, None
 
-async def fetch_google_local_feed(zipcode, limit=50):
+async def fetch_google_local_feed(zipcode: str, limit: int = 50):
     city, state = get_city_state_from_zip(zipcode)
     if not city or not state:
-        print(f"Could not resolve ZIP {zipcode}")
+        print(f"⚠️ Could not resolve ZIP {zipcode} to city/state")
         return []
+
     query = f"{city} {state} local news"
     encoded_query = quote_plus(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+
+    print(f"📡 Fetching Google News RSS for: {query}")
     return await fetch_single_feed(url, limit=limit)
