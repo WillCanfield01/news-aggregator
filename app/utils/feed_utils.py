@@ -1,9 +1,9 @@
+import os
 import re
-import feedparser
 import hashlib
+import feedparser
 import torch
 import torch.nn.functional as F
-import os
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from html import unescape
@@ -11,8 +11,13 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification, Auto
 from app.utils.bias_utils import detect_political_bias
 from openai import OpenAI
 from newspaper import Article
+from flask import current_app
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ==========
+# MODEL LOAD
+# ==========
 
 _model = None
 _tokenizer = None
@@ -26,6 +31,10 @@ def get_model_components():
         config = AutoConfig.from_pretrained("cardiffnlp/tweet-topic-21-multi")
         _model_labels = list(config.id2label.values())
     return _model, _tokenizer, _model_labels
+
+# ==================
+# CATEGORY MAPPING
+# ==================
 
 CATEGORY_MAP = {
     "arts_&_culture": "Entertainment", "fashion_&_style": "Entertainment",
@@ -58,8 +67,13 @@ def predict_category(text):
             return "Unknown"
         raw = labels[idx].lower().replace(" ", "_")
         return normalize_category(raw)
-    except:
+    except Exception as e:
+        print("Category prediction failed:", e)
         return "Unknown"
+
+# =====================
+# SUMMARIZATION / UTILS
+# =====================
 
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
@@ -100,3 +114,72 @@ def extract_full_article_text(url):
     except Exception as e:
         print("Full article extraction failed:", e)
         return ""
+
+# ================
+# MAIN PAGE FEEDS
+# ================
+
+def fetch_feed(url):
+    try:
+        parsed = feedparser.parse(url)
+        articles = []
+        for entry in parsed.entries:
+            link = entry.get("link")
+            if not link:
+                continue
+            article_id = generate_article_id(link)
+            title = strip_html(entry.get("title", "No Title"))
+            summary = strip_html(entry.get("summary", ""))
+            summary = simple_summarize(summary)
+            category = predict_category(f"{title} {summary}")
+            bias = detect_political_bias(f"{title} {summary}")
+            articles.append({
+                "id": article_id,
+                "title": title,
+                "link": link,
+                "summary": summary,
+                "published": entry.get("published", ""),
+                "category": category,
+                "bias": bias
+            })
+        return articles
+    except Exception as e:
+        print("Failed to fetch feed:", e)
+        return []
+
+def fetch_live_articles():
+    feeds = [
+        "https://www.npr.org/rss/rss.php?id=1001",
+        "http://feeds.bbci.co.uk/news/rss.xml",
+    ]
+    articles = []
+    for url in feeds:
+        articles.extend(fetch_feed(url))
+    return articles[:50]
+
+def get_cached_articles():
+    cache = current_app.config.get("ARTICLE_CACHE", {})
+    if cache.get("articles") and datetime.utcnow() - cache["last_fetched"] < timedelta(minutes=10):
+        return cache["articles"]
+    articles = fetch_live_articles()
+    set_cached_articles(articles)
+    return articles
+
+def set_cached_articles(articles):
+    current_app.config["ARTICLE_CACHE"] = {
+        "articles": articles,
+        "last_fetched": datetime.utcnow()
+    }
+
+# ==================
+# LOCAL (ZIP) FEEDS
+# ==================
+
+def fetch_local_feeds(zipcode):
+    local_feeds = [
+        f"https://news.google.com/rss/search?q={zipcode}&hl=en-US&gl=US&ceid=US:en"
+    ]
+    articles = []
+    for url in local_feeds:
+        articles.extend(fetch_feed(url))
+    return articles[:50]  # Local feeds are NOT cached — fetched live always
