@@ -42,3 +42,8 @@ def saved_articles():
             "category": a.category
         } for a in saved
     ])
+
+@bp.route("/me")
+@login_required
+def get_user_profile():
+    return jsonify({"username": current_user.username})

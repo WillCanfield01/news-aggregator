@@ -1,9 +1,10 @@
-from flask import Blueprint, jsonify, render_template
-from flask_login import login_required
+from flask import Blueprint, jsonify, render_template, request
+from flask_login import login_required, current_user
 from app.utils.feed_utils import (
     fetch_live_articles,
     get_cached_articles,
-    regenerate_summary_for_article
+    regenerate_summary_for_article,
+    normalize_category
 )
 from app.utils.bias_utils import bias_bucket
 
@@ -43,3 +44,12 @@ def regenerate_summary(article_id):
     if summary:
         return jsonify({"summary": summary})
     return jsonify({"error": "Article not found"}), 404
+
+@bp.route("/news/")
+@login_required
+def get_news():
+    from app.utils.feed_utils import get_local_articles_for_user
+    is_local = request.args.get("local") == "true"
+    if is_local:
+        return jsonify(get_local_articles_for_user(current_user))
+    return jsonify(get_cached_articles())
