@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, render_template
 from flask_login import login_required
 from app.utils.feed_utils import (
     fetch_live_articles,
@@ -7,12 +7,12 @@ from app.utils.feed_utils import (
 )
 from app.utils.bias_utils import bias_bucket
 
-bp = Blueprint("news", __name__, url_prefix="/news")
+bp = Blueprint('news', __name__)
 
 # Serve main page news (cached for 10 minutes)
-@bp.route("/")
-def all_news():
-    return jsonify(get_cached_articles())
+@bp.route('/')
+def index():
+    return render_template('index.html')
 
 # Refresh articles without using cache (for debug/admin or live testing)
 @bp.route("/new")
