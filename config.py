@@ -9,6 +9,7 @@ class Config:
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
+
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 280,
@@ -23,14 +24,21 @@ class Config:
 
 class DevelopmentConfig(Config):
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = os.getenv("DEV_DATABASE_URL", "sqlite:///../instance/local.db")
+    SQLALCHEMY_DATABASE_URI = os.getenv(
+        "DEV_DATABASE_URL",
+        "sqlite:///instance/local.db"  # keep relative and portable
+    )
 
 class ProductionConfig(Config):
     DEBUG = False
+
     uri = os.getenv("DATABASE_URL", "")
     if uri.startswith("postgres://"):
         uri = uri.replace("postgres://", "postgresql://", 1)
-    SQLALCHEMY_DATABASE_URI = uri + ("?sslmode=require" if "sslmode" not in uri else "")
+    # Append ?sslmode=require if needed
+    if uri and "sslmode" not in uri:
+        uri += "?sslmode=require"
+    SQLALCHEMY_DATABASE_URI = uri
 
 config = {
     "development": DevelopmentConfig,
