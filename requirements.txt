@@ -81,5 +81,4 @@ newspaper3k>=0.2.8
 aiohttp==3.9.5
 beautifulsoup4>=4.12.2
 nltk>=3.8.1
-python-Levenshtein==0.21.1
 pgeocode==0.5.0
