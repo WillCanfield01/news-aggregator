@@ -10,42 +10,30 @@ KNOWN_BIAS_BY_SOURCE = {
     "reuters": 50, "npr": 45, "breitbart": 95,
 }
 
-def detect_political_bias(text, article_id=None, source=None):
-    if article_id and article_id in bias_cache:
-        return bias_cache[article_id]
-
-    fallback_bias = KNOWN_BIAS_BY_SOURCE.get((source or "").lower(), 50)
-
+def detect_political_bias(text):
     try:
-        result = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": (
-                    "Rate political bias from 0 (far left) to 100 (far right). Use linguistic cues.")},
-                {"role": "user", "content": f"Article: {text}"}
+                    "You are a political bias scoring assistant. Given a news headline or short article text, "
+                    "respond with ONLY a single integer from -100 to 100, where:\n"
+                    "-100 means strongly left-leaning,\n"
+                    "0 means neutral,\n"
+                    "100 means strongly right-leaning.\n"
+                    "Do NOT explain your answer or include any other text. Reply with just the number."
+                )},
+                {"role": "user", "content": f"Score the political bias of this text:\n\n{text}"}
             ],
-            max_tokens=10,
+            max_tokens=5,
             temperature=0.3,
-            timeout=10
+            timeout=15
         )
-        raw = result.choices[0].message.content.strip()
-        match = re.search(r'\d+', raw)
-        if match:
-            bias_score = int(match.group())
-        else:
-            raise ValueError(f"Could not parse bias score from: {raw}")
-
-        if 45 <= bias_score <= 55 and source in KNOWN_BIAS_BY_SOURCE:
-            delta = (KNOWN_BIAS_BY_SOURCE[source] - 50) * 0.3
-            bias_score += int(delta)
-
-        bias_score = max(0, min(100, bias_score))
-        if article_id:
-            bias_cache[article_id] = bias_score
-        return bias_score
+        score_str = response.choices[0].message.content.strip()
+        return int(score_str)
     except Exception as e:
-        print("Bias detection failed:", e)
-        return fallback_bias
+        print(f"Bias detection failed: {e}")
+        return 50  # fallback to neutral
 
 def bias_bucket(score):
     if score < 40:
