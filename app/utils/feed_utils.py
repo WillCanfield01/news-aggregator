@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from html import unescape
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
-from utils.bias_utils import detect_political_bias
+from app.utils.bias_utils import detect_political_bias
 from openai import OpenAI
 from newspaper import Article
 
