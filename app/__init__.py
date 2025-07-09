@@ -8,13 +8,12 @@ db = SQLAlchemy()
 login_manager = LoginManager()
 
 def create_app(config_name='default'):
-    app = Flask(
-        __name__,
-        template_folder="templates",
-        static_folder="static"
-    )
+    app = Flask(__name__)
     app.config.from_object(config[config_name])
     config[config_name].init_app(app)
+
+    db.init_app(app)
+    login_manager.init_app(app)  # ← ✅ ADD THIS LINE
 
     # Register routes
     from app.routes import auth_routes, news_routes, local_routes, user_routes
