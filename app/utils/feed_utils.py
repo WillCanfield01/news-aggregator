@@ -183,3 +183,6 @@ def fetch_local_feeds(zipcode):
     for url in local_feeds:
         articles.extend(fetch_feed(url))
     return articles[:50]  # Local feeds are NOT cached — fetched live always
+
+def regenerate_summary_for_article(article_text):
+    return summarize_with_openai(article_text)
