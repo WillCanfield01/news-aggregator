@@ -29,7 +29,11 @@ def detect_political_bias(text, article_id=None, source=None):
             timeout=10
         )
         raw = result.choices[0].message.content.strip()
-        bias_score = int(re.search(r'\d+', raw).group())
+        match = re.search(r'\d+', raw)
+        if match:
+            bias_score = int(match.group())
+        else:
+            raise ValueError(f"Could not parse bias score from: {raw}")
 
         if 45 <= bias_score <= 55 and source in KNOWN_BIAS_BY_SOURCE:
             delta = (KNOWN_BIAS_BY_SOURCE[source] - 50) * 0.3

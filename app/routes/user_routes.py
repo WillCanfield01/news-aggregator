@@ -5,10 +5,15 @@ from app import db
 
 bp = Blueprint("user", __name__, url_prefix="/user")
 
-@bp.route("/me")
+@bp.route('/me')
 @login_required
 def me():
-    return jsonify({"username": current_user.username})
+    return jsonify({
+        'id': current_user.id,
+        'username': current_user.username,
+        'email': current_user.email,
+        'zipcode': current_user.zipcode
+    })
 
 @bp.route("/account")
 @login_required
