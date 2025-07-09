@@ -12,6 +12,7 @@ from app.utils.bias_utils import detect_political_bias
 from openai import OpenAI
 from newspaper import Article
 from flask import current_app
+from app.models import User  # make sure your models are accessible
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -186,3 +187,11 @@ def fetch_local_feeds(zipcode):
 
 def regenerate_summary_for_article(article_text):
     return summarize_with_openai(article_text)
+
+def is_valid_zip(zipcode):
+    return bool(re.match(r"^\d{5}$", zipcode))
+
+def get_local_articles_for_user(user):
+    if not user or not is_valid_zip(user.zipcode):
+        return []
+    return fetch_local_feeds(user.zipcode)
