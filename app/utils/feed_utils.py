@@ -133,7 +133,9 @@ def fetch_feed(url):
             summary = strip_html(entry.get("summary", ""))
             summary = simple_summarize(summary)
             category = predict_category(f"{title} {summary}")
-            bias = detect_political_bias(f"{title} {summary}")
+            full_text = extract_full_article_text(link)
+            bias_input = full_text if full_text.strip() else f"{title} {summary}"
+            bias = detect_political_bias(bias_input)
             articles.append({
                 "id": article_id,
                 "title": title,
