@@ -82,5 +82,5 @@ aiohttp==3.9.5
 uszipcode==1.0.1
 beautifulsoup4>=4.12.2
 nltk>=3.8.1
-sqlalchemy-mate==1.0.4
+sqlalchemy-mate==2.0.0.3
 python-Levenshtein==0.21.1
