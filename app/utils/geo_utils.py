@@ -2,7 +2,7 @@ import re
 import pgeocode
 import pandas as pd
 from urllib.parse import quote_plus
-from utils.feed_utils import fetch_single_feed
+from app.utils.feed_utils import fetch_single_feed
 
 nomi = pgeocode.Nominatim('us')
 

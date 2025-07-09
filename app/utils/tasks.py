@@ -3,8 +3,8 @@ import threading
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
-from utils.feed_utils import fetch_feed
-from utils.geo_utils import fetch_google_local_feed
+from app.utils.feed_utils import fetch_feed
+from app.utils.geo_utils import fetch_google_local_feed
 from yourapp.models import User  # Adjust to match your project
 
 MAX_CACHED_ARTICLES = 300
