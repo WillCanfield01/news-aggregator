@@ -11,6 +11,8 @@ import smtplib
 import openai
 import aiohttp
 import asyncio
+import pgeocode
+import pandas as pd
 from html import unescape
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for, flash
 from flask_cors import CORS
@@ -28,7 +30,6 @@ from postmarker.core import PostmarkClient
 from functools import wraps
 from datetime import datetime, timedelta
 from newspaper import Article
-from uszipcode import SearchEngine
 
 MAX_CACHED_ARTICLES = 300
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -39,6 +40,9 @@ if not POSTMARK_TOKEN:
 postmark = PostmarkClient(server_token=POSTMARK_TOKEN)
 local_articles_cache = {}
 local_cache_lock = threading.Lock()
+
+# U.S. ZIP code data
+nomi = pgeocode.Nominatim('us')
 
 app = Flask(__name__)
 uri = os.environ.get("DATABASE_URL", "")
@@ -759,12 +763,10 @@ def update_zipcode():
 def unauthorized():
     return jsonify({"error": "Unauthorized"}), 401
 
-zip_search = SearchEngine(simple_zipcode=True)
-
 def get_city_state_from_zip(zipcode):
-    result = zip_search.by_zipcode(zipcode)
-    if result and result.major_city and result.state:
-        return result.major_city, result.state
+    info = nomi.query_postal_code(zipcode)
+    if pd.notna(info.place_name) and pd.notna(info.state_name):
+        return info.place_name, info.state_name
     return None, None
 
 async def fetch_google_local_feed(zipcode: str, limit: int = 50):

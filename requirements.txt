@@ -79,8 +79,7 @@ postmarker==1.0
 lxml[html_clean]>=4.9.3
 newspaper3k>=0.2.8
 aiohttp==3.9.5
-uszipcode==1.0.1
 beautifulsoup4>=4.12.2
 nltk>=3.8.1
-sqlalchemy-mate==2.0.0.3
 python-Levenshtein==0.21.1
+pgeocode==0.5.0
