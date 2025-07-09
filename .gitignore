@@ -1,2 +1,5 @@
 .env
 models/
+node_modules/
+.expo/
+instance/local.db
