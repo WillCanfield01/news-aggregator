@@ -21,6 +21,10 @@ def create_app(config_name='default'):
     app.config["SQLALCHEMY_DATABASE_URI"] = uri
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.secret_key = os.getenv("SECRET_KEY", "super-secret-dev-key")
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,  # optional safeguard
+    }
 
     db.init_app(app)
     login_manager.init_app(app)

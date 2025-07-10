@@ -1,5 +1,8 @@
 from flask import Blueprint, request, jsonify, redirect, url_for
 from flask_login import login_user, logout_user, login_required, current_user
+from flask import current_app
+from sqlalchemy.exc import OperationalError
+import time
 from app.models import User
 from app import db, login_manager
 from app.utils.email_utils import generate_confirmation_token, confirm_token, send_confirmation_email
@@ -68,3 +71,14 @@ def confirm_email(token):
         user.is_confirmed = True
         db.session.commit()
         return redirect("https://therealroundup.com/?confirmed=true")
+    
+@login_manager.user_loader
+def load_user(user_id):
+    retries = 3
+    for attempt in range(retries):
+        try:
+            return User.query.get(int(user_id))
+        except OperationalError as e:
+            current_app.logger.warning(f"DB connection failed: {e}")
+            time.sleep(2)  # wait a moment and retry
+    return None  # gracefully fail if Neon isn't awake
