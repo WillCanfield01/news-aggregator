@@ -9,6 +9,8 @@ from app.utils.feed_utils import (
 )
 from app.utils.geo_utils import fetch_google_local_feed
 from app.models import User
+from sqlalchemy.orm import sessionmaker
+from app import db
 
 def start_periodic_refresh(app, interval=600):
     def run():
@@ -20,24 +22,17 @@ def start_periodic_refresh(app, interval=600):
     threading.Thread(target=run, daemon=True).start()
 
 def start_periodic_local_refresh(app, local_articles_cache, interval=900):
-    """Background refresh for local (ZIP) feeds using Google News RSS"""
     async def refresh_loop():
         with app.app_context():
-            from app import db, models
+            Session = sessionmaker(bind=db.engine)
             while True:
-                # Use a new session just for this thread/iteration
-                session = db.create_scoped_session()
-                users = session.query(models.User).filter(models.User.zipcode.isnot(None)).all()
-                session.remove()  # cleanup!
-                seen_zips = set()
-                tasks = []
-                for user in users:
-                    zip_code = user.zipcode.strip()
-                    if re.match(r"^\d{5}$", zip_code) and zip_code not in seen_zips:
-                        seen_zips.add(zip_code)
-                        tasks.append(refresh_zip_feed(zip_code, local_articles_cache))
-                await asyncio.gather(*tasks)
-                await asyncio.sleep(interval)
+                session = Session()
+                try:
+                    users = session.query(User).filter(User.zipcode.isnot(None)).all()
+                    # ... rest of your code ...
+                finally:
+                    session.close()
+                # ... gather tasks, await, sleep, etc. ...
 
     def run():
         asyncio.run(refresh_loop())

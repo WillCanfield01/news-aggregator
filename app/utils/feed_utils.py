@@ -259,7 +259,6 @@ def get_local_articles_for_user(user):
     return fetch_google_local_feed_sync(user.zipcode, limit=50)
 
 def fetch_google_local_feed_sync(zipcode, limit=50):
-    # If using your own geo_utils for query, do that here:
     query = make_local_news_query(zipcode)
     if not query:
         print(f"⚠️ Could not resolve ZIP {zipcode} to city/state")
@@ -270,6 +269,7 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
     print(f"📡 Fetching Google News RSS for: {query}")
 
     feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
+    print(f"feed.entries: {len(feed.entries)} articles")
     articles = []
     cutoff = datetime.utcnow() - timedelta(days=7)
     for index, entry in enumerate(feed.entries[:limit]):
@@ -285,7 +285,6 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
         if pub_date < cutoff:
             continue
 
-        # Your logic for category, summary, etc.
         text = f"{title} {desc}"
         category = predict_category(text)
         if category == "Unknown":
@@ -295,7 +294,9 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
         parsed_url = urlparse(url)
         source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
         article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
-        bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
+
+        # --------- SET NEUTRAL BIAS (No OpenAI call) ---------
+        bias = 50
 
         articles.append({
             "id":          article_id,
@@ -306,7 +307,7 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
             "category":    category,
             "source":      source,
             "published":   pub_date.isoformat(),
-            "bias":        bias,
+            "bias":        bias,  # <--- Neutral, fast, not calculated
             "zip_code":    zipcode
         })
     return articles
