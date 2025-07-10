@@ -10,7 +10,7 @@ from app.utils.feed_utils import (
 from app.utils.geo_utils import fetch_google_local_feed
 from app.models import User
 
-def periodic_refresh(interval=600):
+def start_periodic_refresh(interval=600):
     def run():
         while True:
             for batch in RSS_FEED_BATCHES:
