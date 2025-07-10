@@ -24,6 +24,7 @@ def get_local_news():
     if result:
         ts, articles = result
         if time.time() - ts < 15 * 60:
+            print(f"Serving {len(articles)} cached local articles for {zip_code}")
             return jsonify(articles)
         else:
             del cache[zip_code]
@@ -31,6 +32,7 @@ def get_local_news():
     from app.utils.geo_utils import fetch_google_local_feed
     import asyncio
     articles = asyncio.run(fetch_google_local_feed(zip_code, limit=50))
+    print(f"Articles fetched for {zip_code}: {len(articles)}")
     cache[zip_code] = (time.time(), articles)
     return jsonify(articles)
 
