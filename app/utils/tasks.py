@@ -23,9 +23,12 @@ def start_periodic_local_refresh(app, local_articles_cache, interval=900):
     """Background refresh for local (ZIP) feeds using Google News RSS"""
     async def refresh_loop():
         with app.app_context():
-            from app import db  # Import here to avoid circular import
+            from app import db, models
             while True:
-                users = User.query.filter(User.zipcode.isnot(None)).all()
+                # Use a new session just for this thread/iteration
+                session = db.create_scoped_session()
+                users = session.query(models.User).filter(models.User.zipcode.isnot(None)).all()
+                session.remove()  # cleanup!
                 seen_zips = set()
                 tasks = []
                 for user in users:
@@ -38,7 +41,6 @@ def start_periodic_local_refresh(app, local_articles_cache, interval=900):
 
     def run():
         asyncio.run(refresh_loop())
-
     threading.Thread(target=run, daemon=True).start()
 
 async def refresh_zip_feed(zipcode, local_articles_cache):
