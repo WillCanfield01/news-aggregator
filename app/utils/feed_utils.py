@@ -253,7 +253,13 @@ def regenerate_summary_for_article(article_id):
 def is_valid_zip(zipcode):
     return bool(re.match(r"^\d{5}$", zipcode))
 
-async def fetch_google_local_feed(zipcode: str, limit: int = 50):
+def get_local_articles_for_user(user):
+    if not user or not is_valid_zip(user.zipcode):
+        return []
+    return fetch_google_local_feed_sync(user.zipcode, limit=50)
+
+def fetch_google_local_feed_sync(zipcode, limit=50):
+    # If using your own geo_utils for query, do that here:
     query = make_local_news_query(zipcode)
     if not query:
         print(f"⚠️ Could not resolve ZIP {zipcode} to city/state")
@@ -262,15 +268,45 @@ async def fetch_google_local_feed(zipcode: str, limit: int = 50):
     encoded_query = quote_plus(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
     print(f"📡 Fetching Google News RSS for: {query}")
-    # If you want this to be async, implement an async fetch_single_feed
-    return fetch_feed(url)[:limit]
 
-def get_local_articles_for_user(user):
-    if not user or not is_valid_zip(user.zipcode):
-        return []
-    # For parity, always fetch live—optionally, implement caching if needed
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    articles = loop.run_until_complete(fetch_google_local_feed(user.zipcode, limit=50))
-    loop.close()
+    feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
+    articles = []
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    for index, entry in enumerate(feed.entries[:limit]):
+        title = entry.get("title", "No Title")
+        desc = entry.get("summary", "")
+        if not desc.strip():
+            continue
+
+        parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+        if not parsed_date:
+            continue
+        pub_date = datetime(*parsed_date[:6])
+        if pub_date < cutoff:
+            continue
+
+        # Your logic for category, summary, etc.
+        text = f"{title} {desc}"
+        category = predict_category(text)
+        if category == "Unknown":
+            category = "General"
+        summary = simple_summarize(desc)
+
+        parsed_url = urlparse(url)
+        source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+        article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
+        bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
+
+        articles.append({
+            "id":          article_id,
+            "title":       title,
+            "summary":     summary,
+            "description": desc,
+            "url":         entry.get("link", "#"),
+            "category":    category,
+            "source":      source,
+            "published":   pub_date.isoformat(),
+            "bias":        bias,
+            "zip_code":    zipcode
+        })
     return articles
