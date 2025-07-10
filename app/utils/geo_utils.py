@@ -1,26 +1,19 @@
 from urllib.parse import quote_plus
 import aiohttp  # use if you want true async for feed fetching
 import feedparser
+import pgeocode
+import pandas as pd
 
-# app/utils/geo_utils.py
+nomi = pgeocode.Nominatim('us')
 
 def get_city_state_from_zip(zipcode):
-    """Basic ZIP code to city/state lookup stub.
-    In production, replace this with an actual lookup or API.
-    """
-    # Dummy mapping - add your own or use an API
-    zip_map = {
-        "90210": ("Beverly Hills", "CA"),
-        "10001": ("New York", "NY"),
-        "83702": ("Boise", "ID"),
-        # add more as needed
-    }
-    result = zip_map.get(str(zipcode))
-    if result:
-        city, state = result
-        return city, state
-    else:
-        return None, None
+    """Looks up city and state from a US ZIP using pgeocode."""
+    zipcode = str(zipcode).zfill(5)
+    info = nomi.query_postal_code(zipcode)
+    print("ZIP lookup:", info)  # Optional: Remove this print for production
+    if pd.notna(info.place_name) and pd.notna(info.state_name):
+        return info.place_name, info.state_name
+    return None, None
 
 def make_local_news_query(zipcode):
     """Generate a local news query string based on ZIP code."""
