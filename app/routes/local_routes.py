@@ -26,4 +26,4 @@ def update_zipcode():
         flash("ZIP code updated successfully!", "success")
     else:
         flash("Invalid ZIP code format. Please enter a 5-digit U.S. ZIP.", "error")
-    return redirect(url_for("user.account"))
+    return redirect(url_for("account_page"))

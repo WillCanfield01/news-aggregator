@@ -18,14 +18,17 @@ def confirm_token(token, expiration=3600):
 
 def send_confirmation_email(email, username, token):
     confirm_link = f"https://therealroundup.com/confirm/{token}"
-    postmark.emails.send(
-        From=os.getenv("EMAIL_FROM"),
-        To=email,
-        Subject='Confirm Your Email – The Roundup',
-        HtmlBody=f'''
-            <p>Hi {username},</p>
-            <p>Please confirm your email by clicking the link below:</p>
-            <p><a href="{confirm_link}">Confirm your email</a></p>
-        ''',
-        MessageStream="outbound"
-    )
+    try:
+        postmark.emails.send(
+            From=os.getenv("EMAIL_FROM"),
+            To=email,
+            Subject='Confirm Your Email – The Roundup',
+            HtmlBody=f'''
+                <p>Hi {username},</p>
+                <p>Please confirm your email by clicking the link below:</p>
+                <p><a href="{confirm_link}">Confirm your email</a></p>
+            ''',
+            MessageStream="outbound"
+        )
+    except Exception as e:
+        print("Error sending confirmation email:", e)

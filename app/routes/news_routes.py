@@ -1,55 +1,58 @@
 from flask import Blueprint, jsonify, render_template, request
 from flask_login import login_required, current_user
 from app.utils.feed_utils import (
-    fetch_live_articles,
     get_cached_articles,
+    get_new_articles,
+    manual_refresh_articles,
     regenerate_summary_for_article,
-    normalize_category
+    normalize_category,
+    get_local_articles_for_user,
 )
 from app.utils.bias_utils import bias_bucket
 
 bp = Blueprint('news', __name__)
 
-# Serve main page news (cached for 10 minutes)
+# Main homepage (serves index.html)
 @bp.route('/')
-def index():
+def home():
     return render_template('index.html')
 
-# Refresh articles without using cache (for debug/admin or live testing)
-@bp.route("/new")
+# Main news API (returns cached articles)
+@bp.route('/news')
+def get_news():
+    return jsonify(get_cached_articles())
+
+# Manual refresh endpoint (admin/testing)
+@bp.route('/refresh')
+def manual_refresh():
+    result = manual_refresh_articles()
+    return jsonify(result)
+
+# Get most recently refreshed articles (new batch)
+@bp.route('/new')
 def new_articles():
-    return jsonify(fetch_live_articles())
-
-# Filter news by political bias
-@bp.route("/by-bias/<bias>")
-def news_by_bias(bias):
-    bias = bias.strip().capitalize()
-    if bias not in {"Left", "Center", "Right"}:
-        return jsonify({"error": "Invalid bias value"}), 400
-
-    filtered = [a for a in get_cached_articles() if bias_bucket(a["bias"]) == bias]
-    return jsonify(filtered)
-
-# Filter news by normalized category
-@bp.route("/by-category/<category>")
-def news_by_category(category):
-    normalized = normalize_category(category)
-    filtered = [a for a in get_cached_articles() if a["category"] == normalized]
-    return jsonify(filtered)
+    return jsonify(get_new_articles())
 
 # Regenerate OpenAI summary for a specific article (by ID)
-@bp.route("/regenerate-summary/<article_id>")
+@bp.route('/regenerate-summary/<article_id>')
 def regenerate_summary(article_id):
     summary = regenerate_summary_for_article(article_id)
     if summary:
         return jsonify({"summary": summary})
     return jsonify({"error": "Article not found"}), 404
 
-@bp.route("/news/")
-@login_required
-def get_news():
-    from app.utils.feed_utils import get_local_articles_for_user
-    is_local = request.args.get("local") == "true"
-    if is_local:
-        return jsonify(get_local_articles_for_user(current_user))
-    return jsonify(get_cached_articles())
+# Filter by political bias bucket
+@bp.route('/news/by-bias/<bias>')
+def news_by_bias(bias):
+    bias = bias.strip().capitalize()
+    if bias not in {"Left", "Center", "Right"}:
+        return jsonify({"error": "Invalid bias value"}), 400
+    filtered = [a for a in get_cached_articles() if bias_bucket(a["bias"]) == bias]
+    return jsonify(filtered)
+
+# Filter by category
+@bp.route('/news/by-category/<category>')
+def news_by_category(category):
+    normalized = normalize_category(category)
+    filtered = [a for a in get_cached_articles() if a["category"] == normalized]
+    return jsonify(filtered)

@@ -15,14 +15,26 @@ def load_user(user_id):
 
 @bp.route("/login", methods=["POST"])
 def login():
+    data = request.get_json() or {}
+    username = data.get("username", "").strip().lower()
+    password = data.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
     try:
-        data = request.get_json()
-        email = data.get("email")
-        password = data.get("password")
-        # Validate login...
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        user = User.query.filter_by(username=username).first()
+    except Exception as db_error:
+        current_app.logger.warning("Database error during login: %s", db_error)
+        return jsonify({"error": "Database error. Please try again shortly."}), 503
+
+    if user and user.check_password(password):
+        if not user.is_confirmed:
+            return jsonify({"error": "Please confirm your email first."}), 403
+        login_user(user)
+        return jsonify(success=True, username=user.username)
+
+    return jsonify(success=False, message="Invalid credentials"), 401
 
 @bp.route("/logout", methods=["POST"])
 @login_required
@@ -71,6 +83,11 @@ def confirm_email(token):
         user.is_confirmed = True
         db.session.commit()
         return redirect("https://therealroundup.com/?confirmed=true")
+    
+@bp.route("/me")
+@login_required
+def me():
+    return jsonify({"username": current_user.username})
     
 @login_manager.user_loader
 def load_user(user_id):

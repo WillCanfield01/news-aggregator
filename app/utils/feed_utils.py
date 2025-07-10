@@ -5,25 +5,27 @@ import feedparser
 import torch
 import torch.nn.functional as F
 import threading
-from urllib.parse import urlparse
+import asyncio
+from urllib.parse import urlparse, quote_plus
 from datetime import datetime, timedelta
 from html import unescape
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
 from app.utils.bias_utils import detect_political_bias
 from openai import OpenAI
 from newspaper import Article
-from flask import current_app
-from app.models import User  # make sure your models are accessible
+from app.utils.geo_utils import get_city_state_from_zip, make_local_news_query
+import pgeocode
+
+# For local feed city/state lookups
+nomi = pgeocode.Nominatim('us')
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-_model = None
-_tokenizer = None
-_model_labels = None
-_model_lock = threading.Lock()
-
+# === Article batching & caching ===
+MAX_CACHED_ARTICLES = 300
 cached_articles = []
 new_articles_last_refresh = []
+current_batch_index = 0
 
 RSS_FEED_BATCHES = [
     [
@@ -40,10 +42,7 @@ RSS_FEED_BATCHES = [
     ]
 ]
 
-current_batch_index = 0
-
 FILTERED_CATEGORIES = set(["Unknown"])
-
 CATEGORY_MAP = {
     "arts_&_culture": "Entertainment", "fashion_&_style": "Entertainment",
     "food_&_dining": "Entertainment", "diaries_&_daily_life": "Entertainment",
@@ -57,6 +56,14 @@ CATEGORY_MAP = {
     "family": "Lifestyle"
 }
 
+_model = None
+_tokenizer = None
+_model_labels = None
+_model_lock = threading.Lock()
+
+# =============================
+# ML/UTILS: Category + Summary
+# =============================
 def get_model_components():
     global _model, _tokenizer, _model_labels
     if _model is None:
@@ -90,10 +97,6 @@ def predict_category(text):
         return normalize_category(raw)
     except:
         return "Unknown"
-
-# =====================
-# SUMMARIZATION / UTILS
-# =====================
 
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
@@ -130,7 +133,7 @@ def summarize_with_openai(text):
                 }
             ],
             max_tokens=180,  # Enough for 2–3 sentence summary
-            temperature=0.3,  # Lower temperature for more factual output
+            temperature=0.3,
             timeout=30
         )
         return result.choices[0].message.content.strip()
@@ -149,9 +152,8 @@ def extract_full_article_text(url):
         return ""
 
 # ================
-# MAIN PAGE FEEDS
+# Main Feed Logic
 # ================
-
 def fetch_feed(url, use_ai=False):
     articles = []
     try:
@@ -209,50 +211,66 @@ def fetch_feed(url, use_ai=False):
 
     return articles
 
-def fetch_live_articles():
-    feeds = [
-        "https://www.npr.org/rss/rss.php?id=1001",
-        "http://feeds.bbci.co.uk/news/rss.xml",
-    ]
-    articles = []
-    for url in feeds:
-        articles.extend(fetch_feed(url))
-    return articles[:50]
+def preload_articles_batched(feed_list, use_ai=False):
+    global cached_articles, new_articles_last_refresh
+    print(f"Preloading articles from {len(feed_list)} feeds...")
+    all_new = []
+    for url in feed_list:
+        all_new.extend(fetch_feed(url, use_ai))
+    # Only keep unique articles
+    existing_ids = {a["id"] for a in cached_articles}
+    unique_new = [a for a in all_new if a["id"] not in existing_ids]
+    new_articles_last_refresh = unique_new
+    cached_articles = unique_new + cached_articles
+    cached_articles = cached_articles[:MAX_CACHED_ARTICLES]
+    print(f"✓ {len(unique_new)} new articles added. Total cached: {len(cached_articles)}")
+
+def manual_refresh_articles():
+    global current_batch_index
+    preload_articles_batched(RSS_FEED_BATCHES[current_batch_index], use_ai=False)
+    current_batch_index = (current_batch_index + 1) % len(RSS_FEED_BATCHES)
+    return {"status": "Refreshed", "batch": current_batch_index}
 
 def get_cached_articles():
-    cache = current_app.config.get("ARTICLE_CACHE", {})
-    if cache.get("articles") and datetime.utcnow() - cache["last_fetched"] < timedelta(minutes=10):
-        return cache["articles"]
-    articles = fetch_live_articles()
-    set_cached_articles(articles)
-    return articles
+    return cached_articles
 
-def set_cached_articles(articles):
-    current_app.config["ARTICLE_CACHE"] = {
-        "articles": articles,
-        "last_fetched": datetime.utcnow()
-    }
+def get_new_articles():
+    return new_articles_last_refresh
 
-# ==================
-# LOCAL (ZIP) FEEDS
-# ==================
+def regenerate_summary_for_article(article_id):
+    article = next((a for a in cached_articles if a["id"] == article_id), None)
+    if article:
+        full_text = extract_full_article_text(article["url"])
+        if not full_text:
+            full_text = article["description"]
+        article["summary"] = summarize_with_openai(full_text)
+        return article["summary"]
+    return None
 
-def fetch_local_feeds(zipcode):
-    local_feeds = [
-        f"https://news.google.com/rss/search?q={zipcode}&hl=en-US&gl=US&ceid=US:en"
-    ]
-    articles = []
-    for url in local_feeds:
-        articles.extend(fetch_feed(url))
-    return articles[:50]  # Local feeds are NOT cached — fetched live always
-
-def regenerate_summary_for_article(article_text):
-    return summarize_with_openai(article_text)
-
+# ================
+# Local News Logic
+# ================
 def is_valid_zip(zipcode):
     return bool(re.match(r"^\d{5}$", zipcode))
+
+async def fetch_google_local_feed(zipcode: str, limit: int = 50):
+    query = make_local_news_query(zipcode)
+    if not query:
+        print(f"⚠️ Could not resolve ZIP {zipcode} to city/state")
+        return []
+
+    encoded_query = quote_plus(query)
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+    print(f"📡 Fetching Google News RSS for: {query}")
+    # If you want this to be async, implement an async fetch_single_feed
+    return fetch_feed(url)[:limit]
 
 def get_local_articles_for_user(user):
     if not user or not is_valid_zip(user.zipcode):
         return []
-    return fetch_local_feeds(user.zipcode)
+    # For parity, always fetch live—optionally, implement caching if needed
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    articles = loop.run_until_complete(fetch_google_local_feed(user.zipcode, limit=50))
+    loop.close()
+    return articles

@@ -16,16 +16,15 @@ def detect_political_bias(text, article_id=None, source=None):
     fallback_bias = KNOWN_BIAS_BY_SOURCE.get((source or "").lower(), 50)
 
     prompt = (
-    "Rate the political bias of this news article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right).\n\n"
-    "Consider language, tone, and framing of issues. Even subtle preferences matter. Avoid assuming neutrality.\n\n"
-    "Examples:\n"
-    "- Praise of renewable energy and criticism of oil companies = 25\n"
-    "- Defense of gun rights or religious liberty = 75\n"
-    "- Objective economic stats without interpretation = 50\n"
-    "- Article with loaded words like 'radical left' or 'MAGA patriots' = 10 or 95\n\n"
-    "Return ONLY a number from 0 to 100."
+        "Rate the political bias of this news article on a scale from 0 (Far Left), 50 (Center), to 100 (Far Right).\n\n"
+        "Consider language, tone, and framing of issues. Even subtle preferences matter. Avoid assuming neutrality.\n\n"
+        "Examples:\n"
+        "- Praise of renewable energy and criticism of oil companies = 25\n"
+        "- Defense of gun rights or religious liberty = 75\n"
+        "- Objective economic stats without interpretation = 50\n"
+        "- Article with loaded words like 'radical left' or 'MAGA patriots' = 10 or 95\n\n"
+        "Return ONLY a number from 0 to 100."
     )
-
 
     try:
         result = client.chat.completions.create(
@@ -39,16 +38,20 @@ def detect_political_bias(text, article_id=None, source=None):
             timeout=10
         )
         raw = result.choices[0].message.content.strip()
-        bias_score = int(re.search(r'\d+', raw).group())
+        match = re.search(r'\d+', raw)
+        if not match:
+            print(f"Unexpected OpenAI output for bias: {raw}")
+            return fallback_bias
+        bias_score = int(match.group())
 
         if 45 <= bias_score <= 55 and source in KNOWN_BIAS_BY_SOURCE:
-                    delta = (KNOWN_BIAS_BY_SOURCE[source] - 50) * 0.3  # Apply 30% nudge
-                    bias_score += int(delta)
+            delta = (KNOWN_BIAS_BY_SOURCE[source] - 50) * 0.3  # Apply 30% nudge
+            bias_score += int(delta)
         bias_score = max(0, min(100, bias_score))
         if article_id:
             bias_cache[article_id] = bias_score
         return bias_score
-        
+
     except Exception as e:
         print("Bias detection failed:", e)
         return fallback_bias
