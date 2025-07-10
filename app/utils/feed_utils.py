@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 import threading
 import asyncio
+import dateutil.parser
 from urllib.parse import urlparse, quote_plus
 from datetime import datetime, timedelta
 from html import unescape
@@ -274,15 +275,26 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
     cutoff = datetime.utcnow() - timedelta(days=7)
     for index, entry in enumerate(feed.entries[:limit]):
         title = entry.get("title", "No Title")
-        desc = entry.get("summary", "")
+        desc = entry.get("summary", "") or entry.get("description", "") or ""
+        # Use title if desc is empty
         if not desc.strip():
-            continue
+            desc = title
 
+        # --- More robust date parsing ---
         parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
-        if not parsed_date:
+        pub_date = None
+        if parsed_date:
+            pub_date = datetime(*parsed_date[:6])
+        elif entry.get("published"):
+            try:
+                pub_date = dateutil.parser.parse(entry.get("published"))
+            except Exception as e:
+                print(f"Date parse failed: {e}")
+        if not pub_date:
+            print(f"Skipping: no valid date for {title}")
             continue
-        pub_date = datetime(*parsed_date[:6])
         if pub_date < cutoff:
+            print(f"Skipping: too old {title} ({pub_date})")
             continue
 
         text = f"{title} {desc}"
@@ -290,13 +302,9 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
         if category == "Unknown":
             category = "General"
         summary = simple_summarize(desc)
-
         parsed_url = urlparse(url)
         source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
         article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
-
-        # --------- SET NEUTRAL BIAS (No OpenAI call) ---------
-        bias = 50
 
         articles.append({
             "id":          article_id,
@@ -307,7 +315,7 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
             "category":    category,
             "source":      source,
             "published":   pub_date.isoformat(),
-            "bias":        bias,  # <--- Neutral, fast, not calculated
             "zip_code":    zipcode
         })
+    print(f"Articles parsed for {zipcode}: {len(articles)}")
     return articles
