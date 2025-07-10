@@ -388,7 +388,7 @@
 
             document.getElementById("loading").style.display = "block";
 
-            fetch('/news?local=true')
+            fetch('/news')
                 .then(response => response.json())
                 .then(data => {
                     articles = data;
