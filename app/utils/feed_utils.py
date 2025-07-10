@@ -268,33 +268,34 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
     encoded_query = quote_plus(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
     print(f"📡 Fetching Google News RSS for: {query}")
+    print(f"RSS URL: {url}")
 
     feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
     print(f"feed.entries: {len(feed.entries)} articles")
     articles = []
     cutoff = datetime.utcnow() - timedelta(days=7)
+
     for index, entry in enumerate(feed.entries[:limit]):
         title = entry.get("title", "No Title")
-        desc = entry.get("summary", "") or entry.get("description", "") or ""
-        # Use title if desc is empty
-        if not desc.strip():
-            desc = title
+        # Google sometimes puts content in "description", sometimes "summary", rarely both.
+        desc = entry.get("summary") or entry.get("description") or title or ""
+        desc = strip_html(desc)
 
-        # --- More robust date parsing ---
-        parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
+        # Robust date extraction
         pub_date = None
+        parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
         if parsed_date:
             pub_date = datetime(*parsed_date[:6])
         elif entry.get("published"):
             try:
                 pub_date = dateutil.parser.parse(entry.get("published"))
             except Exception as e:
-                print(f"Date parse failed: {e}")
+                print(f"Date parse failed for '{title}': {e}")
         if not pub_date:
-            print(f"Skipping: no valid date for {title}")
+            print(f"Skipping '{title}': no valid date")
             continue
         if pub_date < cutoff:
-            print(f"Skipping: too old {title} ({pub_date})")
+            print(f"Skipping '{title}': too old ({pub_date})")
             continue
 
         text = f"{title} {desc}"
