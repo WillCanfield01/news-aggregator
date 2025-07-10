@@ -52,7 +52,7 @@ def create_app(config_name='default'):
     with app.app_context():
         # Main news batching
         preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
-        start_periodic_refresh(app)
+        start_periodic_refresh(app, interval=600)
         # Local news refresh
         start_periodic_local_refresh(app, local_articles_cache=local_articles_cache)
 
