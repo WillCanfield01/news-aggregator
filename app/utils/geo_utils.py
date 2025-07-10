@@ -1,5 +1,4 @@
 from urllib.parse import quote_plus
-from app.utils.geo_utils import make_local_news_query
 import aiohttp  # use if you want true async for feed fetching
 import feedparser
 
