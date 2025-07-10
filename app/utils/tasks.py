@@ -10,15 +10,12 @@ from app.utils.feed_utils import (
 from app.utils.geo_utils import fetch_google_local_feed
 from app.models import User
 
-def start_periodic_refresh(app, interval=480):
-    """Background batch refresh for main articles (uses batch cycling)"""
+def periodic_refresh(interval=600):
     def run():
-        with app.app_context():
-            batch = 0
-            while True:
-                preload_articles_batched(RSS_FEED_BATCHES[batch])
-                batch = (batch + 1) % len(RSS_FEED_BATCHES)
-                time.sleep(interval)
+        while True:
+            for batch in RSS_FEED_BATCHES:
+                preload_articles_batched(batch)
+            time.sleep(interval)  # Sleep AFTER all batches processed
     threading.Thread(target=run, daemon=True).start()
 
 def start_periodic_local_refresh(app, local_articles_cache, interval=900):
