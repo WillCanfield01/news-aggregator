@@ -162,12 +162,26 @@ def fetch_feed(url, use_ai=False):
         feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
         cutoff = datetime.utcnow() - timedelta(days=7)
 
-        for index, entry in enumerate(feed.entries):
+        for index, entry in enumerate(feed.entries[:limit]):
             title = entry.get("title", "No Title")
-            desc  = entry.get("summary", "")
+            desc  = (
+                entry.get("summary", "")
+                or entry.get("description", "")
+                or ""
+            )
+            # Use title as desc if both summary/description are missing
             if not desc.strip():
+                desc = title
+            # Only skip if everything is blank
+            if not desc.strip() and not title.strip():
                 continue
 
+        print(f"Feed has {len(feed.entries)} entries")
+        for e in feed.entries[:2]:
+            print("Entry keys:", list(e.keys()))
+            print("Title:", e.get("title"))
+            print("Summary:", e.get("summary"))
+            print("Description:", e.get("description"))
             # Parse publish date (allow updated if published missing)
             parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
             if not parsed_date:
@@ -277,7 +291,6 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
 
     for index, entry in enumerate(feed.entries[:limit]):
         title = entry.get("title", "No Title")
-        # Google sometimes puts content in "description", sometimes "summary", rarely both.
         desc = entry.get("summary") or entry.get("description") or title or ""
         desc = strip_html(desc)
 
