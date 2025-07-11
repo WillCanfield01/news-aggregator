@@ -16,6 +16,7 @@ from openai import OpenAI
 from newspaper import Article
 from app.utils.geo_utils import get_city_state_from_zip, make_local_news_query
 import pgeocode
+import requests
 
 # For local feed city/state lookups
 nomi = pgeocode.Nominatim('us')
@@ -284,8 +285,20 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
     print(f"📡 Fetching Google News RSS for: {query}")
     print(f"RSS URL: {url}")
 
-    feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
-    print(f"feed.entries: {len(feed.entries)} articles")
+    # --- Print HTTP response directly, if no entries ---
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    response = requests.get(url, headers=headers)
+    print(f"HTTP Status: {response.status_code}")
+    print("First 500 chars of HTTP response:")
+    print(response.text[:500])
+
+    feed = feedparser.parse(response.text)
+    print(f"Feed status: {getattr(feed, 'status', None)}")
+    print(f"Feed bozo: {feed.bozo}")
+    if feed.bozo:
+        print(f"Feed bozo_exception: {feed.bozo_exception}")
+    print(f"Feed headers: {getattr(feed, 'headers', None)}")
+    print(f"Feed entries: {len(feed.entries)}")
     articles = []
     cutoff = datetime.utcnow() - timedelta(days=7)
 
