@@ -156,7 +156,7 @@ def extract_full_article_text(url):
 # ================
 # Main Feed Logic
 # ================
-def fetch_feed(url, use_ai=False):
+def fetch_feed(url, use_ai=False, limit=50):
     articles = []
     try:
         print(f"Fetching {url}…")
@@ -232,7 +232,7 @@ def preload_articles_batched(feed_list, use_ai=False):
     print(f"Preloading articles from {len(feed_list)} feeds...")
     all_new = []
     for url in feed_list:
-        all_new.extend(fetch_feed(url, use_ai))
+        all_new.extend(fetch_feed(url, use_ai, limit=50))
     # Only keep unique articles
     existing_ids = {a["id"] for a in cached_articles}
     unique_new = [a for a in all_new if a["id"] not in existing_ids]
