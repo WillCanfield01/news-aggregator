@@ -41,7 +41,10 @@ class ProductionConfig(Config):
             uri += "?sslmode=require"
         return uri
 
-    SQLALCHEMY_DATABASE_URI = get_database_uri.__func__()
+    SQLALCHEMY_DATABASE_URI = None  # placeholder, set below
+
+# Set the database URI after the class definition
+ProductionConfig.SQLALCHEMY_DATABASE_URI = ProductionConfig.get_database_uri()
 
 config = {
     "development": DevelopmentConfig,
