@@ -24,7 +24,7 @@ def get_local_news():
     cache = current_app.local_articles_cache
 
     result = cache.get(zip_code)
-    if result:
+    if result and isinstance(result, tuple) and len(result) == 2:
         ts, articles = result
         if time.time() - ts < 15 * 60:
             print(f"Serving {len(articles)} cached local articles for {zip_code}")
