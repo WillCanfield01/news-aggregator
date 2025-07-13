@@ -11,7 +11,14 @@ bp = Blueprint('auth', __name__)
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    retries = 3
+    for attempt in range(retries):
+        try:
+            return User.query.get(int(user_id))
+        except OperationalError as e:
+            current_app.logger.warning(f"DB connection failed: {e}")
+            time.sleep(2)  # wait a moment and retry
+    return None  # gracefully fail if Neon isn't awake
 
 @bp.route("/login", methods=["POST"])
 def login():
@@ -88,14 +95,3 @@ def confirm_email(token):
 @login_required
 def me():
     return jsonify({"username": current_user.username})
-    
-@login_manager.user_loader
-def load_user(user_id):
-    retries = 3
-    for attempt in range(retries):
-        try:
-            return User.query.get(int(user_id))
-        except OperationalError as e:
-            current_app.logger.warning(f"DB connection failed: {e}")
-            time.sleep(2)  # wait a moment and retry
-    return None  # gracefully fail if Neon isn't awake

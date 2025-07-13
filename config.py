@@ -32,13 +32,16 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     DEBUG = False
 
-    uri = os.getenv("DATABASE_URL", "")
-    if uri.startswith("postgres://"):
-        uri = uri.replace("postgres://", "postgresql://", 1)
-    # Append ?sslmode=require if needed
-    if uri and "sslmode" not in uri:
-        uri += "?sslmode=require"
-    SQLALCHEMY_DATABASE_URI = uri
+    @classmethod
+    def get_database_uri(cls):
+        uri = os.getenv("DATABASE_URL", "")
+        if uri.startswith("postgres://"):
+            uri = uri.replace("postgres://", "postgresql://", 1)
+        if uri and "sslmode" not in uri:
+            uri += "?sslmode=require"
+        return uri
+
+    SQLALCHEMY_DATABASE_URI = get_database_uri.__func__()
 
 config = {
     "development": DevelopmentConfig,

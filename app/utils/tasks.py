@@ -1,7 +1,6 @@
 import threading
 import time
 import asyncio
-import re
 from app.utils.feed_utils import (
     preload_articles_batched,
     manual_refresh_articles,
@@ -23,16 +22,19 @@ def start_periodic_refresh(app, interval=600):
 
 def start_periodic_local_refresh(app, local_articles_cache, interval=900):
     async def refresh_loop():
-        with app.app_context():
-            Session = sessionmaker(bind=db.engine)
-            while True:
+        while True:
+            with app.app_context():
+                Session = sessionmaker(bind=db.engine)
                 session = Session()
                 try:
                     users = session.query(User).filter(User.zipcode.isnot(None)).all()
-                    # ... rest of your code ...
+                    zipcodes = {user.zipcode for user in users if user.zipcode}
                 finally:
                     session.close()
-                # ... gather tasks, await, sleep, etc. ...
+            # Gather tasks for each zipcode
+            tasks = [refresh_zip_feed(zipcode, local_articles_cache) for zipcode in zipcodes]
+            await asyncio.gather(*tasks)
+            await asyncio.sleep(interval)
 
     def run():
         asyncio.run(refresh_loop())

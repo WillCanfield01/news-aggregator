@@ -20,18 +20,29 @@ def home():
 # Main news API (returns cached articles)
 @bp.route('/news')
 def get_news():
-    return jsonify(get_cached_articles())
+    try:
+        articles = get_cached_articles()
+        return jsonify(articles)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Manual refresh endpoint (admin/testing)
 @bp.route('/refresh')
 def manual_refresh():
-    result = manual_refresh_articles()
-    return jsonify(result)
+    try:
+        result = manual_refresh_articles()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Get most recently refreshed articles (new batch)
 @bp.route('/new')
 def new_articles():
-    return jsonify(get_new_articles())
+    try:
+        articles = get_new_articles()
+        return jsonify(articles)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Regenerate OpenAI summary for a specific article (by ID)
 @bp.route('/regenerate-summary/<article_id>')
@@ -47,12 +58,14 @@ def news_by_bias(bias):
     bias = bias.strip().capitalize()
     if bias not in {"Left", "Center", "Right"}:
         return jsonify({"error": "Invalid bias value"}), 400
-    filtered = [a for a in get_cached_articles() if bias_bucket(a["bias"]) == bias]
+    filtered = [a for a in get_cached_articles() if a.get("bias", "").capitalize() == bias]
     return jsonify(filtered)
 
 # Filter by category
 @bp.route('/news/by-category/<category>')
 def news_by_category(category):
     normalized = normalize_category(category)
-    filtered = [a for a in get_cached_articles() if a["category"] == normalized]
+    if not normalized:
+        return jsonify({"error": "Invalid category"}), 400
+    filtered = [a for a in get_cached_articles() if a.get("category") == normalized]
     return jsonify(filtered)

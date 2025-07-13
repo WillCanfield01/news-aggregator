@@ -27,7 +27,7 @@ def detect_political_bias(text, article_id=None, source=None):
     )
 
     try:
-        result = client.chat.completions.create(
+        result = client.ChatCompletion.create(  # Fixed method call
             model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": prompt},
@@ -44,8 +44,8 @@ def detect_political_bias(text, article_id=None, source=None):
             return fallback_bias
         bias_score = int(match.group())
 
-        if 45 <= bias_score <= 55 and source in KNOWN_BIAS_BY_SOURCE:
-            delta = (KNOWN_BIAS_BY_SOURCE[source] - 50) * 0.3  # Apply 30% nudge
+        if 45 <= bias_score <= 55 and source:  # Ensure source is not None
+            delta = (KNOWN_BIAS_BY_SOURCE.get(source.lower(), 50) - 50) * 0.3  # Apply 30% nudge
             bias_score += int(delta)
         bias_score = max(0, min(100, bias_score))
         if article_id:
@@ -53,7 +53,7 @@ def detect_political_bias(text, article_id=None, source=None):
         return bias_score
 
     except Exception as e:
-        print("Bias detection failed:", e)
+        print(f"Bias detection failed: {e}")  # Improved error logging
         return fallback_bias
 
 def bias_bucket(score):

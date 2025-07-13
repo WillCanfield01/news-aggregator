@@ -285,20 +285,30 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
     print(f"📡 Fetching Google News RSS for: {query}")
     print(f"RSS URL: {url}")
 
-    # --- Print HTTP response directly, if no entries ---
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(url, headers=headers)
-    print(f"HTTP Status: {response.status_code}")
+
+    # Check if the response is valid
+    if response.status_code != 200 or not response.text.strip():
+        print(f"⚠️ Failed to fetch RSS feed for ZIP {zipcode}. HTTP Status: {response.status_code}")
+        return []
+
     print("First 500 chars of HTTP response:")
     print(response.text[:500])
 
-    feed = feedparser.parse(response.text)
+    try:
+        feed = feedparser.parse(response.text)
+    except Exception as e:
+        print(f"⚠️ Failed to parse RSS feed for ZIP {zipcode}: {e}")
+        return []
+
     print(f"Feed status: {getattr(feed, 'status', None)}")
     print(f"Feed bozo: {feed.bozo}")
     if feed.bozo:
         print(f"Feed bozo_exception: {feed.bozo_exception}")
     print(f"Feed headers: {getattr(feed, 'headers', None)}")
     print(f"Feed entries: {len(feed.entries)}")
+
     articles = []
     cutoff = datetime.utcnow() - timedelta(days=7)
 

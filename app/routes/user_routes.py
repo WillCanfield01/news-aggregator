@@ -37,6 +37,10 @@ def save_article():
     source = data.get("source")
     category = data.get("category")
 
+    # Check for missing required fields
+    if not all([article_id, title, url]):
+        return jsonify({"error": "Missing required article fields"}), 400
+
     if SavedArticle.query.filter_by(user_id=current_user.id, article_id=article_id).first():
         return jsonify({"error": "Article already saved"}), 400
 
@@ -55,7 +59,7 @@ def save_article():
     )
     db.session.add(saved)
     db.session.commit()
-    return jsonify({"success": True, "message": "Article saved"})
+    return jsonify({"success": True, "message": "Article saved"}), 201
 
 @bp.route("/save", methods=["POST"])
 @login_required
@@ -67,13 +71,15 @@ def alias_save_article():
 def unsave_article():
     data = request.get_json() or {}
     article_id = data.get("id")
+    if not article_id:
+        return jsonify({"error": "Missing article id"}), 400
     saved = SavedArticle.query.filter_by(user_id=current_user.id, article_id=article_id).first()
     if not saved:
         return jsonify({"error": "Article not found in saved list"}), 404
 
     db.session.delete(saved)
     db.session.commit()
-    return jsonify({"success": True, "message": "Article unsaved"})
+    return jsonify({"success": True, "message": "Article unsaved"}), 200
 
 @bp.route("/reset-password", methods=["POST"])
 @login_required
@@ -82,6 +88,9 @@ def reset_password():
     current = data.get("current_password", "").strip()
     new = data.get("new_password", "").strip()
 
+    if not current or not new:
+        return jsonify({"error": "Missing password fields"}), 400
+
     if not current_user.check_password(current):
         return jsonify({"error": "Current password is incorrect"}), 400
     if len(new) < 6:
@@ -89,4 +98,4 @@ def reset_password():
 
     current_user.set_password(new)
     db.session.commit()
-    return jsonify({"success": True, "message": "Password updated successfully"})
+    return jsonify({"success": True, "message": "Password updated successfully"}), 200

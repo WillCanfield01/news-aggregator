@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_cors import CORS
 from config import config
+from threading import Lock
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -45,18 +46,17 @@ def create_app(config_name='default'):
     from app.utils.feed_utils import preload_articles_batched, RSS_FEED_BATCHES
     from app.utils.tasks import start_periodic_refresh, start_periodic_local_refresh
 
-    # Local articles cache can be a global dict, but must persist for the life of the app
-    # You may want to move this to a better location or make it a property of app
+    # Local articles cache and lock for thread safety
     local_articles_cache = {}
+    local_articles_cache_lock = Lock()
+    app.local_articles_cache = local_articles_cache
+    app.local_articles_cache_lock = local_articles_cache_lock
 
     with app.app_context():
         # Main news batching
         preload_articles_batched(RSS_FEED_BATCHES[0], use_ai=False)
         start_periodic_refresh(app, interval=600)
         # Local news refresh
-        start_periodic_local_refresh(app, local_articles_cache=local_articles_cache)
-
-    # Optionally, attach the local cache to the app object for use in routes
-    app.local_articles_cache = local_articles_cache
+        start_periodic_local_refresh(app, local_articles_cache=local_articles_cache, cache_lock=local_articles_cache_lock)
 
     return app

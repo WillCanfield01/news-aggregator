@@ -215,7 +215,7 @@
             if (category === 'Local') {
                 document.getElementById("loading").style.display = "block";
 
-                fetch('/news/local')
+                fetch('/news/local', { credentials: "include" })
                     .then(response => response.json())
                     .then(localArticles => {
                         articles = localArticles;
@@ -239,7 +239,7 @@
                 return;
             }
 
-            fetch(`/regenerate-summary/${articleId}`, { method: 'GET' })
+            fetch(`/regenerate-summary/${articleId}`, { method: 'GET', credentials: "include" })
                 .then(response => response.json())
                 .then(data => {
                     if (data.summary) {
@@ -267,42 +267,6 @@
 
         function closeSignupModal() {
             document.getElementById("signupModal").style.display = "none";
-        }
-
-        function submitSignup() {
-            const username = document.getElementById("signupUsername").value;
-            const password = document.getElementById("signupPassword").value;
-
-            fetch("/signup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({
-                    username: username,
-                    password: password
-                })
-            })
-                .then(async res => {
-                    const text = await res.text();
-                    try {
-                        const data = JSON.parse(text);
-                        if (res.ok) {
-                            showToast("Account created! Logging you in...");
-                            closeSignupModal();
-                            location.reload();
-                        } else {
-                            showToast("Sign-up failed: " + (data.error || "Unknown error"));
-                        }
-                    } catch (err) {
-                        console.error("Invalid JSON response:", text);
-                        showToast("Unexpected server response");
-                    }
-                })
-                .catch(err => {
-                    console.error("Signup error:", err);
-                    showToast("Error during sign-up: " + err.message);
-                });
-
         }
 
         function showToast(message, duration = 3000) {
@@ -380,7 +344,7 @@
 
         function getBiasShortLabel(score) {
             if (typeof score !== "number") return "U";
-            return score <= 25 ? "L" : score >= 75 ? "R" : "C";
+            return score < 25 ? "L" : score > 75 ? "R" : "C";
         }
 
         document.addEventListener("DOMContentLoaded", () => {
@@ -388,7 +352,7 @@
 
             document.getElementById("loading").style.display = "block";
 
-            fetch('/news')
+            fetch('/news', { credentials: "include" })
                 .then(response => response.json())
                 .then(data => {
                     articles = data;
@@ -419,7 +383,6 @@
                     showAuthButtons();
                 });
 
-
             // Save/unsave logic
             document.body.addEventListener("click", async (e) => {
                 if (!e.target.classList.contains("save-btn")) return;
@@ -434,6 +397,7 @@
                         const res = await fetch("/unsave-article", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
+                            credentials: "include",
                             body: JSON.stringify({ id: articleId })
                         });
 
@@ -478,11 +442,12 @@
                     showToast("Something went wrong. Try again.");
                 }
             });
+
             document.addEventListener("click", (e) => {
                 const dropdown = document.getElementById("dropdown-menu");
                 const button = document.querySelector(".avatar-button");
 
-                if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+                if (dropdown && button && !dropdown.contains(e.target) && !button.contains(e.target)) {
                     dropdown.style.display = "none";
                 }
             });

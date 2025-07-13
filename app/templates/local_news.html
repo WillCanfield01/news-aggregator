@@ -17,13 +17,15 @@
         <div class="header-inner">
             <div style="width: 100px;"></div>
             <h1 style="flex-grow: 1; text-align: center;">📍 Local News</h1>
-            <div id="profile-dropdown">
-                <button onclick="toggleDropdown()" class="avatar-button">👤</button>
-                <div id="dropdown-menu">
+            <div id="profile-dropdown" style="position: relative;">
+                <button onclick="toggleDropdown()" class="avatar-button" aria-haspopup="true" aria-expanded="false"
+                    aria-controls="dropdown-menu">👤</button>
+                <div id="dropdown-menu" role="menu" aria-hidden="true">
                     <p id="username-display">User</p>
-                    <button onclick="window.location.href='/account'">My Account</button>
-                    <a href="/"><button style="margin-bottom: 10px;">Home</button></a>
-                    <button onclick="logout()">Logout</button>
+                    <button onclick="window.location.href='/account'" role="menuitem">My Account</button>
+                    <button onclick="window.location.href='/'" role="menuitem"
+                        style="margin-bottom: 10px;">Home</button>
+                    <button onclick="logout()" role="menuitem">Logout</button>
                 </div>
             </div>
         </div>
@@ -66,7 +68,10 @@
 
         function toggleDropdown() {
             const menu = document.getElementById("dropdown-menu");
-            menu.style.display = menu.style.display === "block" ? "none" : "block";
+            const expanded = menu.style.display === "block";
+            menu.style.display = expanded ? "none" : "block";
+            menu.setAttribute("aria-hidden", expanded ? "true" : "false");
+            document.querySelector(".avatar-button").setAttribute("aria-expanded", (!expanded).toString());
         }
 
         function logout() {
@@ -78,14 +83,16 @@
 
         function showToast(message) {
             const toast = document.getElementById("toast-container");
-            toast.textContent = message;
+            toast.textContent = "";
             toast.style.display = "block";
             toast.style.opacity = "1";
+            toast.textContent = message;
 
             setTimeout(() => {
                 toast.style.opacity = "0";
                 setTimeout(() => {
                     toast.style.display = "none";
+                    toast.textContent = "";
                 }, 300);
             }, 3000);
         }
@@ -175,8 +182,10 @@
             document.addEventListener("click", (e) => {
                 const dropdown = document.getElementById("dropdown-menu");
                 const button = document.querySelector(".avatar-button");
-                if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+                if (dropdown.style.display === "block" && !dropdown.contains(e.target) && !button.contains(e.target)) {
                     dropdown.style.display = "none";
+                    dropdown.setAttribute("aria-hidden", "true");
+                    button.setAttribute("aria-expanded", "false");
                 }
             });
         });
@@ -232,17 +241,23 @@
             cursor: pointer;
         }
 
+        #profile-dropdown {
+            position: relative;
+        }
+
         #dropdown-menu {
             display: none;
             position: absolute;
             top: 50px;
-            right: 10px;
+            right: 0;
             background-color: white;
             border: 1px solid #ccc;
             padding: 10px;
             border-radius: 5px;
             z-index: 500;
             text-align: left;
+            min-width: 140px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
         }
 
         .bias-meter {

@@ -18,7 +18,10 @@ def get_local_news():
     if not zip_code:
         return jsonify([])
 
-    cache = getattr(current_app, "local_articles_cache", {})
+    # Ensure cache exists in current_app
+    if not hasattr(current_app, "local_articles_cache"):
+        current_app.local_articles_cache = {}
+    cache = current_app.local_articles_cache
 
     result = cache.get(zip_code)
     if result:
@@ -39,12 +42,16 @@ def get_local_news():
 @bp.route("/update-zipcode", methods=["POST"])
 @login_required
 def update_zipcode():
-    zip_input = request.form.get("zip") or (request.get_json() or {}).get("zip", "").strip()
+    # Accept zip from form or JSON body
+    zip_input = request.form.get("zip")
+    if zip_input is None:
+        json_data = request.get_json(silent=True)
+        zip_input = (json_data or {}).get("zip", "")
+    zip_input = (zip_input or "").strip()
     if is_valid_zip(zip_input):
         current_user.zipcode = zip_input
         db.session.commit()
         flash("ZIP code updated successfully!", "success")
     else:
         flash("Invalid ZIP code format. Please enter a 5-digit U.S. ZIP.", "error")
-    # Make sure the endpoint matches your user/account route
     return redirect(url_for("user.account_page"))
