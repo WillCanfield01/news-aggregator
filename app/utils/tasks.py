@@ -20,7 +20,7 @@ def start_periodic_refresh(app, interval=600):
                 time.sleep(interval)
     threading.Thread(target=run, daemon=True).start()
 
-def start_periodic_local_refresh(app, local_articles_cache, interval=900):
+def start_periodic_local_refresh(app, local_articles_cache, cache_lock, interval=900):
     async def refresh_loop():
         while True:
             with app.app_context():
@@ -32,7 +32,7 @@ def start_periodic_local_refresh(app, local_articles_cache, interval=900):
                 finally:
                     session.close()
             # Gather tasks for each zipcode
-            tasks = [refresh_zip_feed(zipcode, local_articles_cache) for zipcode in zipcodes]
+            tasks = [refresh_zip_feed(zipcode, local_articles_cache, cache_lock) for zipcode in zipcodes]
             await asyncio.gather(*tasks)
             await asyncio.sleep(interval)
 
@@ -40,6 +40,7 @@ def start_periodic_local_refresh(app, local_articles_cache, interval=900):
         asyncio.run(refresh_loop())
     threading.Thread(target=run, daemon=True).start()
 
-async def refresh_zip_feed(zipcode, local_articles_cache):
+async def refresh_zip_feed(zipcode, local_articles_cache, cache_lock):
     articles = await fetch_google_local_feed(zipcode)
-    local_articles_cache[zipcode] = articles
+    with cache_lock:
+        local_articles_cache[zipcode] = articles
