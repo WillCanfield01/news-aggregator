@@ -227,13 +227,24 @@ def fetch_feed(url, use_ai=False, limit=50):
 
     return articles
 
+def deduplicate_articles(articles):
+    seen = set()
+    deduped = []
+    for article in articles:
+        aid = article.get("id")
+        if aid and aid not in seen:
+            seen.add(aid)
+            deduped.append(article)
+    return deduped
+
 def preload_articles_batched(feed_list, use_ai=False):
     global cached_articles, new_articles_last_refresh
     print(f"Preloading articles from {len(feed_list)} feeds...")
     all_new = []
     for url in feed_list:
         all_new.extend(fetch_feed(url, use_ai, limit=50))
-    # Only keep unique articles
+    # Deduplicate all_new by article ID
+    all_new = deduplicate_articles(all_new)
     existing_ids = {a["id"] for a in cached_articles}
     unique_new = [a for a in all_new if a["id"] not in existing_ids]
     new_articles_last_refresh = unique_new
@@ -355,4 +366,6 @@ def fetch_google_local_feed_sync(zipcode, limit=50):
             "zip_code":    zipcode
         })
     print(f"Articles parsed for {zipcode}: {len(articles)}")
+    # Deduplicate by article ID
+    articles = deduplicate_articles(articles)
     return articles

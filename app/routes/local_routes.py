@@ -32,12 +32,28 @@ def get_local_news():
         else:
             del cache[zip_code]
 
+    # Synchronous fetch to avoid blocking
     from app.utils.geo_utils import fetch_google_local_feed
-    import asyncio
-    articles = asyncio.run(fetch_google_local_feed(zip_code, limit=50))
-    print(f"Articles fetched for {zip_code}: {len(articles)}")
-    cache[zip_code] = (time.time(), articles)
-    return jsonify(articles)
+    try:
+        articles = fetch_google_local_feed(zip_code, limit=50)
+    except Exception as e:
+        print(f"Error fetching articles for {zip_code}: {e}")
+        return jsonify([])
+
+    # Deduplicate articles by URL and title
+    seen = set()
+    deduped_articles = []
+    for article in articles:
+        url = (article.get("url") or article.get("link") or "").strip()
+        title = (article.get("title") or "").strip()
+        unique_key = f"{url}|{title}"
+        if url and unique_key not in seen:
+            seen.add(unique_key)
+            deduped_articles.append(article)
+
+    print(f"Articles fetched for {zip_code}: {len(deduped_articles)}")
+    cache[zip_code] = (time.time(), deduped_articles)
+    return jsonify(deduped_articles)
 
 @bp.route("/update-zipcode", methods=["POST"])
 @login_required
