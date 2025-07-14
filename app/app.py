@@ -44,7 +44,11 @@ local_cache_lock = threading.Lock()
 # U.S. ZIP code data
 nomi = pgeocode.Nominatim('us')
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
+    static_folder=os.path.join(os.path.dirname(__file__), 'static')
+    )
 uri = os.environ.get("DATABASE_URL", "")
 if uri.startswith("postgres://"):
     uri = uri.replace("postgres://", "postgresql://", 1)
