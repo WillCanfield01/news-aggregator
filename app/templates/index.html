@@ -3,8 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <meta name="description"
-        content="The Roundup – Summarized local and global news with AI-powered summaries and bias indicators.">
+    <meta name="description" content="The Roundup – Summarized local and global news with bias indicators.">
     <title>The Roundup – Summarized News</title>
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
         rel="stylesheet" />
@@ -17,31 +16,23 @@
 
     <div class="header">
         <div class="header-inner">
-            <!-- Left Column (empty to balance layout) -->
             <div style="width: 100px;"></div>
-
-            <!-- Center Column (title) -->
             <h1 style="flex-grow: 1; text-align: center; margin: 0;">The Roundup</h1>
-
-            <!-- Right Column (auth buttons or profile) -->
             <div id="auth-buttons" style="display: flex; gap: 10px;">
                 <button onclick="openLogin()">Login</button>
                 <button onclick="openSignup()">Sign Up</button>
             </div>
-
             <div id="profile-dropdown" style="display: none;">
                 <button onclick="toggleDropdown()" class="avatar-button">👤</button>
                 <div id="dropdown-menu">
                     <p id="username-display">User</p>
                     <a href="/account"><button style="margin-bottom: 10px;">My Account</button></a>
-                    <a href="/news/local"><button style="margin-bottom: 10px;">Local News</button></a>
                     <button onclick="logout()">Logout</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- ✅ Filter Buttons -->
     <div id="filter">
         <select onchange="filterCategory(this.value)"
             style="padding: 10px; font-size: 1em; border-radius: 5px; border: 1px solid #ccc;">
@@ -55,12 +46,148 @@
         </select>
     </div>
 
-    <!-- ✅ Loading and Articles -->
     <div id="loading" style="display: none;">Loading...</div>
     <h2 id="dynamic-header" style="margin-top: 20px;"></h2>
     <div id="articles"></div>
 
     <script>
+        let articles = [];
+        let currentUser = null;
+
+        function showProfileUI(username) {
+            document.getElementById("auth-buttons").style.display = "none";
+            document.getElementById("profile-dropdown").style.display = "block";
+            document.getElementById("username-display").textContent = username;
+        }
+
+        function showAuthButtons() {
+            document.getElementById("auth-buttons").style.display = "block";
+            document.getElementById("profile-dropdown").style.display = "none";
+        }
+
+        function toggleDropdown() {
+            const menu = document.getElementById("dropdown-menu");
+            menu.style.display = menu.style.display === "block" ? "none" : "block";
+        }
+
+        function logout() {
+            fetch("/logout", {
+                method: "POST",
+                credentials: "include"
+            })
+                .then(res => res.json())
+                .then(() => {
+                    currentUser = null;
+                    showAuthButtons();
+                });
+        }
+
+        function displayArticles(category) {
+            const articlesDiv = document.getElementById('articles');
+            const header = document.getElementById('dynamic-header');
+            articlesDiv.innerHTML = '';
+            header.innerHTML = '';
+
+            const filtered = category === 'All'
+                ? articles
+                : articles.filter(a => a.category.toLowerCase() === category.toLowerCase());
+
+            if (filtered.length === 0) {
+                articlesDiv.innerHTML = '<p>No articles found for this category.</p>';
+                return;
+            }
+
+            filtered.forEach(article => {
+                const div = document.createElement('div');
+                div.classList.add('article');
+                div.id = article.id;
+
+                const biasPercent = getBiasPositionPercent(article.bias);
+                const biasLabel = getBiasShortLabel(article.bias);
+
+                div.innerHTML = `
+                    <h2>${article.title}</h2>
+                    <p class="category">${article.category}</p>
+                    <div class="bias-meter" aria-label="Political bias meter">
+                        <div class="bias-meter-marker"
+                            style="left: calc(${biasPercent}% - 9px);"
+                            title="Bias: ${biasLabel} (${article.bias})">
+                            ${biasLabel}
+                        </div>
+                    </div>
+                    <div class="bias-meter-labels">
+                        <span>Far Left</span>
+                        <span>Far Right</span>
+                    </div>
+                    <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
+                    <p class="summary" id="summary-${article.id}">
+                        ${article.summary}
+                        <br>
+                        <small style="color:#888">(Summary based on publisher-provided text. Click source for full article.)</small>
+                    </p>
+                    <button class="save-btn" data-article-id="${article.id}" data-saved="false">Save</button>
+                    <a href="${article.url}" target="_blank" rel="noopener noreferrer">
+                        <strong>Read Full Article &rarr;</strong>
+                    </a>
+                `;
+
+                articlesDiv.appendChild(div);
+            });
+        }
+
+        function filterCategory(category) {
+            const header = document.getElementById('dynamic-header');
+            header.innerHTML = '';
+            const articlesDiv = document.getElementById('articles');
+            articlesDiv.innerHTML = '';
+
+            displayArticles(category);
+        }
+
+        function getBiasPositionPercent(score) {
+            if (typeof score !== "number") return 50;
+            return Math.min(100, Math.max(0, score));
+        }
+
+        function getBiasShortLabel(score) {
+            if (typeof score !== "number") return "U";
+            return score < 25 ? "L" : score > 75 ? "R" : "C";
+        }
+
+        function getArticleDataById(articleId) {
+            return articles.find(a => a.id === articleId);
+        }
+
+        function showToast(message, duration = 3000) {
+            const toast = document.getElementById("toast-container");
+            toast.textContent = message;
+            toast.style.display = "block";
+            toast.style.opacity = "1";
+
+            setTimeout(() => {
+                toast.style.opacity = "0";
+                setTimeout(() => {
+                    toast.style.display = "none";
+                }, 300);
+            }, duration);
+        }
+
+        function openLogin() {
+            document.getElementById("loginModal").style.display = "flex";
+        }
+
+        function closeLoginModal() {
+            document.getElementById("loginModal").style.display = "none";
+        }
+
+        function openSignup() {
+            document.getElementById("signupModal").style.display = "flex";
+        }
+
+        function closeSignupModal() {
+            document.getElementById("signupModal").style.display = "none";
+        }
+
         function handleLogin(event) {
             event.preventDefault();
 
@@ -117,239 +244,8 @@
                     console.error(err);
                 });
         }
-    </script>
-
-    <script>
-        let articles = [];
-        let currentUser = null;
-
-        function showProfileUI(username) {
-            document.getElementById("auth-buttons").style.display = "none";
-            document.getElementById("profile-dropdown").style.display = "block";
-            document.getElementById("username-display").textContent = username;
-        }
-
-        function showAuthButtons() {
-            document.getElementById("auth-buttons").style.display = "block";
-            document.getElementById("profile-dropdown").style.display = "none";
-        }
-
-        function toggleDropdown() {
-            const menu = document.getElementById("dropdown-menu");
-            menu.style.display = menu.style.display === "block" ? "none" : "block";
-        }
-
-        function logout() {
-            fetch("/logout", {
-                method: "POST",
-                credentials: "include"
-            })
-                .then(res => res.json())
-                .then(() => {
-                    currentUser = null;
-                    showAuthButtons();
-                });
-        }
-
-        function displayArticles(category) {
-            const articlesDiv = document.getElementById('articles');
-            const header = document.getElementById('dynamic-header');
-            articlesDiv.innerHTML = '';
-            header.innerHTML = '';
-
-            const filtered = category === 'All'
-                ? articles
-                : articles.filter(a => a.category.toLowerCase() === category.toLowerCase());
-
-            // ✅ Set header if showing local news
-            if (category === 'Local' && filtered.length && filtered[0].zip_code) {
-                header.innerHTML = `📍 Local News for ${filtered[0].zip_code}`;
-            }
-
-            if (filtered.length === 0) {
-                articlesDiv.innerHTML = '<p>No articles found for this category.</p>';
-                return;
-            }
-
-            filtered.forEach(article => {
-                const div = document.createElement('div');
-                div.classList.add('article');
-                div.id = article.id;
-
-                const biasPercent = getBiasPositionPercent(article.bias);
-                const biasLabel = getBiasShortLabel(article.bias);
-
-                div.innerHTML = `
-            <h2>${article.title}</h2>
-            <p class="category">${article.category}${article.zip_code ? " - " + article.zip_code : ""}</p>
-
-            <div class="bias-meter" aria-label="Political bias meter">
-                <div class="bias-meter-marker"
-                    style="left: calc(${biasPercent}% - 9px);"
-                    title="Bias: ${biasLabel} (${article.bias})">
-                    ${biasLabel}
-                </div>
-            </div>
-            <div class="bias-meter-labels">
-                <span>Far Left</span>
-                <span>Far Right</span>
-            </div>
-
-            <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
-            <p class="summary" id="summary-${article.id}">${article.summary}</p>
-            <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-            <button class="save-btn" data-article-id="${article.id}" data-saved="false">Save</button>
-            <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
-        `;
-
-                articlesDiv.appendChild(div);
-            });
-        }
-
-        function filterCategory(category) {
-            const header = document.getElementById('dynamic-header');
-            header.innerHTML = '';
-            const articlesDiv = document.getElementById('articles');
-            articlesDiv.innerHTML = '';
-
-            if (category === 'Local') {
-                document.getElementById("loading").style.display = "block";
-
-                fetch('/news/local', { credentials: "include" })
-                    .then(response => response.json())
-                    .then(localArticles => {
-                        articles = localArticles;
-                        displayArticles('All');
-                        document.getElementById("loading").style.display = "none";
-                    })
-                    .catch(error => {
-                        console.error("Error fetching local news:", error);
-                        articlesDiv.innerHTML = '<p>⚠️ Failed to load local news.</p>';
-                        document.getElementById("loading").style.display = "none";
-                    });
-            } else {
-                displayArticles(category);
-            }
-        }
-
-        function regenerateSummary(articleId) {
-            const article = articles.find(a => a.id === articleId);
-            if (!article) {
-                console.error("Article not found!");
-                return;
-            }
-
-            fetch(`/regenerate-summary/${articleId}`, { method: 'GET', credentials: "include" })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.summary) {
-                        const articleDiv = document.querySelector(`#${articleId}`);
-                        const summaryElement = articleDiv.querySelector('.summary');
-                        summaryElement.textContent = data.summary;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error regenerating summary:', error);
-                });
-        }
-
-        function openLogin() {
-            document.getElementById("loginModal").style.display = "flex";
-        }
-
-        function closeLoginModal() {
-            document.getElementById("loginModal").style.display = "none";
-        }
-
-        function openSignup() {
-            document.getElementById("signupModal").style.display = "flex";
-        }
-
-        function closeSignupModal() {
-            document.getElementById("signupModal").style.display = "none";
-        }
-
-        function showToast(message, duration = 3000) {
-            const toast = document.getElementById("toast-container");
-            toast.textContent = message;
-            toast.style.display = "block";
-            toast.style.opacity = "1";
-
-            setTimeout(() => {
-                toast.style.opacity = "0";
-                setTimeout(() => {
-                    toast.style.display = "none";
-                }, 300); // matches fade-out
-            }, duration);
-        }
-
-        function getArticleDataById(articleId) {
-            return articles.find(a => a.id === articleId);
-        }
-
-        function checkEmailConfirmationToast() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get("confirmed") === "true") {
-                showToast("✅ Your email has been confirmed!");
-                history.replaceState({}, document.title, "/");
-            }
-        }
-
-        function resendConfirmationEmail() {
-            fetch("/resend-confirmation", {
-                method: "POST",
-                credentials: "include"
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        showToast("📧 Confirmation email sent!");
-                    } else {
-                        showToast("⚠️ Failed to resend email: " + (data.message || "Unknown error"));
-                    }
-                })
-                .catch(err => {
-                    console.error("Resend error:", err);
-                    showToast("Something went wrong. Try again.");
-                });
-        }
-
-        function checkUnconfirmedToast() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get("unconfirmed") === "true") {
-                document.getElementById("unconfirmed-message").style.display = "block";
-                showToast("⚠️ Please confirm your email to unlock features.");
-                history.replaceState({}, document.title, "/");
-            }
-        }
-
-        function getBiasClass(bias) {
-            if (!bias) return 'bias-unknown';
-
-            const b = bias.toLowerCase();
-
-            if (b.includes('far left')) return 'bias-left-far';
-            if (b.includes('left')) return 'bias-left';
-            if (b.includes('center') || b.includes('neutral')) return 'bias-center';
-            if (b.includes('right')) return 'bias-right';
-            if (b.includes('far right')) return 'bias-right-far';
-
-            return 'bias-unknown';
-        }
-
-        function getBiasPositionPercent(score) {
-            if (typeof score !== "number") return 50;
-            return Math.min(100, Math.max(0, score));
-        }
-
-        function getBiasShortLabel(score) {
-            if (typeof score !== "number") return "U";
-            return score < 25 ? "L" : score > 75 ? "R" : "C";
-        }
 
         document.addEventListener("DOMContentLoaded", () => {
-            checkEmailConfirmationToast();
-
             document.getElementById("loading").style.display = "block";
 
             fetch('/news', { credentials: "include" })
@@ -373,13 +269,9 @@
                     if (data.username) {
                         currentUser = data.username;
                         showProfileUI(data.username);
-                        if (data.is_confirmed === false) {
-                            document.getElementById("unconfirmed-message").style.display = "block";
-                        }
                     }
                 })
                 .catch(() => {
-                    // fallback for logged-out state
                     showAuthButtons();
                 });
 
@@ -496,20 +388,12 @@
         </form>
     </div>
 
-    <div id="unconfirmed-message"
-        style="display: none; background-color: #fff8dc; color: #23496a; border: 1px solid #23496a; padding: 20px; margin: 20px auto; border-radius: 8px; width: 80%; max-width: 600px; text-align: center;">
-        <h2>📩 Please Confirm Your Email</h2>
-        <p>Before saving articles or accessing full features, confirm your email address.</p>
-        <button onclick="resendConfirmationEmail()">Resend Confirmation Email</button>
-    </div>
-
     <!-- Toast Notification -->
     <div id="toast-container" style="position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
             background-color: #23496a; color: white; padding: 12px 20px;
             border-radius: 5px; font-size: 1em; display: none;
             z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
     </div>
-
 
 </body>
 
