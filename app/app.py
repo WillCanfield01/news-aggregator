@@ -230,7 +230,7 @@ def summarize_with_openai(text):
 def generate_article_id(link):
     return f"article-{hashlib.md5(link.encode()).hexdigest()[:12]}"
 
-def fetch_feed(url):
+def fetch_feed(url, use_ai=False):
     articles = []
     try:
         print(f"Fetching {url}…")
