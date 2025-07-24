@@ -239,12 +239,11 @@ def fetch_feed(url, use_ai=False):
 
         for index, entry in enumerate(feed.entries):
             title = entry.get("title", "No Title")
-            # Use only summary or description from RSS (never scrape or fetch full text!)
-            desc = entry.get("summary", "") or entry.get("description", "")
-
-            if not desc.strip() and not title.strip():
+            desc  = entry.get("summary", "")
+            if not desc.strip():
                 continue
 
+            # Parse publish date (allow updated if published missing)
             parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
             if not parsed_date:
                 continue
@@ -252,31 +251,34 @@ def fetch_feed(url, use_ai=False):
             if pub_date < cutoff:
                 continue
 
-            # Only run AI on what the feed provides
-            text = f"{title} {desc}"
+            # Category & summary
+            text     = f"{title} {desc}"
             category = predict_category(text)
             if category == "Unknown":
                 category = "General"
-            # If you want, use AI to summarize the desc; otherwise, just truncate
-            summary = simple_summarize(desc)  # or summarize_with_openai(desc)
+            summary = summarize_with_openai(desc) if use_ai else simple_summarize(desc)
 
+            # Source normalization
             parsed_url = urlparse(url)
-            source = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+            source     = parsed_url.netloc.replace("www.", "").replace("feeds.", "").split(".")[0].lower()
+
+            # Political bias (internal fallback inside detect_political_bias)
             article_id = generate_article_id(entry.get("link", f"{url}-{index}"))
             bias = detect_political_bias(f"{title}. {desc}", article_id=article_id, source=source)
 
             articles.append({
-                "id": article_id,
-                "title": title,
-                "summary": summary,
+                "id":          article_id,
+                "title":       title,
+                "summary":     summary,
                 "description": desc,
-                "url": entry.get("link", "#"),
-                "category": category,
-                "source": source,
-                "published": pub_date.isoformat(),
-                "bias": bias
+                "url":         entry.get("link", "#"),
+                "category":    category,
+                "source":      source,
+                "published":   pub_date.isoformat(),
+                "bias":        bias
             })
 
+        # Sort newest first
         articles.sort(key=lambda a: a["published"], reverse=True)
         print(f"✓ Added {len(articles)} articles from {url}")
 
@@ -487,9 +489,12 @@ def get_news():
 def regenerate_summary(article_id):
     article = next((a for a in cached_articles if a["id"] == article_id), None)
     if article:
-        # Only summarize the RSS-provided description/summary (do NOT scrape!)
-        desc = article["description"]
-        article["summary"] = simple_summarize(desc)  # or summarize_with_openai(desc)
+        full_text = extract_full_article_text(article["url"])
+        if not full_text:
+            print(f"🟡 Falling back to RSS description for {article['url']}")
+            full_text = article["description"]
+
+        article["summary"] = summarize_with_openai(full_text)
         return jsonify({"summary": article["summary"]})
     return jsonify({"error": "Article not found"}), 404
 
