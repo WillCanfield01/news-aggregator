@@ -124,21 +124,19 @@ new_articles_last_refresh = []
 RSS_FEED_BATCHES = [
     [
         "http://feeds.bbci.co.uk/news/rss.xml",
-        "https://rss.cnn.com/rss/edition.rss",
-        "https://feeds.reuters.com/reuters/topNews",
+        "http://rss.cnn.com/rss/edition.rss",
+        "https://reutersbest.com/feed/",
         "https://feeds.npr.org/1001/rss.xml",
-        "https://apnews.com/rss",
+        "https://news.google.com/rss/search?q=when:24h allinurl:apnews.com",
         "https://moxie.foxnews.com/google-publisher/latest.xml",
-        "https://nypost.com/feed/",
     ],
     [
         "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
         "https://www.theguardian.com/world/rss",
-        "http://feeds.feedburner.com/TechCrunch/",
         "https://www.espn.com/espn/rss/news",
         "https://www.msnbc.com/feeds/latest",
-        "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
-        "https://www.bloomberg.com/feed/podcast/etf-report.xml",
+        "https://feeds.bloomberg.com/politics/news.rss",
+        "https://nypost.com/feed/",
     ]
 ]
 
