@@ -209,7 +209,7 @@
     </div>
     {% endif %}
 
-    <form method="POST" action="{{ url_for('local.update_zipcode') }}">
+    <form method="POST" action="{{ url_for('update_zipcode') }}">
         <h2>Update ZIP Code</h2>
         <input type="text" name="zipcode" placeholder="ZIP Code" value="{{ current_zip or '' }}" maxlength="10"
             required />
