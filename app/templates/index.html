@@ -2,515 +2,133 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8">
+    <title>The Daily Reddit Feature – Your Smart News Digest</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description"
-        content="The Roundup – Summarized local and global news with AI-powered summaries and bias indicators.">
-    <title>The Roundup – Summarized News</title>
-    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Roboto:wght@400;700&display=swap"
-        rel="stylesheet" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        content="Get the smartest news summaries, plus one must-see story from Reddit every day. No bias, just clarity.">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            background: #f6f9fb;
+        }
+
+        .hero {
+            background: linear-gradient(90deg, #ff4500 0%, #e9ecef 100%);
+            padding: 3rem 0 2rem 0;
+            color: #242424;
+            text-align: center;
+            border-radius: 0 0 2rem 2rem;
+        }
+
+        .site-title {
+            font-weight: bold;
+            font-size: 2.7rem;
+            letter-spacing: -1px;
+            margin-bottom: .5rem;
+        }
+
+        .subtext {
+            color: #444b;
+            font-size: 1.1rem;
+            margin-bottom: 2rem;
+        }
+
+        .reddit-feature {
+            background: #fff;
+            border-radius: 1.2rem;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+            margin-top: -2.5rem;
+            padding: 2.2rem 1.5rem 1.5rem 1.5rem;
+            max-width: 680px;
+            margin-left: auto;
+            margin-right: auto;
+            position: relative;
+        }
+
+        .reddit-badge {
+            background: #ff4500;
+            color: #fff;
+            padding: 0.2em 0.7em;
+            font-size: 1em;
+            border-radius: 0.5em;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.7em;
+            display: inline-block;
+        }
+
+        .headline {
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin-bottom: .5em;
+        }
+
+        .summary {
+            color: #222b;
+            font-size: 1.05rem;
+            margin-bottom: 1em;
+        }
+
+        .btn-explore {
+            margin-top: 2.5rem;
+        }
+
+        footer {
+            margin-top: 4rem;
+            padding-top: 2rem;
+            color: #888;
+        }
+    </style>
 </head>
 
 <body>
-
-    <div class="header">
-        <div class="header-inner">
-            <!-- Left Column (empty to balance layout) -->
-            <div style="width: 100px;"></div>
-
-            <!-- Center Column (title) -->
-            <h1 style="flex-grow: 1; text-align: center; margin: 0;">The Roundup</h1>
-
-            <!-- Right Column (auth buttons or profile) -->
-            <div id="auth-buttons" style="display: flex; gap: 10px;">
-                <button onclick="openLogin()">Login</button>
-                <button onclick="openSignup()">Sign Up</button>
-            </div>
-
-            <div id="profile-dropdown" style="display: none;">
-                <button onclick="toggleDropdown()" class="avatar-button">👤</button>
-                <div id="dropdown-menu">
-                    <p id="username-display">User</p>
-                    <a href="/account"><button style="margin-bottom: 10px;">My Account</button></a>
-                    <a href="/news/local"><button style="margin-bottom: 10px;">Local News</button></a>
-                    <button onclick="logout()">Logout</button>
-                </div>
-            </div>
+    <section class="hero">
+        <div class="container">
+            <div class="site-title">The Daily Reddit Feature</div>
+            <div class="subtext">Every day: One top post from Reddit, plus the latest news headlines.<br>No ads, no
+                spin, just clarity.</div>
+            <a href="#feature" class="btn btn-primary shadow-sm btn-lg btn-explore">See Today's Reddit Article</a>
         </div>
-    </div>
+    </section>
 
-    <!-- ✅ Filter Buttons -->
-    <div id="filter">
-        <select onchange="filterCategory(this.value)"
-            style="padding: 10px; font-size: 1em; border-radius: 5px; border: 1px solid #ccc;">
-            <option value="All">All</option>
-            <option value="Finance">Finance</option>
-            <option value="Sports">Sports</option>
-            <option value="Politics">Politics</option>
-            <option value="Entertainment">Entertainment</option>
-            <option value="Health">Health</option>
-            <option value="Technology">Technology</option>
-        </select>
-    </div>
+    <main class="container">
+        <section id="feature" class="reddit-feature shadow mt-5 mb-5">
+            <div class="reddit-badge">Reddit Top Post</div>
+            <div id="reddit-headline" class="headline">Loading today's Reddit article...</div>
+            <div id="reddit-summary" class="summary"></div>
+            <a id="reddit-link" href="#" target="_blank" style="display: none;"
+                class="btn btn-outline-danger btn-sm">Read on Reddit</a>
+        </section>
 
-    <!-- ✅ Loading and Articles -->
-    <div id="loading" style="display: none;">Loading...</div>
-    <h2 id="dynamic-header" style="margin-top: 20px;"></h2>
-    <div id="articles"></div>
+        <div class="text-center">
+            <a href="/news" class="btn btn-outline-dark btn-lg mt-2">
+                Explore All Headlines
+            </a>
+        </div>
+    </main>
 
-    <script>
-        function handleLogin(event) {
-            event.preventDefault();
-
-            const username = document.getElementById("loginUsername").value.trim().toLowerCase();
-            const password = document.getElementById("loginPassword").value;
-
-            fetch("/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ username, password })
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        showToast("Login successful!");
-                        closeLoginModal();
-                        location.reload();
-                    } else {
-                        showToast("Login failed: " + data.message);
-                    }
-                })
-                .catch(err => {
-                    showToast("Login error: " + err.message);
-                    console.error(err);
-                });
-        }
-
-        function handleSignup(event) {
-            event.preventDefault();
-
-            const username = document.getElementById("signupUsername").value.trim().toLowerCase();
-            const email = document.getElementById("signupEmail").value.trim();
-            const password = document.getElementById("signupPassword").value;
-            const zip = document.getElementById("signupZip").value.trim();
-
-            fetch("/signup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ username, email, password, zip })
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        showToast("Account created! Please check your email to verify.");
-                        closeSignupModal();
-                    } else {
-                        showToast("Signup failed: " + (data.message || "Unknown error"));
-                    }
-                })
-                .catch(err => {
-                    showToast("Signup error: " + err.message);
-                    console.error(err);
-                });
-        }
-    </script>
+    <footer class="text-center small">
+        &copy; {{ year or 2025 }} The Daily Reddit Feature &mdash; <a href="https://therealroundup.com"
+            class="text-decoration-none">Powered by The Roundup</a>
+    </footer>
 
     <script>
-        let articles = [];
-        let currentUser = null;
-
-        function showProfileUI(username) {
-            document.getElementById("auth-buttons").style.display = "none";
-            document.getElementById("profile-dropdown").style.display = "block";
-            document.getElementById("username-display").textContent = username;
-        }
-
-        function showAuthButtons() {
-            document.getElementById("auth-buttons").style.display = "block";
-            document.getElementById("profile-dropdown").style.display = "none";
-        }
-
-        function toggleDropdown() {
-            const menu = document.getElementById("dropdown-menu");
-            menu.style.display = menu.style.display === "block" ? "none" : "block";
-        }
-
-        function logout() {
-            fetch("/logout", {
-                method: "POST",
-                credentials: "include"
-            })
-                .then(res => res.json())
-                .then(() => {
-                    currentUser = null;
-                    showAuthButtons();
-                });
-        }
-
-        function displayArticles(category) {
-            const articlesDiv = document.getElementById('articles');
-            const header = document.getElementById('dynamic-header');
-            articlesDiv.innerHTML = '';
-            header.innerHTML = '';
-
-            const filtered = category === 'All'
-                ? articles
-                : articles.filter(a => a.category.toLowerCase() === category.toLowerCase());
-
-            // ✅ Set header if showing local news
-            if (category === 'Local' && filtered.length && filtered[0].zip_code) {
-                header.innerHTML = `📍 Local News for ${filtered[0].zip_code}`;
-            }
-
-            if (filtered.length === 0) {
-                articlesDiv.innerHTML = '<p>No articles found for this category.</p>';
-                return;
-            }
-
-            filtered.forEach(article => {
-                const div = document.createElement('div');
-                div.classList.add('article');
-                div.id = article.id;
-
-                const biasPercent = getBiasPositionPercent(article.bias);
-                const biasLabel = getBiasShortLabel(article.bias);
-
-                div.innerHTML = `
-            <h2>${article.title}</h2>
-            <p class="category">${article.category}${article.zip_code ? " - " + article.zip_code : ""}</p>
-
-            <div class="bias-meter" aria-label="Political bias meter">
-                <div class="bias-meter-marker"
-                    style="left: calc(${biasPercent}% - 9px);"
-                    title="Bias: ${biasLabel} (${article.bias})">
-                    ${biasLabel}
-                </div>
-            </div>
-            <div class="bias-meter-labels">
-                <span>Far Left</span>
-                <span>Far Right</span>
-            </div>
-
-            <p class="source"><strong>Source: ${article.source.toUpperCase()}</strong></p>
-            <p class="summary" id="summary-${article.id}">${article.summary}</p>
-            <button onclick="regenerateSummary('${article.id}')">Regenerate with AI</button>
-            <button class="save-btn" data-article-id="${article.id}" data-saved="false">Save</button>
-            <a href="${article.url}" target="_blank" rel="noopener noreferrer">Read more</a>
-        `;
-
-                articlesDiv.appendChild(div);
-            });
-        }
-
-        function filterCategory(category) {
-            const header = document.getElementById('dynamic-header');
-            header.innerHTML = '';
-            const articlesDiv = document.getElementById('articles');
-            articlesDiv.innerHTML = '';
-
-            if (category === 'Local') {
-                document.getElementById("loading").style.display = "block";
-
-                fetch('/news/local', { credentials: "include" })
-                    .then(response => response.json())
-                    .then(localArticles => {
-                        articles = localArticles;
-                        displayArticles('All');
-                        document.getElementById("loading").style.display = "none";
-                    })
-                    .catch(error => {
-                        console.error("Error fetching local news:", error);
-                        articlesDiv.innerHTML = '<p>⚠️ Failed to load local news.</p>';
-                        document.getElementById("loading").style.display = "none";
-                    });
-            } else {
-                displayArticles(category);
-            }
-        }
-
-        function regenerateSummary(articleId) {
-            const article = articles.find(a => a.id === articleId);
-            if (!article) {
-                console.error("Article not found!");
-                return;
-            }
-
-            fetch(`/regenerate-summary/${articleId}`, { method: 'GET', credentials: "include" })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.summary) {
-                        const articleDiv = document.querySelector(`#${articleId}`);
-                        const summaryElement = articleDiv.querySelector('.summary');
-                        summaryElement.textContent = data.summary;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error regenerating summary:', error);
-                });
-        }
-
-        function openLogin() {
-            document.getElementById("loginModal").style.display = "flex";
-        }
-
-        function closeLoginModal() {
-            document.getElementById("loginModal").style.display = "none";
-        }
-
-        function openSignup() {
-            document.getElementById("signupModal").style.display = "flex";
-        }
-
-        function closeSignupModal() {
-            document.getElementById("signupModal").style.display = "none";
-        }
-
-        function showToast(message, duration = 3000) {
-            const toast = document.getElementById("toast-container");
-            toast.textContent = message;
-            toast.style.display = "block";
-            toast.style.opacity = "1";
-
-            setTimeout(() => {
-                toast.style.opacity = "0";
-                setTimeout(() => {
-                    toast.style.display = "none";
-                }, 300); // matches fade-out
-            }, duration);
-        }
-
-        function getArticleDataById(articleId) {
-            return articles.find(a => a.id === articleId);
-        }
-
-        function checkEmailConfirmationToast() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get("confirmed") === "true") {
-                showToast("✅ Your email has been confirmed!");
-                history.replaceState({}, document.title, "/");
-            }
-        }
-
-        function resendConfirmationEmail() {
-            fetch("/resend-confirmation", {
-                method: "POST",
-                credentials: "include"
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        showToast("📧 Confirmation email sent!");
-                    } else {
-                        showToast("⚠️ Failed to resend email: " + (data.message || "Unknown error"));
-                    }
-                })
-                .catch(err => {
-                    console.error("Resend error:", err);
-                    showToast("Something went wrong. Try again.");
-                });
-        }
-
-        function checkUnconfirmedToast() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get("unconfirmed") === "true") {
-                document.getElementById("unconfirmed-message").style.display = "block";
-                showToast("⚠️ Please confirm your email to unlock features.");
-                history.replaceState({}, document.title, "/");
-            }
-        }
-
-        function getBiasClass(bias) {
-            if (!bias) return 'bias-unknown';
-
-            const b = bias.toLowerCase();
-
-            if (b.includes('far left')) return 'bias-left-far';
-            if (b.includes('left')) return 'bias-left';
-            if (b.includes('center') || b.includes('neutral')) return 'bias-center';
-            if (b.includes('right')) return 'bias-right';
-            if (b.includes('far right')) return 'bias-right-far';
-
-            return 'bias-unknown';
-        }
-
-        function getBiasPositionPercent(score) {
-            if (typeof score !== "number") return 50;
-            return Math.min(100, Math.max(0, score));
-        }
-
-        function getBiasShortLabel(score) {
-            if (typeof score !== "number") return "U";
-            return score < 25 ? "L" : score > 75 ? "R" : "C";
-        }
-
-        document.addEventListener("DOMContentLoaded", () => {
-            checkEmailConfirmationToast();
-
-            document.getElementById("loading").style.display = "block";
-
-            fetch('/news', { credentials: "include" })
-                .then(response => response.json())
-                .then(data => {
-                    articles = data;
-                    displayArticles('All');
-                    document.getElementById("loading").style.display = "none";
-                })
-                .catch(error => {
-                    console.error('Error fetching news:', error);
-                    document.getElementById("loading").style.display = "none";
-                });
-
-            fetch("/me", { credentials: "include" })
-                .then(res => {
-                    if (!res.ok) throw new Error("Not logged in");
-                    return res.json();
-                })
-                .then(data => {
-                    if (data.username) {
-                        currentUser = data.username;
-                        showProfileUI(data.username);
-                        if (data.is_confirmed === false) {
-                            document.getElementById("unconfirmed-message").style.display = "block";
-                        }
-                    }
-                })
-                .catch(() => {
-                    // fallback for logged-out state
-                    showAuthButtons();
-                });
-
-            // Save/unsave logic
-            document.body.addEventListener("click", async (e) => {
-                if (!e.target.classList.contains("save-btn")) return;
-
-                const btn = e.target;
-                const articleId = btn.dataset.articleId;
-                const isSaved = btn.dataset.saved === "true";
-                const articleData = getArticleDataById(articleId);
-
-                try {
-                    if (isSaved) {
-                        const res = await fetch("/unsave-article", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            credentials: "include",
-                            body: JSON.stringify({ id: articleId })
-                        });
-
-                        const result = await res.json();
-                        if (res.ok) {
-                            btn.textContent = "Save";
-                            btn.dataset.saved = "false";
-                            btn.classList.remove("saved");
-                            showToast("🗑️ Article removed from saved list.");
-                        } else {
-                            showToast(result.error || "⚠️ Failed to unsave.");
-                        }
-                    } else {
-                        const res = await fetch("/save-article", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            credentials: "include",
-                            body: JSON.stringify(articleData)
-                        });
-
-                        const result = await res.json();
-
-                        if (res.status === 401) {
-                            showToast("🔐 Please log in to save articles.");
-                            return;
-                        } else if (res.status === 403) {
-                            showToast("📧 Please confirm your email to save articles.");
-                            return;
-                        }
-
-                        if (res.ok) {
-                            btn.textContent = "Unsave";
-                            btn.dataset.saved = "true";
-                            btn.classList.add("saved");
-                            showToast("✅ Article saved!");
-                        } else {
-                            showToast(result.error || "⚠️ Failed to save.");
-                        }
-                    }
-                } catch (err) {
-                    console.error(err);
-                    showToast("Something went wrong. Try again.");
+        // You may want to expose an endpoint like /api/reddit-feature
+        fetch('/api/reddit-feature')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('reddit-headline').innerText = data.title || "No Reddit post found today.";
+                document.getElementById('reddit-summary').innerText = data.summary || "";
+                if (data.url) {
+                    let btn = document.getElementById('reddit-link');
+                    btn.href = data.url;
+                    btn.style.display = "inline-block";
                 }
+            })
+            .catch(() => {
+                document.getElementById('reddit-headline').innerText = "Could not load Reddit article today.";
             });
-
-            document.addEventListener("click", (e) => {
-                const dropdown = document.getElementById("dropdown-menu");
-                const button = document.querySelector(".avatar-button");
-
-                if (dropdown && button && !dropdown.contains(e.target) && !button.contains(e.target)) {
-                    dropdown.style.display = "none";
-                }
-            });
-
-        });
-
     </script>
-
-    <!-- Login Modal -->
-    <div id="loginModal"
-        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
-        <form onsubmit="handleLogin(event)"
-            style="background-color: white; padding: 30px; border-radius: 8px; width: 300px; text-align: left; position: relative;">
-            <h2 style="margin-bottom: 20px;">Login</h2>
-            <label for="loginUsername">Username</label>
-            <input type="text" id="loginUsername" name="username" required style="width: 100%; margin-bottom: 10px;" />
-            <label for="loginPassword">Password</label>
-            <input type="password" id="loginPassword" name="password" required
-                style="width: 100%; margin-bottom: 20px;" />
-            <button type="submit">Submit</button>
-            <button type="button" onclick="closeLoginModal()"
-                style="background-color: gray; margin-left: 10px;">Cancel</button>
-        </form>
-    </div>
-
-    <!-- Sign-Up Modal -->
-    <div id="signupModal"
-        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
-        <form onsubmit="handleSignup(event)"
-            style="background-color: white; padding: 30px; border-radius: 8px; width: 300px; text-align: left; position: relative;">
-            <h2 style="margin-bottom: 20px;">Sign Up</h2>
-            <label for="signupUsername">Username</label>
-            <input type="text" id="signupUsername" name="username" required style="width: 100%; margin-bottom: 10px;" />
-            <label for="signupEmail">Email</label>
-            <input type="email" id="signupEmail" name="email" required style="width: 100%; margin-bottom: 10px;" />
-            <label for="signupZip">ZIP Code</label>
-            <input type="text" id="signupZip" name="zip" pattern="\d{5}" required
-                style="width: 100%; margin-bottom: 10px;" />
-            <small>Enter a 5-digit ZIP Code (e.g. 83704)</small>
-            <label for="signupPassword">Password</label>
-            <input type="password" id="signupPassword" name="password" required
-                style="width: 100%; margin-bottom: 20px;" />
-            <button type="submit">Create Account</button>
-            <button type="button" onclick="closeSignupModal()"
-                style="background-color: gray; margin-left: 10px;">Cancel</button>
-        </form>
-    </div>
-
-    <div id="unconfirmed-message"
-        style="display: none; background-color: #fff8dc; color: #23496a; border: 1px solid #23496a; padding: 20px; margin: 20px auto; border-radius: 8px; width: 80%; max-width: 600px; text-align: center;">
-        <h2>📩 Please Confirm Your Email</h2>
-        <p>Before saving articles or accessing full features, confirm your email address.</p>
-        <button onclick="resendConfirmationEmail()">Resend Confirmation Email</button>
-    </div>
-
-    <!-- Toast Notification -->
-    <div id="toast-container" style="position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background-color: #23496a; color: white; padding: 12px 20px;
-            border-radius: 5px; font-size: 1em; display: none;
-            z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
-    </div>
-
-
 </body>
 
 </html>

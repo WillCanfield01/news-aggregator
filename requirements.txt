@@ -82,3 +82,10 @@ aiohttp==3.9.5
 beautifulsoup4>=4.12.2
 nltk>=3.8.1
 pgeocode==0.5.0
+flask
+beautifulsoup4
+openai
+praw==7.7.1
+apscheduler
+python-dotenv
+markdown==3.6

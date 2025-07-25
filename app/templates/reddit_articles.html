@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Reddit Article Generator</title>
+</head>
+
+<body>
+    <h1>Reddit AI Articles</h1>
+    <form id="gen-form" method="post" action="/reddit-articles/generate">
+        <button type="submit">Generate Today's Article</button>
+    </form>
+    <ul>
+        {% for article in articles %}
+        <li>
+            <strong>{{ article.title }}</strong>
+            <pre>{{ article.content }}</pre>
+        </li>
+        {% endfor %}
+    </ul>
+    <script>
+        document.getElementById("gen-form").onsubmit = async function (e) {
+            e.preventDefault();
+            let resp = await fetch('/reddit-articles/generate', { method: 'POST' });
+            let data = await resp.json();
+            if (data.success) location.reload();
+        }
+    </script>
+</body>
+
+</html>
