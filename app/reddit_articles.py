@@ -4,14 +4,15 @@ import requests
 import openai
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify
-from app.reddit_articles import bp as reddit_bp
-app.register_blueprint(reddit_bp)
-# -- SETUP --
+
+import praw
+
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUBREDDIT = "AskReddit"
-ARTICLES_DIR = "app/generated_articles"  # Save as markdown/html
+
+ARTICLES_DIR = os.path.join(os.path.dirname(__file__), "generated_articles")  # More portable
 
 if not os.path.exists(ARTICLES_DIR):
     os.makedirs(ARTICLES_DIR)
@@ -19,9 +20,6 @@ if not os.path.exists(ARTICLES_DIR):
 openai.api_key = OPENAI_API_KEY
 
 bp = Blueprint("reddit_articles", __name__, url_prefix="/reddit-articles")
-
-# -- Reddit Scraper (PRAW) --
-import praw
 
 def get_top_askreddit_post():
     reddit = praw.Reddit(
@@ -94,7 +92,6 @@ def save_article_md(title, content):
         f.write(content)
     return filename
 
-# -- FLASK ROUTES --
 @bp.route("/")
 def show_articles():
     files = [f for f in os.listdir(ARTICLES_DIR) if f.endswith(".md")]
@@ -114,6 +111,3 @@ def generate():
     fname = save_article_md(post["title"], article)
     return jsonify({"filename": fname, "success": True})
 
-# In your app.py or __init__.py, register blueprint as:
-# from app.reddit_articles import bp as reddit_bp
-# app.register_blueprint(reddit_bp)
