@@ -3,10 +3,10 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>The Daily Reddit Feature – Your Smart News Digest</title>
+    <title>Daily Community Q&A – Your Smart News Digest</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description"
-        content="Get the smartest news summaries, plus one must-see story from Reddit every day. No bias, just clarity.">
+        content="Get the smartest news summaries, plus one must-see community Q&A or big question every day. No bias, just clarity.">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <style>
         body {
@@ -14,7 +14,7 @@
         }
 
         .hero {
-            background: linear-gradient(90deg, #ff4500 0%, #e9ecef 100%);
+            background: linear-gradient(90deg, #58bbff 0%, #e9ecef 100%);
             padding: 3rem 0 2rem 0;
             color: #242424;
             text-align: center;
@@ -34,7 +34,7 @@
             margin-bottom: 2rem;
         }
 
-        .reddit-feature {
+        .feature {
             background: #fff;
             border-radius: 1.2rem;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
@@ -46,8 +46,8 @@
             position: relative;
         }
 
-        .reddit-badge {
-            background: #ff4500;
+        .badge-feature {
+            background: #58bbff;
             color: #fff;
             padding: 0.2em 0.7em;
             font-size: 1em;
@@ -84,49 +84,51 @@
 <body>
     <section class="hero">
         <div class="container">
-            <div class="site-title">The Daily Reddit Feature</div>
-            <div class="subtext">Every day: One top post from Reddit, plus the latest news headlines.<br>No ads, no
-                spin, just clarity.</div>
-            <a href="#feature" class="btn btn-primary shadow-sm btn-lg btn-explore">See Today's Reddit Article</a>
+            <div class="site-title">The Daily Feature</div>
+            <div class="subtext">
+                Every day: One thought-provoking Q&A or trending community discussion.<br>
+                No ads, no spin, just clarity.
+            </div>
+            <a href="#feature" class="btn btn-primary shadow-sm btn-lg btn-explore">See Today's Featured Article</a>
         </div>
     </section>
 
     <main class="container">
-        <section id="feature" class="reddit-feature shadow mt-5 mb-5">
-            <div class="reddit-badge">Reddit Top Post</div>
-            <div id="reddit-headline" class="headline">Loading today's Reddit article...</div>
-            <div id="reddit-summary" class="summary"></div>
-            <a id="reddit-link" href="#" target="_blank" style="display: none;"
-                class="btn btn-outline-danger btn-sm">Read on Reddit</a>
+        <section id="feature" class="feature shadow mt-5 mb-5">
+            <div class="badge-feature">Today's Top Discussion</div>
+            <div id="headline" class="headline">Loading today's featured article...</div>
+            <div id="summary" class="summary"></div>
+            <!-- Optionally, you can add a link to "original discussion" but hide it by default or only show if wanted -->
+            <!-- <a id="discussion-link" href="#" target="_blank" style="display: none;" class="btn btn-outline-info btn-sm">See Original Discussion</a> -->
         </section>
-
         <div class="text-center">
             <a href="/reddit-articles/articles" class="btn btn-outline-dark btn-lg mt-2">
-                Explore All Headlines
+                Explore All Published Articles
             </a>
         </div>
     </main>
 
     <footer class="text-center small">
-        &copy; {{ year or 2025 }} The Daily Reddit Feature &mdash; <a href="https://therealroundup.com"
-            class="text-decoration-none">Powered by The Roundup</a>
+        &copy; {{ year or 2025 }} The Daily Feature &mdash;
+        <a href="https://therealroundup.com" class="text-decoration-none">Powered by The Roundup</a>
     </footer>
 
     <script>
-        // You may want to expose an endpoint like /api/reddit-feature
+        // You may want to expose an endpoint like /api/daily-feature
         fetch('/api/reddit-feature')
             .then(res => res.json())
             .then(data => {
-                document.getElementById('reddit-headline').innerText = data.title || "No Reddit post found today.";
-                document.getElementById('reddit-summary').innerText = data.summary || "";
-                if (data.url) {
-                    let btn = document.getElementById('reddit-link');
-                    btn.href = data.url;
-                    btn.style.display = "inline-block";
-                }
+                document.getElementById('headline').innerText = data.title || "No feature found today.";
+                document.getElementById('summary').innerText = data.summary || "";
+                // Optionally show "original discussion" link:
+                // if (data.url) {
+                //     let btn = document.getElementById('discussion-link');
+                //     btn.href = data.url;
+                //     btn.style.display = "inline-block";
+                // }
             })
             .catch(() => {
-                document.getElementById('reddit-headline').innerText = "Could not load Reddit article today.";
+                document.getElementById('headline').innerText = "Could not load today's featured article.";
             });
     </script>
 </body>
