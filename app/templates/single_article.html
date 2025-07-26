@@ -4,7 +4,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>{{ article.title }} – The Roundup</title>
+    <title>{{ title }} – The Roundup</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <style>
         body {
@@ -85,13 +85,13 @@
 <body>
     <div class="container">
         <a class="back-link" href="{{ url_for('reddit_articles.list_articles') }}">← Back to All Articles</a>
-        <h1 class="article-title">{{ article.title }}</h1>
-        {% if article.date %}
-        <div class="article-meta">{{ article.date.strftime('%B %d, %Y') }}</div>
+        <h1 class="article-title">{{ title }}</h1>
+        {% if date %}
+        <div class="article-meta">{{ date.strftime('%B %d, %Y') }}</div>
         {% endif %}
         <hr class="divider">
         <div class="article-content">
-            {{ article.content | safe }}
+            {{ content | safe }}
         </div>
     </div>
 </body>

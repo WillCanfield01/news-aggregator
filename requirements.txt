@@ -89,3 +89,4 @@ praw==7.7.1
 apscheduler
 python-dotenv
 markdown==3.6
+unidecode

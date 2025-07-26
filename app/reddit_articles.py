@@ -3,7 +3,7 @@ import re
 import openai
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify
-
+from unidecode import unidecode
 import praw
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
@@ -25,6 +25,11 @@ BANNED_WORDS = [
     "dick", "cock", "blowjob", "suck", "f***", "shit", "piss", "rape", "molest",
     "incest", "adult", "fetish", "taboo", "explicit", "onlyfans"
     # ...add more as needed
+]
+
+EXTRA_BANNED = [
+    "hitler", "nazi", "terror", "rape", "porn", "sex", "nsfw",
+    # ...add any other personal names, brands, or keywords you want to avoid in titles
 ]
 
 def is_safe(text):
@@ -111,6 +116,33 @@ def generate_article(topic, outline, keywords):
     )
     return response.choices[0].message.content
 
+def rewrite_title(original_title):
+    # Remove banned words first
+    text = unidecode(original_title)
+    words = text.split()
+    cleaned = [w for w in words if w.lower() not in BANNED_WORDS + EXTRA_BANNED]
+    text = ' '.join(cleaned)
+    
+    # Now use OpenAI to rewrite for clarity/SEO
+    prompt = (
+        f"Rewrite this community discussion question as a clear, concise, and professional SEO article headline. "
+        f"Remove any references to Reddit, NSFW, personal names, or internet slang. "
+        f"Do not ask questions—make it a statement if possible. Example: "
+        f"Input: 'What do you think was in the mystery box? Ghislaine'\n"
+        f"Output: 'Unraveling the Mystery Box: Theories and Surprises'\n"
+        f"Input: '{text}'\n"
+        f"Output:"
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=30,
+        temperature=0.2,
+    )
+    headline = response.choices[0].message.content.strip()
+    # Optionally strip trailing punctuation, excess spaces, or quotes
+    headline = headline.strip(' "\'')
+    return headline or "Untitled Article"
 
 def save_article_md(title, content):
     filename = f"{ARTICLES_DIR}/{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', title)[:50]}.md"
@@ -170,11 +202,12 @@ def clean_title(title):
 
 def generate_article_for_today():
     post = get_top_askreddit_post()
-    clean_topic = clean_title(post["title"])
-    keywords = extract_keywords(clean_topic, post["comments"])
-    outline = generate_outline(clean_topic, keywords)
-    article = generate_article(clean_topic, outline, keywords)
-    fname = save_article_md(clean_topic, article)
+    cleaned_topic = clean_title(post["title"])
+    headline = rewrite_title(cleaned_topic)
+    keywords = extract_keywords(headline, post["comments"])
+    outline = generate_outline(headline, keywords)
+    article = generate_article(headline, outline, keywords)
+    fname = save_article_md(headline, article)
     print(f"Generated and saved: {fname}")
     return fname
 
