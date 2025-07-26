@@ -47,7 +47,7 @@ def extract_keywords(text, comments=[]):
         "\n\nList as comma-separated keywords only."
     )
     response = openai.ChatCompletion.create(
-        model="gpt-4o",
+        model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=50,
         temperature=0.2
@@ -63,7 +63,7 @@ def generate_outline(topic, keywords):
         "Include 5-7 headings/subheadings, meta title, meta description, and a FAQ section."
     )
     response = openai.ChatCompletion.create(
-        model="gpt-4o",
+        model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=300,
         temperature=0.3
@@ -78,7 +78,7 @@ def generate_article(topic, outline, keywords):
         "End with an FAQ. Avoid fluff, be engaging and original."
     )
     response = openai.ChatCompletion.create(
-        model="gpt-4o",
+        model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1800,
         temperature=0.5
@@ -104,6 +104,7 @@ def show_articles():
 
 @bp.route("/generate", methods=["POST"])
 def generate():
+    fname = generate_article_for_today()
     post = get_top_askreddit_post()
     keywords = extract_keywords(post["title"], post["comments"])
     outline = generate_outline(post["title"], keywords)
@@ -134,3 +135,12 @@ def read_article(filename):
     with open(path, encoding="utf-8") as f:
         content = f.read()
     return render_template("single_article.html", content=content, title=filename.replace(".md", ""))
+
+def generate_article_for_today():
+    post = get_top_askreddit_post()
+    keywords = extract_keywords(post["title"], post["comments"])
+    outline = generate_outline(post["title"], keywords)
+    article = generate_article(post["title"], outline, keywords)
+    fname = save_article_md(post["title"], article)
+    print(f"Generated and saved: {fname}")
+    return fname
