@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, quote_plus
 
 # Assuming db and login_manager are created elsewhere and imported into your app context!
-from . import db, login_manager
+from app.app import db, login_manager
 
 # --- Blueprint registration ---
 aggregator_bp = Blueprint(
