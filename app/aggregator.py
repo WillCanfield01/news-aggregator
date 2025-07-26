@@ -277,11 +277,11 @@ def periodic_refresh(interval=480):
         time.sleep(interval)
 
 # --- ROUTES ---
-@aggregator_bp.route("/")
-def home():
+@aggregator_bp.route("/news")
+def news_home():
     return render_template("aggregator_index.html")
 
-@aggregator_bp.route("/news")
+@aggregator_bp.route("/api/news")
 def get_news():
     response = jsonify(cached_articles)
     response.headers['Cache-Control'] = 'no-store'

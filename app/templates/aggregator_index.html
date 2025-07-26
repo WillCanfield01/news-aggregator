@@ -352,7 +352,7 @@
 
             document.getElementById("loading").style.display = "block";
 
-            fetch('/news', { credentials: "include" })
+            fetch('/api/news', { credentials: "include" })
                 .then(response => response.json())
                 .then(data => {
                     articles = data;
