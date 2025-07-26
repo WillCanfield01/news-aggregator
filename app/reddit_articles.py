@@ -158,9 +158,15 @@ def show_articles():
     articles = []
     for fname in sorted(files, reverse=True):
         with open(os.path.join(ARTICLES_DIR, fname), encoding="utf-8") as f:
-            content = f.read()
-        articles.append({"filename": fname, "content": content[:500] + "...", "title": fname})
-    return render_template("reddit_articles.html", articles=articles)
+            lines = f.readlines()
+            # If markdown, the real title is likely the first non-empty line starting with "#"
+            real_title = next((line.strip("# \n") for line in lines if line.strip().startswith("#")), fname.replace(".md", ""))
+            content = "".join(lines)
+        articles.append({
+            "filename": fname,
+            "title": real_title,
+            "content": content[:400] + "...",  # Or an excerpt
+        })
 
 
 @bp.route("/generate", methods=["POST"])
@@ -175,15 +181,19 @@ def published_articles():
     articles = []
     for fname in sorted(files, reverse=True):
         with open(os.path.join(ARTICLES_DIR, fname), encoding="utf-8") as f:
-            content = f.read()
-        title = fname.replace(".md", "")
+            lines = f.readlines()
+            # Find first non-empty line starting with "#", use as real title
+            real_title = next(
+                (line.strip("# \n") for line in lines if line.strip().startswith("#")),
+                fname.replace(".md", "")
+            )
+            content = "".join(lines)
         articles.append({
             "filename": fname,
-            "title": title,
+            "title": real_title,
             "content": content[:400] + "...",  # Snippet/preview only
         })
     return render_template("published_articles.html", articles=articles)
-
 
 @bp.route("/articles/<filename>")
 def read_article(filename):

@@ -84,7 +84,7 @@
 
 <body>
     <div class="container">
-        <a class="back-link" href="{{ url_for('reddit_articles.list_articles') }}">← Back to All Articles</a>
+        <a class="back-link" href="{{ url_for('reddit_articles.show_articles') }}">← Back to All Articles</a>
         <h1 class="article-title">{{ title }}</h1>
         {% if date %}
         <div class="article-meta">{{ date.strftime('%B %d, %Y') }}</div>
