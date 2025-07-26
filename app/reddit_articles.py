@@ -19,6 +19,20 @@ openai.api_key = OPENAI_API_KEY
 
 bp = Blueprint("reddit_articles", __name__, url_prefix="/reddit-articles")
 
+BANNED_WORDS = [
+    "sex", "sexual", "nsfw", "porn", "nude", "nudes", "vagina", "penis", "erection",
+    "boobs", "boob", "breast", "cum", "orgasm", "masturbat", "anal", "ass", "butt",
+    "dick", "cock", "blowjob", "suck", "f***", "shit", "piss", "rape", "molest",
+    "incest", "adult", "fetish", "taboo", "explicit", "onlyfans"
+    # ...add more as needed
+]
+
+def is_safe(text):
+    text = text.lower()
+    for word in BANNED_WORDS:
+        if word in text:
+            return False
+    return True
 
 def get_top_askreddit_post():
     reddit = praw.Reddit(
@@ -27,17 +41,24 @@ def get_top_askreddit_post():
         user_agent="RealRoundup/1.0 by u/No-Plan-81"
     )
     subreddit = reddit.subreddit(SUBREDDIT)
-    top = next(subreddit.top(time_filter="day", limit=1))
-    top.comments.replace_more(limit=0)
-    top_comments = [c.body for c in top.comments[:5] if hasattr(c, "body")]
-    return {
-        "title": top.title,
-        "selftext": top.selftext,
-        "url": top.url,
-        "comments": top_comments,
-        "id": top.id,
-    }
-
+    # Get top 10 posts of the day, check each
+    for post in subreddit.top(time_filter="day", limit=10):
+        if getattr(post, "over_18", False):
+            continue  # Skip if Reddit marks as NSFW
+        if not is_safe(post.title) or not is_safe(post.selftext or ""):
+            continue
+        post.comments.replace_more(limit=0)
+        # Only keep safe comments
+        safe_comments = [c.body for c in post.comments[:10] if hasattr(c, "body") and is_safe(c.body)]
+        if safe_comments:
+            return {
+                "title": post.title,
+                "selftext": post.selftext,
+                "url": post.url,
+                "comments": safe_comments[:5],  # top 5 safe comments
+                "id": post.id,
+            }
+    raise Exception("No safe AskReddit post found today!")
 
 def extract_keywords(text, comments=[]):
     prompt = (
@@ -61,7 +82,9 @@ def generate_outline(topic, keywords):
     prompt = (
         f"Create a detailed SEO blog post outline for the topic '{topic}'. "
         f"Target these keywords: {', '.join(keywords)}. "
-        "The article should be in a conversational style, sharing personal insights and tips. "
+        "The article should read like a trending community discussion, as if curated for a smart, independent advice site. "
+        "Absolutely avoid any mention of Reddit, forums, or social media. "
+        "Use a conversational style, sharing personal insights and tips. "
         "Include 5-7 headings/subheadings, a meta title, meta description, and an FAQ section."
     )
     response = openai.chat.completions.create(
@@ -78,7 +101,7 @@ def generate_article(topic, outline, keywords):
         f"Using this outline:\n{outline}\n\n"
         f"Write a 1000+ word SEO blog article on '{topic}' targeting these keywords: {', '.join(keywords)}. "
         "Write it as a helpful, original, and engaging advice column—share insights and practical wisdom, as if from a personal blog or expert contributor. "
-        "Avoid any mention of Reddit, forums, or social media. End with an FAQ."
+        "Absolutely avoid any mention of Reddit, forums, or social media. The article must be fully independent. End with an FAQ."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
@@ -139,16 +162,21 @@ def read_article(filename):
         content = f.read()
     return render_template("single_article.html", content=content, title=filename.replace(".md", ""))
 
+def clean_title(title):
+    # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
+    title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)
+    title = re.sub(r'\b[Rr]eddit\b:?\s*', '', title)
+    return title.strip()
 
 def generate_article_for_today():
     post = get_top_askreddit_post()
-    keywords = extract_keywords(post["title"], post["comments"])
-    outline = generate_outline(post["title"], keywords)
-    article = generate_article(post["title"], outline, keywords)
-    fname = save_article_md(post["title"], article)
+    clean_topic = clean_title(post["title"])
+    keywords = extract_keywords(clean_topic, post["comments"])
+    outline = generate_outline(clean_topic, keywords)
+    article = generate_article(clean_topic, outline, keywords)
+    fname = save_article_md(clean_topic, article)
     print(f"Generated and saved: {fname}")
     return fname
-
 
 if __name__ == "__main__":
     # This lets you run: python app/reddit_articles.py

@@ -1,18 +1,98 @@
-<!-- templates/single_article.html -->
+<!-- templates/read_article.html -->
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <title>{{ title }} – The Roundup</title>
+    <title>{{ article.title }} – The Roundup</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        body {
+            background: #f6f4ed;
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 740px;
+            margin: 48px auto 0 auto;
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 6px 30px rgba(60, 60, 60, 0.09);
+            padding: 44px 34px 56px 34px;
+        }
+
+        .back-link {
+            display: block;
+            margin-bottom: 28px;
+            color: #1845a3;
+            font-weight: 600;
+            text-decoration: none;
+            font-size: 1.07rem;
+        }
+
+        .back-link:hover {
+            color: #2863fa;
+            text-decoration: underline;
+        }
+
+        .article-title {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #14345b;
+            margin: 0 0 10px 0;
+        }
+
+        .article-meta {
+            color: #6e7a8a;
+            font-size: 1rem;
+            margin-bottom: 18px;
+        }
+
+        .article-content {
+            font-size: 1.16rem;
+            line-height: 1.7;
+            color: #1a2331;
+        }
+
+        .article-content h2,
+        .article-content h3,
+        .article-content h4 {
+            margin-top: 28px;
+            margin-bottom: 14px;
+            color: #183561;
+            font-weight: 700;
+        }
+
+        .article-content p {
+            margin-bottom: 18px;
+        }
+
+        .article-content strong,
+        .article-content b {
+            color: #1845a3;
+        }
+
+        .divider {
+            border: none;
+            border-top: 1px solid #e2e4ea;
+            margin: 32px 0 32px 0;
+        }
+    </style>
 </head>
 
 <body>
-    <a href="{{ url_for('reddit_articles.published_articles') }}">← Back to All Articles</a>
-    <h1>{{ title }}</h1>
-    <div class="article-full" style="margin-top: 2em;">
-        <pre style="white-space: pre-wrap">{{ content }}</pre>
+    <div class="container">
+        <a class="back-link" href="{{ url_for('reddit_articles.list_articles') }}">← Back to All Articles</a>
+        <h1 class="article-title">{{ article.title }}</h1>
+        {% if article.date %}
+        <div class="article-meta">{{ article.date.strftime('%B %d, %Y') }}</div>
+        {% endif %}
+        <hr class="divider">
+        <div class="article-content">
+            {{ article.content | safe }}
+        </div>
     </div>
 </body>
 
