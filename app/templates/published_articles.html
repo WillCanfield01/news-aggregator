@@ -1,0 +1,28 @@
+<!-- templates/published_articles.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Published Articles – The Roundup</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <h1>All Published Articles</h1>
+    {% for article in articles %}
+    <div class="article-preview" style="margin-bottom: 2em;">
+        <h2>
+            <a href="{{ url_for('reddit_articles.read_article', filename=article.filename) }}">
+                {{ article.title }}
+            </a>
+        </h2>
+        <pre style="white-space: pre-wrap">{{ article.content }}</pre>
+        <a href="{{ url_for('reddit_articles.read_article', filename=article.filename) }}">Read Full Article</a>
+        <hr>
+    </div>
+    {% endfor %}
+    <a href="/">← Back to Home</a>
+</body>
+
+</html>

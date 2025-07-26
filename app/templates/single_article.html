@@ -1,0 +1,19 @@
+<!-- templates/single_article.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} – The Roundup</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <a href="{{ url_for('reddit_articles.published_articles') }}">← Back to All Articles</a>
+    <h1>{{ title }}</h1>
+    <div class="article-full" style="margin-top: 2em;">
+        <pre style="white-space: pre-wrap">{{ content }}</pre>
+    </div>
+</body>
+
+</html>

@@ -111,3 +111,26 @@ def generate():
     fname = save_article_md(post["title"], article)
     return jsonify({"filename": fname, "success": True})
 
+@bp.route("/articles")
+def published_articles():
+    files = [f for f in os.listdir(ARTICLES_DIR) if f.endswith(".md")]
+    articles = []
+    for fname in sorted(files, reverse=True):
+        with open(os.path.join(ARTICLES_DIR, fname), encoding="utf-8") as f:
+            content = f.read()
+        title = fname.replace(".md", "")
+        articles.append({
+            "filename": fname,
+            "title": title,
+            "content": content[:400] + "...",  # Snippet/preview only
+        })
+    return render_template("published_articles.html", articles=articles)
+
+@bp.route("/articles/<filename>")
+def read_article(filename):
+    path = os.path.join(ARTICLES_DIR, filename)
+    if not os.path.exists(path):
+        return "Article not found.", 404
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    return render_template("single_article.html", content=content, title=filename.replace(".md", ""))

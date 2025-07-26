@@ -14,6 +14,7 @@ def create_app():
         static_folder="static"
     )
 
+    # ---- Configs ----
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///local.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-dev-key")
@@ -22,6 +23,11 @@ def create_app():
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax'
     )
+
+    # ---- Initialize Extensions ----
+    db.init_app(app)
+    login_manager.init_app(app)  # <-- THIS LINE IS MISSING!
+    login_manager.login_view = "aggregator.login"  # Optional: set login page
 
     from app.aggregator import aggregator_bp, start_background_tasks
     from app.reddit_articles import bp as reddit_bp
