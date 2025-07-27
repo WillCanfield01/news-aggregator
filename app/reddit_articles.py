@@ -311,7 +311,9 @@ def generate_article_for_today():
     return filename
 
 if __name__ == "__main__":
-    # This lets you run: python app/reddit_articles.py
-    print("Generating today's Reddit article...")
-    fname = generate_article_for_today()
-    print(f"✅ Generated and saved: {fname}")
+    from app import create_app
+    app = create_app()
+    with app.app_context():
+        print("Generating today's Reddit article...")
+        fname = generate_article_for_today()
+        print(f"✅ Generated and saved: {fname}")
