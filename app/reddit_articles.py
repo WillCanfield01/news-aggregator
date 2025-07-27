@@ -5,6 +5,7 @@ from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify
 from unidecode import unidecode
 import praw
+import markdown2
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
@@ -201,8 +202,15 @@ def read_article(filename):
     if not os.path.exists(path):
         return "Article not found.", 404
     with open(path, encoding="utf-8") as f:
-        content = f.read()
-    return render_template("single_article.html", content=content, title=filename.replace(".md", ""))
+        md_content = f.read()
+    # Convert markdown to HTML!
+    html_content = markdown2.markdown(md_content)
+    # Extract a title (like you do elsewhere)
+    title = next(
+        (line.strip("# \n") for line in md_content.splitlines() if line.strip().startswith("#")),
+        filename.replace(".md", "")
+    )
+    return render_template("single_article.html", content=html_content, title=title)
 
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
