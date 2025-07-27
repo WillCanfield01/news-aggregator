@@ -90,3 +90,4 @@ apscheduler
 python-dotenv
 markdown==3.6
 unidecode
+markdown2
