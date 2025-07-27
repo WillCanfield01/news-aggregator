@@ -6,10 +6,12 @@ from flask import Blueprint, render_template, request, jsonify
 from unidecode import unidecode
 import praw
 import markdown2
+import requests
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 SUBREDDIT = "AskReddit"
 
 ARTICLES_DIR = os.path.join(os.path.dirname(__file__), "generated_articles")
@@ -152,6 +154,91 @@ def save_article_md(title, content):
         f.write(content)
     return filename
 
+def get_unsplash_image(query):
+    url = "https://api.unsplash.com/photos/random"
+    params = {
+        "query": query,
+        "orientation": "landscape",
+        "client_id": UNSPLASH_ACCESS_KEY
+    }
+    r = requests.get(url, params=params)
+    if r.status_code == 200:
+        data = r.json()
+        return data["urls"]["regular"], data["user"]["name"], data["links"]["html"]  # url, photographer, profile
+    return None, None, None
+
+def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_heading=None):
+    image_md = f"![{alt_text}]({image_url})"
+    if caption:
+        image_md += f"\n*{caption}*"
+    lines = md_text.splitlines()
+    if after_heading:
+        # Insert after the heading that matches after_heading
+        for i, line in enumerate(lines):
+            if after_heading.lower() in line.lower():
+                lines.insert(i+1, image_md)
+                break
+        else:
+            lines.append(image_md)
+    else:
+        # Default: after first heading
+        for i, line in enumerate(lines):
+            if line.strip().startswith("#"):
+                lines.insert(i+1, image_md)
+                break
+        else:
+            lines.insert(0, image_md)
+    return "\n".join(lines)
+
+def suggest_image_sections_and_captions(article_md, outline):
+    prompt = (
+        "Given the following article outline and the full draft, suggest 1-3 sections where a relevant image would add value. "
+        "For each section, provide:\n"
+        "- The section heading or a short description of the content after which to insert the image\n"
+        "- An image search query (e.g. 'family traditions', 'lost customs', 'community gathering')\n"
+        "- A short, descriptive caption and alt text for the image\n\n"
+        f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
+        "Format your reply as JSON:\n"
+        "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]"
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=250,
+        temperature=0.3,
+    )
+    # Parse as JSON, be robust to possible formatting weirdness
+    import json
+    try:
+        sections = json.loads(response.choices[0].message.content)
+        return sections
+    except Exception as e:
+        print("AI JSON parse error:", e)
+        return []
+
+def extract_markdown_title(lines, fallback):
+    # Find the first heading line, else fallback
+    for line in lines:
+        if line.strip().startswith("#"):
+            return line.strip("# \n")
+    return fallback
+
+def generate_image_alt_text(headline, keywords, outline, section_text):
+    prompt = (
+        f"Write a highly descriptive, SEO-optimized alt text for an image to be used in an article with the headline: '{headline}'. "
+        f"Target these keywords: {', '.join(keywords)}. "
+        f"The image appears in this section: '{section_text}'. "
+        "Alt text should be 8-20 words, clear, and relevant for both screen readers and Google image search. "
+        "Do not use 'image of', 'photo of', etc."
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=40,
+        temperature=0.3,
+    )
+    alt_text = response.choices[0].message.content.strip().strip('"').strip("'")
+    return alt_text
 
 @bp.route("/")
 def show_articles():
@@ -168,6 +255,8 @@ def show_articles():
             "title": real_title,
             "content": content[:400] + "...",  # Or an excerpt
         })
+    return render_template("reddit_articles.html", articles=articles)
+
 
 
 @bp.route("/generate", methods=["POST"])
@@ -202,14 +291,19 @@ def read_article(filename):
     if not os.path.exists(path):
         return "Article not found.", 404
     with open(path, encoding="utf-8") as f:
-        md_content = f.read()
-    # Convert markdown to HTML!
-    html_content = markdown2.markdown(md_content)
-    # Extract a title (like you do elsewhere)
+        lines = f.readlines()
+    # Find and extract the first # Title line for display
     title = next(
-        (line.strip("# \n") for line in md_content.splitlines() if line.strip().startswith("#")),
+        (line.strip("# \n") for line in lines if line.strip().startswith("#")),
         filename.replace(".md", "")
     )
+    # Remove first heading line
+    body_lines = [line for line in lines if not line.strip().startswith("#", 0, 2)]
+    # Optionally remove a second "meta-title" (e.g., bolded first line)
+    if body_lines and body_lines[0].strip().startswith("**"):
+        body_lines = body_lines[1:]
+    md_content = "".join(body_lines).lstrip("\n")
+    html_content = markdown2.markdown(md_content)
     return render_template("single_article.html", content=html_content, title=title)
 
 def clean_title(title):
@@ -224,8 +318,22 @@ def generate_article_for_today():
     headline = rewrite_title(cleaned_topic)
     keywords = extract_keywords(headline, post["comments"])
     outline = generate_outline(headline, keywords)
-    article = generate_article(headline, outline, keywords)
-    fname = save_article_md(headline, article)
+    article_md = generate_article(headline, outline, keywords)
+
+    # --- IMAGE SUGGESTIONS & INSERTION HERE ---
+    image_suggestions = suggest_image_sections_and_captions(article_md, outline)
+    for suggestion in image_suggestions:
+        image_url, photographer, image_page = get_unsplash_image(suggestion["query"])
+        if image_url:
+            article_md = insert_image_markdown(
+                article_md, image_url,
+                alt_text=suggestion["caption"],
+                caption=f"{suggestion['caption']} (Photo by {photographer} on Unsplash)",
+                after_heading=suggestion["section"]
+            )
+    # --- END IMAGE INSERTION ---
+
+    fname = save_article_md(headline, article_md)
     print(f"Generated and saved: {fname}")
     return fname
 

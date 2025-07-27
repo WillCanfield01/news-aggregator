@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <title>Latest Community Topics</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Browse all daily AI-generated community advice and trending discussion articles.">
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -93,9 +94,14 @@
             {% for article in articles %}
             <li>
                 <div class="article-title">{{ article.title }}</div>
-                <div class="snippet">{{ article.content }}</div>
-                <a href="/reddit-articles/articles/{{ article.filename }}" class="read-link" target="_blank">Read Full
-                    Article &rarr;</a>
+                {% if article.date %}
+                <div class="article-date">{{ article.date }}</div>
+                {% endif %}
+                <div class="snippet">{{ article.snippet | safe }}</div>
+                <a href="/reddit-articles/articles/{{ article.filename }}" class="read-link" target="_blank"
+                    aria-label="Read full article: {{ article.title }}">
+                    Read Full Article &rarr;
+                </a>
             </li>
             {% endfor %}
         </ul>
