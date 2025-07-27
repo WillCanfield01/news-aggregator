@@ -211,10 +211,11 @@ def suggest_image_sections_and_captions(article_md, outline):
         "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]"
     )
     response = openai.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
-        temperature=0.3,
+    model="gpt-4.1-mini",
+    messages=[{"role": "user", "content": prompt}],
+    max_tokens=250,
+    temperature=0.3,
+    response_format={"type": "json_object"}  # 👈 force valid JSON!
     )
     # Parse as JSON, be robust to possible formatting weirdness
     import json
