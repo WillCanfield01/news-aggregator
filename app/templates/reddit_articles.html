@@ -81,6 +81,12 @@
         .read-link:hover {
             text-decoration: underline;
         }
+
+        .article-date {
+            color: #888;
+            font-size: 0.98rem;
+            margin-bottom: 0.4rem;
+        }
     </style>
 </head>
 
@@ -93,7 +99,7 @@
             <li>
                 <div class="article-title">{{ article.title }}</div>
                 {% if article.date %}
-                <div class="article-date">{{ article.date }}</div>
+                <div class="article-date">{{ article.date.strftime('%B %d, %Y') }}</div>
                 {% endif %}
                 <div class="snippet">{{ article.snippet | safe }}</div>
                 <a href="/reddit-articles/articles/{{ article.filename }}" class="read-link" target="_blank"
@@ -104,14 +110,6 @@
             {% endfor %}
         </ul>
     </div>
-    <script>
-        document.getElementById("gen-form").onsubmit = async function (e) {
-            e.preventDefault();
-            let resp = await fetch('/reddit-articles/generate', { method: 'POST' });
-            let data = await resp.json();
-            if (data.success) location.reload();
-        }
-    </script>
 </body>
 
 </html>
