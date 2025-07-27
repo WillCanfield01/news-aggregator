@@ -4,6 +4,10 @@ import openai
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify
 from unidecode import unidecode
+from app.models import CommunityArticle
+from app import db
+from datetime import date
+from markdown2 import markdown
 import praw
 import markdown2
 import requests
@@ -147,12 +151,17 @@ def rewrite_title(original_title):
     headline = headline.strip(' "\'')
     return headline or "Untitled Article"
 
-def save_article_md(title, content):
-    filename = f"{ARTICLES_DIR}/{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', title)[:50]}.md"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"# {title}\n\n")
-        f.write(content)
-    return filename
+def save_article_db(title, content_md, filename, html_content=None):
+    article = CommunityArticle(
+        date=date.today(),
+        filename=filename,
+        title=title,
+        content=content_md,
+        html_content=html_content or markdown(content_md)
+    )
+    db.session.add(article)
+    db.session.commit()
+    return article.id
 
 def get_unsplash_image(query):
     url = "https://api.unsplash.com/photos/random"
@@ -242,22 +251,8 @@ def generate_image_alt_text(headline, keywords, outline, section_text):
 
 @bp.route("/")
 def show_articles():
-    files = [f for f in os.listdir(ARTICLES_DIR) if f.endswith(".md")]
-    articles = []
-    for fname in sorted(files, reverse=True):
-        with open(os.path.join(ARTICLES_DIR, fname), encoding="utf-8") as f:
-            lines = f.readlines()
-            # If markdown, the real title is likely the first non-empty line starting with "#"
-            real_title = next((line.strip("# \n") for line in lines if line.strip().startswith("#")), fname.replace(".md", ""))
-            content = "".join(lines)
-        articles.append({
-            "filename": fname,
-            "title": real_title,
-            "content": content[:400] + "...",  # Or an excerpt
-        })
+    articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
     return render_template("reddit_articles.html", articles=articles)
-
-
 
 @bp.route("/generate", methods=["POST"])
 def generate():
@@ -267,45 +262,13 @@ def generate():
 
 @bp.route("/articles")
 def published_articles():
-    files = [f for f in os.listdir(ARTICLES_DIR) if f.endswith(".md")]
-    articles = []
-    for fname in sorted(files, reverse=True):
-        with open(os.path.join(ARTICLES_DIR, fname), encoding="utf-8") as f:
-            lines = f.readlines()
-            # Find first non-empty line starting with "#", use as real title
-            real_title = next(
-                (line.strip("# \n") for line in lines if line.strip().startswith("#")),
-                fname.replace(".md", "")
-            )
-            content = "".join(lines)
-        articles.append({
-            "filename": fname,
-            "title": real_title,
-            "content": content[:400] + "...",  # Snippet/preview only
-        })
+    articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
     return render_template("published_articles.html", articles=articles)
 
 @bp.route("/articles/<filename>")
 def read_article(filename):
-    path = os.path.join(ARTICLES_DIR, filename)
-    if not os.path.exists(path):
-        return "Article not found.", 404
-    with open(path, encoding="utf-8") as f:
-        lines = f.readlines()
-    # Find and extract the first # Title line for display
-    title = next(
-        (line.strip("# \n") for line in lines if line.strip().startswith("#")),
-        filename.replace(".md", "")
-    )
-    # Remove first heading line
-    body_lines = [line for line in lines if not line.strip().startswith("#", 0, 2)]
-    # Optionally remove a second "meta-title" (e.g., bolded first line)
-    if body_lines and body_lines[0].strip().startswith("**"):
-        body_lines = body_lines[1:]
-    md_content = "".join(body_lines).lstrip("\n")
-    html_content = markdown2.markdown(md_content)
-    return render_template("single_article.html", content=html_content, title=title)
-
+    article = CommunityArticle.query.filter_by(filename=filename).first_or_404()
+    return render_template("single_article.html", content=article.html_content, title=article.title)
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
     title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)
@@ -332,10 +295,11 @@ def generate_article_for_today():
                 after_heading=suggestion["section"]
             )
     # --- END IMAGE INSERTION ---
-
-    fname = save_article_md(headline, article_md)
-    print(f"Generated and saved: {fname}")
-    return fname
+    html_content = markdown(article_md)
+    filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
+    save_article_db(headline, article_md, filename, html_content)
+    print(f"✅ Saved to DB: {filename}")
+    return filename
 
 if __name__ == "__main__":
     # This lets you run: python app/reddit_articles.py

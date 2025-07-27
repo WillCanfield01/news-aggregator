@@ -86,10 +86,8 @@
 
 <body>
     <div class="container">
+        <a href="/" class="back-link">← Back to Home</a>
         <h1>Daily Community Articles</h1>
-        <form id="gen-form" method="post" action="/reddit-articles/generate">
-            <button type="submit">Generate Today’s Article</button>
-        </form>
         <ul>
             {% for article in articles %}
             <li>
