@@ -89,7 +89,6 @@ def extract_keywords(text, comments=[]):
     keywords = [kw.strip() for kw in re.split(r",|;", kw_text) if kw.strip()]
     return keywords
 
-
 def generate_outline(topic, keywords):
     prompt = (
         f"Create a detailed SEO blog post outline for the topic '{topic}'. "
@@ -97,16 +96,24 @@ def generate_outline(topic, keywords):
         "The article should read like a trending community discussion, as if curated for a smart, independent advice site. "
         "Absolutely avoid any mention of Reddit, forums, or social media. "
         "Use a conversational style, sharing personal insights and tips. "
-        "Include 5-7 headings/subheadings, a meta title, meta description, and an FAQ section."
+        "Include 5-7 headings/subheadings, a meta title, meta description, and an FAQ section.\n"
+        "Format your response as:\n"
+        "Meta Title: ...\nMeta Description: ...\nOutline:\n# ... (markdown headings, etc)"
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=300,
+        max_tokens=350,
         temperature=0.3,
     )
-    return response.choices[0].message.content
-
+    content = response.choices[0].message.content
+    mt = re.search(r"Meta Title:\s*(.+)", content)
+    md = re.search(r"Meta Description:\s*(.+)", content)
+    ol = re.search(r"Outline:\s*([\s\S]+)", content)
+    meta_title = mt.group(1).strip() if mt else topic
+    meta_description = md.group(1).strip() if md else ""
+    outline = ol.group(1).strip() if ol else content
+    return meta_title, meta_description, outline
 
 def generate_article(topic, outline, keywords):
     prompt = (
@@ -151,13 +158,15 @@ def rewrite_title(original_title):
     headline = headline.strip(' "\'')
     return headline or "Untitled Article"
 
-def save_article_db(title, content_md, filename, html_content=None):
+def save_article_db(title, content_md, filename, html_content=None, meta_title=None, meta_description=None):
     article = CommunityArticle(
         date=date.today(),
         filename=filename,
         title=title,
         content=content_md,
-        html_content=html_content or markdown(content_md)
+        html_content=html_content or markdown(content_md),
+        meta_title=meta_title,
+        meta_description=meta_description
     )
     db.session.add(article)
     db.session.commit()
@@ -299,7 +308,28 @@ def read_article(filename):
         return "\n".join(output)
     cleaned_md = remove_first_heading(article.content)
     html_content = markdown(cleaned_md)
-    return render_template("single_article.html", content=html_content, title=article.title)
+    
+    # Add meta_title and meta_description support
+    meta_title = None
+    meta_description = None
+    # If you have fields for these, use them
+    if hasattr(article, "meta_title") and article.meta_title:
+        meta_title = article.meta_title
+    if hasattr(article, "meta_description") and article.meta_description:
+        meta_description = article.meta_description
+    else:
+        # Fallback: Use first ~160 chars of plain text
+        plain = re.sub(r'<.*?>', '', html_content)  # Remove HTML tags
+        meta_description = plain[:160]
+
+    return render_template(
+        "single_article.html",
+        title=article.title,
+        date=article.date,
+        content=html_content,
+        meta_title=meta_title,
+        meta_description=meta_description
+    )
 
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
@@ -312,10 +342,11 @@ def generate_article_for_today():
     cleaned_topic = clean_title(post["title"])
     headline = rewrite_title(cleaned_topic)
     keywords = extract_keywords(headline, post["comments"])
-    outline = generate_outline(headline, keywords)
+
+    # Modified: gets meta_title, meta_description, outline
+    meta_title, meta_description, outline = generate_outline(headline, keywords)
     article_md = generate_article(headline, outline, keywords)
 
-    # --- IMAGE SUGGESTIONS & INSERTION HERE ---
     image_suggestions = suggest_image_sections_and_captions(article_md, outline)
     if isinstance(image_suggestions, dict):
         image_suggestions = [image_suggestions]
@@ -333,12 +364,14 @@ def generate_article_for_today():
 
     html_content = markdown(article_md)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
-    
+
     # === Check for duplicates before saving ===
     if CommunityArticle.query.filter_by(filename=filename).first():
         print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
-        return filename  # or return None to signal a skip
-    save_article_db(headline, article_md, filename, html_content)
+        return filename
+
+    # Pass meta fields!
+    save_article_db(headline, article_md, filename, html_content, meta_title, meta_description)
     print(f"✅ Saved to DB: {filename}")
     return filename
 

@@ -53,11 +53,38 @@ def create_app():
     def landing():
         return render_template("index.html", year=datetime.now().year)
 
+    # === ADD THIS FOR SITEMAP ===
+    @app.route('/sitemap.xml')
+    def sitemap():
+        base_url = "https://therealroundup.com"  # Make sure this is your real domain
+        articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
+        urls = [f"{base_url}/reddit-articles/articles/{a.filename}" for a in articles]
+
+        xml = ['<?xml version="1.0" encoding="UTF-8"?>']
+        xml.append('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
+        xml.append(f"""
+        <url>
+            <loc>{base_url}/</loc>
+            <priority>1.0</priority>
+        </url>
+        """)
+        for url in urls:
+            xml.append(f"""
+        <url>
+            <loc>{url}</loc>
+            <priority>0.8</priority>
+        </url>
+        """)
+        xml.append('</urlset>')
+        sitemap_xml = "\n".join(xml)
+        return Response(sitemap_xml, mimetype='application/xml')
+
     with app.app_context():
         start_background_tasks()
-        schedule_daily_reddit_article(app)  # <-- Schedule the daily job
+        schedule_daily_reddit_article(app)
 
     return app
+
 
 if __name__ == "__main__":
     app = create_app()

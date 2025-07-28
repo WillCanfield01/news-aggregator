@@ -9,3 +9,5 @@ class CommunityArticle(db.Model):
     content = db.Column(db.Text, nullable=False)  # Store the markdown here
     html_content = db.Column(db.Text)  # Optional: store the rendered HTML
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    meta_title = db.Column(db.String(255), nullable=True)
+    meta_description = db.Column(db.Text, nullable=True)

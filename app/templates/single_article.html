@@ -4,7 +4,11 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>{{ title }} – The Roundup</title>
+    <title>{{ meta_title or title }} – The Roundup</title>
+    <meta name="description" content="{{ meta_description or (content[:160] if content else '') }}">
+    <meta property="og:title" content="{{ meta_title or title }}">
+    <meta property="og:description" content="{{ meta_description or (content[:160] if content else '') }}">
+    <meta property="og:type" content="article">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <style>
         body {
