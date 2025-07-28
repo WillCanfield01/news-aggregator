@@ -203,15 +203,15 @@ import json
 
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
-        "Given the following article outline and the full draft, suggest 1-3 sections where a relevant image would add value. "
-        "For each section, provide:\n"
-        "- The section heading or a short description of the content after which to insert the image\n"
-        "- An image search query (e.g. 'family traditions', 'lost customs', 'community gathering')\n"
-        "- A short, descriptive caption and alt text for the image\n\n"
-        f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
-        "Format your reply as JSON:\n"
-        "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]"
-        "\nReturn only valid, parsable JSON, with no extra text, comments, or explanations."
+    "Given the following article outline and the full draft, suggest 2-4 different sections where a relevant image would add value. "
+    "For each section, provide:\n"
+    "- The section heading (verbatim)\n"
+    "- An image search query (e.g. 'family traditions', 'lost customs', 'community gathering')\n"
+    "- A short, descriptive caption and alt text for the image\n\n"
+    f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
+    "Format your reply as a **JSON list** (not a single object!):\n"
+    "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]\n"
+    "Return only valid, parsable JSON, no explanations or comments."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
