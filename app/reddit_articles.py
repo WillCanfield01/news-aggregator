@@ -199,6 +199,8 @@ def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_head
             lines.insert(0, image_md)
     return "\n".join(lines)
 
+import json
+
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
         "Given the following article outline and the full draft, suggest 1-3 sections where a relevant image would add value. "
@@ -209,19 +211,32 @@ def suggest_image_sections_and_captions(article_md, outline):
         f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
         "Format your reply as JSON:\n"
         "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]"
+        "\nReturn only valid, parsable JSON, with no extra text, comments, or explanations."
     )
     response = openai.chat.completions.create(
-    model="gpt-4.1-mini",
-    messages=[{"role": "user", "content": prompt}],
-    max_tokens=250,
-    temperature=0.3,
-    response_format={"type": "json_object"}  # 👈 force valid JSON!
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=250,
+        temperature=0.3,
+        response_format={"type": "json_object"}
     )
-    # Parse as JSON, be robust to possible formatting weirdness
-    import json
+    gpt_output = response.choices[0].message.content
+    print("Raw image suggestion output:", gpt_output)
     try:
-        sections = json.loads(response.choices[0].message.content)
-        return sections
+        # Parse the JSON output
+        suggestions = json.loads(gpt_output)
+        # If suggestions is a dict with a single key, extract the value
+        if isinstance(suggestions, dict):
+            suggestions = list(suggestions.values())[0]
+        # If it's a string, try to parse again (sometimes double-encoded)
+        if isinstance(suggestions, str):
+            suggestions = json.loads(suggestions)
+        if not isinstance(suggestions, list):
+            suggestions = [suggestions]
+        # Make sure all are dicts
+        suggestions = [s for s in suggestions if isinstance(s, dict)]
+        print("Parsed suggestions:", suggestions)
+        return suggestions
     except Exception as e:
         print("AI JSON parse error:", e)
         return []
