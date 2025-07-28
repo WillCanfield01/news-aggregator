@@ -319,9 +319,6 @@ def generate_article_for_today():
     image_suggestions = suggest_image_sections_and_captions(article_md, outline)
     if isinstance(image_suggestions, dict):
         image_suggestions = [image_suggestions]
-    
-    inserted_any_image = False  # Track if we inserted at least one image
-
     for suggestion in image_suggestions:
         if not isinstance(suggestion, dict):
             continue
@@ -333,21 +330,14 @@ def generate_article_for_today():
                 caption=f"{suggestion.get('caption', '')} (Photo by {photographer} on Unsplash)",
                 after_heading=suggestion.get("section")
             )
-            inserted_any_image = True  # Mark that we inserted an image
-
-    if not inserted_any_image:
-        # Test fallback image insertion
-        print("No valid AI/Unsplash images inserted, adding fallback image.")
-        article_md = insert_image_markdown(
-            article_md,
-            "https://images.unsplash.com/photo-1465101162946-4377e57745c3",
-            alt_text="Sample fallback image",
-            caption="Sample fallback image for testing"
-        )
-    # --- END IMAGE INSERTION ---
 
     html_content = markdown(article_md)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
+    
+    # === Check for duplicates before saving ===
+    if CommunityArticle.query.filter_by(filename=filename).first():
+        print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
+        return filename  # or return None to signal a skip
     save_article_db(headline, article_md, filename, html_content)
     print(f"✅ Saved to DB: {filename}")
     return filename
