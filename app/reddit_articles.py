@@ -203,7 +203,7 @@ import json
 
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
-    "Given the following article outline and the full draft, suggest 2-4 different sections where a relevant image would add value. "
+    "Given the following article outline and the full draft, suggest 3-5 different sections where a relevant image would add value. "
     "For each section, provide:\n"
     "- The section heading (verbatim)\n"
     "- An image search query (e.g. 'family traditions', 'lost customs', 'community gathering')\n"
@@ -216,7 +216,7 @@ def suggest_image_sections_and_captions(article_md, outline):
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
+        max_tokens=300,
         temperature=0.3,
         response_format={"type": "json_object"}
     )
