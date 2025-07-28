@@ -223,18 +223,11 @@ def suggest_image_sections_and_captions(article_md, outline):
     gpt_output = response.choices[0].message.content
     print("Raw image suggestion output:", gpt_output)
     try:
-        # Parse the JSON output
         suggestions = json.loads(gpt_output)
-        # If suggestions is a dict with a single key, extract the value
         if isinstance(suggestions, dict):
-            suggestions = list(suggestions.values())[0]
-        # If it's a string, try to parse again (sometimes double-encoded)
-        if isinstance(suggestions, str):
-            suggestions = json.loads(suggestions)
-        if not isinstance(suggestions, list):
             suggestions = [suggestions]
-        # Make sure all are dicts
-        suggestions = [s for s in suggestions if isinstance(s, dict)]
+        elif suggestions is None:
+            suggestions = []
         print("Parsed suggestions:", suggestions)
         return suggestions
     except Exception as e:
