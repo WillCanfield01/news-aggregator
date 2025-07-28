@@ -293,7 +293,21 @@ def published_articles():
 @bp.route("/articles/<filename>")
 def read_article(filename):
     article = CommunityArticle.query.filter_by(filename=filename).first_or_404()
-    return render_template("single_article.html", content=article.html_content, title=article.title)
+    # Remove the first markdown heading (e.g. "# Title") before rendering
+    def remove_first_heading(md_text):
+        lines = md_text.splitlines()
+        found = False
+        output = []
+        for line in lines:
+            if not found and line.strip().startswith("#"):
+                found = True
+                continue  # skip this heading line
+            output.append(line)
+        return "\n".join(output)
+    cleaned_md = remove_first_heading(article.content)
+    html_content = markdown(cleaned_md)
+    return render_template("single_article.html", content=html_content, title=article.title)
+
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
     title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)
@@ -310,16 +324,35 @@ def generate_article_for_today():
 
     # --- IMAGE SUGGESTIONS & INSERTION HERE ---
     image_suggestions = suggest_image_sections_and_captions(article_md, outline)
+    if isinstance(image_suggestions, dict):
+        image_suggestions = [image_suggestions]
+    
+    inserted_any_image = False  # Track if we inserted at least one image
+
     for suggestion in image_suggestions:
-        image_url, photographer, image_page = get_unsplash_image(suggestion["query"])
+        if not isinstance(suggestion, dict):
+            continue
+        image_url, photographer, image_page = get_unsplash_image(suggestion.get("query", ""))
         if image_url:
             article_md = insert_image_markdown(
                 article_md, image_url,
-                alt_text=suggestion["caption"],
-                caption=f"{suggestion['caption']} (Photo by {photographer} on Unsplash)",
-                after_heading=suggestion["section"]
+                alt_text=suggestion.get("caption", headline),
+                caption=f"{suggestion.get('caption', '')} (Photo by {photographer} on Unsplash)",
+                after_heading=suggestion.get("section")
             )
+            inserted_any_image = True  # Mark that we inserted an image
+
+    if not inserted_any_image:
+        # Test fallback image insertion
+        print("No valid AI/Unsplash images inserted, adding fallback image.")
+        article_md = insert_image_markdown(
+            article_md,
+            "https://images.unsplash.com/photo-1465101162946-4377e57745c3",
+            alt_text="Sample fallback image",
+            caption="Sample fallback image for testing"
+        )
     # --- END IMAGE INSERTION ---
+
     html_content = markdown(article_md)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
     save_article_db(headline, article_md, filename, html_content)
