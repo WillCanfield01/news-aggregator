@@ -1,10 +1,11 @@
 import os
 from datetime import datetime
-from flask import Flask, render_template
+from flask import Flask, render_template, Response, url_for, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
+from app.models import CommunityArticle
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -16,8 +17,7 @@ def schedule_daily_reddit_article(app):
             generate_article_for_today()
             print("✅ Daily Reddit article generated at", datetime.now())
 
-    scheduler = BackgroundScheduler(timezone=pytz.timezone("America/Denver"))  # MST/MDT
-    # Runs every day at 17:00 (5 PM) Mountain Time
+    scheduler = BackgroundScheduler(timezone=pytz.timezone("America/Denver"))
     scheduler.add_job(scheduled_job, "cron", hour=17, minute=0)
     scheduler.start()
 
@@ -53,41 +53,43 @@ def create_app():
     def landing():
         return render_template("index.html", year=datetime.now().year)
 
-    # === ADD THIS FOR SITEMAP ===
-    @app.route('/sitemap.xml')
+    # === SITEMAP ROUTE ===
+    @app.route("/sitemap.xml")
     def sitemap():
-        base_url = "https://therealroundup.com"  # Make sure this is your real domain
-        articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
-        urls = [f"{base_url}/reddit-articles/articles/{a.filename}" for a in articles]
+        try:
+            articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
+            base_url = "https://therealroundup.com"
+            urlset = [
+                f"""<url>
+    <loc>{base_url}{url_for('reddit_articles.read_article', filename=a.filename)}</loc>
+    <lastmod>{a.date.strftime('%Y-%m-%d') if a.date else ''}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+</url>""" for a in articles
+            ]
+            # Always include homepage!
+            home_url = f"""<url>
+    <loc>{base_url}/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+</url>"""
+            sitemap_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{home_url}
+{''.join(urlset)}
+</urlset>"""
 
-        xml = ['<?xml version="1.0" encoding="UTF-8"?>']
-        xml.append('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
-        xml.append(f"""
-        <url>
-            <loc>{base_url}/</loc>
-            <priority>1.0</priority>
-        </url>
-        """)
-        for url in urls:
-            xml.append(f"""
-        <url>
-            <loc>{url}</loc>
-            <priority>0.8</priority>
-        </url>
-        """)
-        xml.append('</urlset>')
-        sitemap_xml = "\n".join(xml)
-        return Response(sitemap_xml, mimetype='application/xml')
+            return Response(sitemap_xml, mimetype="application/xml")
+        except Exception as e:
+            current_app.logger.error(f"Sitemap error: {e}")
+            return Response("Internal Server Error", status=500)
 
     with app.app_context():
         start_background_tasks()
-        schedule_daily_reddit_article(app)
+        schedule_daily_reddit_article(app)  # Schedule the daily job
 
     return app
 
-
 if __name__ == "__main__":
     app = create_app()
-    # with app.app_context():
-    #     db.create_all()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
