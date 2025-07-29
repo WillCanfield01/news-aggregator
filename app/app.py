@@ -5,7 +5,6 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
-from app.models import CommunityArticle
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -48,6 +47,9 @@ def create_app():
 
     app.register_blueprint(aggregator_bp)
     app.register_blueprint(reddit_bp)
+
+    # ==== MOVE THE IMPORT HERE! ====
+    from app.models import CommunityArticle
 
     @app.route("/")
     def landing():
