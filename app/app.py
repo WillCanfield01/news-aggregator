@@ -92,6 +92,10 @@ def create_app():
 
     return app
 
+@app.route("/robots.txt")
+def robots():
+    return current_app.send_static_file("robots.txt")
+
 if __name__ == "__main__":
     app = create_app()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

@@ -11,6 +11,7 @@ from markdown2 import markdown
 import praw
 import markdown2
 import requests
+import difflib
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
@@ -190,22 +191,32 @@ def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_head
     if caption:
         image_md += f"\n*{caption}*"
     lines = md_text.splitlines()
+
+    inserted = False
     if after_heading:
-        # Insert after the heading that matches after_heading
-        for i, line in enumerate(lines):
-            if after_heading.lower() in line.lower():
-                lines.insert(i+1, image_md)
-                break
-        else:
-            lines.append(image_md)
-    else:
+        # Try to find the best heading match
+        headings = [i for i, line in enumerate(lines) if line.strip().startswith("#")]
+        best_match_idx = None
+        best_ratio = 0
+        for i in headings:
+            line_clean = re.sub(r'[^a-zA-Z0-9 ]', '', lines[i]).lower()
+            heading_clean = re.sub(r'[^a-zA-Z0-9 ]', '', after_heading).lower()
+            ratio = difflib.SequenceMatcher(None, line_clean, heading_clean).ratio()
+            if ratio > best_ratio and ratio > 0.5:
+                best_ratio = ratio
+                best_match_idx = i
+        if best_match_idx is not None:
+            lines.insert(best_match_idx + 1, image_md)
+            inserted = True
+    if not inserted:
         # Default: after first heading
         for i, line in enumerate(lines):
             if line.strip().startswith("#"):
                 lines.insert(i+1, image_md)
+                inserted = True
                 break
-        else:
-            lines.insert(0, image_md)
+    if not inserted:
+        lines.insert(0, image_md)
     return "\n".join(lines)
 
 import json
@@ -233,10 +244,10 @@ def suggest_image_sections_and_captions(article_md, outline):
     print("Raw image suggestion output:", gpt_output)
     try:
         suggestions = json.loads(gpt_output)
-        if isinstance(suggestions, dict):
-            suggestions = [suggestions]
-        elif suggestions is None:
-            suggestions = []
+        if isinstance(image_suggestions, dict):
+            image_suggestions = [image_suggestions]
+        elif image_suggestions is None:
+            image_suggestions = []
         print("Parsed suggestions:", suggestions)
         return suggestions
     except Exception as e:
