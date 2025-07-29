@@ -48,14 +48,12 @@ def create_app():
     app.register_blueprint(aggregator_bp)
     app.register_blueprint(reddit_bp)
 
-    # ==== MOVE THE IMPORT HERE! ====
     from app.models import CommunityArticle
 
     @app.route("/")
     def landing():
         return render_template("index.html", year=datetime.now().year)
 
-    # === SITEMAP ROUTE ===
     @app.route("/sitemap.xml")
     def sitemap():
         try:
@@ -69,7 +67,6 @@ def create_app():
     <priority>0.8</priority>
 </url>""" for a in articles
             ]
-            # Always include homepage!
             home_url = f"""<url>
     <loc>{base_url}/</loc>
     <changefreq>daily</changefreq>
@@ -80,21 +77,27 @@ def create_app():
 {home_url}
 {''.join(urlset)}
 </urlset>"""
-
             return Response(sitemap_xml, mimetype="application/xml")
         except Exception as e:
             current_app.logger.error(f"Sitemap error: {e}")
             return Response("Internal Server Error", status=500)
 
+    @app.route("/robots.txt")
+    def robots():
+        # Serve a plain robots.txt or from static if you have a file there
+        return (
+            "User-agent: *\n"
+            "Allow: /\n"
+            "Sitemap: https://therealroundup.com/sitemap.xml\n",
+            200,
+            {"Content-Type": "text/plain"}
+        )
+
     with app.app_context():
         start_background_tasks()
-        schedule_daily_reddit_article(app)  # Schedule the daily job
+        schedule_daily_reddit_article(app)
 
     return app
-
-@app.route("/robots.txt")
-def robots():
-    return current_app.send_static_file("robots.txt")
 
 if __name__ == "__main__":
     app = create_app()
