@@ -12,6 +12,7 @@ import praw
 import markdown2
 import requests
 import difflib
+import re
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
@@ -46,6 +47,21 @@ def is_safe(text):
         if word in text:
             return False
     return True
+
+def split_markdown_sections(md):
+    # Matches both "# Title" and "1. Something"
+    pattern = re.compile(r'^(#+ .+|[0-9]+\. .+)$', re.MULTILINE)
+    splits = [m.start() for m in pattern.finditer(md)]
+    splits.append(len(md))
+    sections = []
+    for i in range(len(splits) - 1):
+        section_start = splits[i]
+        section_end = splits[i+1]
+        heading_match = pattern.match(md[section_start:].split('\n', 1)[0])
+        heading = heading_match.group(0) if heading_match else ""
+        content = md[section_start:section_end].strip()
+        sections.append((heading, content))
+    return sections
 
 def get_top_askreddit_post():
     reddit = praw.Reddit(
@@ -215,6 +231,36 @@ def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_head
 
 import json
 
+def generate_section_image_suggestion(headline, keywords, outline, section_heading, section_content):
+    prompt = (
+        f"Given the article '{headline}' (keywords: {', '.join(keywords)}), "
+        f"and the section below:\n\n"
+        f"Section Heading: {section_heading}\n"
+        f"Section Content:\n{section_content}\n\n"
+        "Suggest a relevant image for Unsplash, with:\n"
+        "- An image search query (max 5 words)\n"
+        "- A short, descriptive caption and alt text (max 20 words)\n"
+        "Format as JSON: {\"query\": \"...\", \"caption\": \"...\"}\n"
+        "If no image fits, reply: {\"query\": \"\", \"caption\": \"skip\"}"
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=60,
+        temperature=0.2,
+        response_format={"type": "json_object"}
+    )
+    try:
+        suggestion = json.loads(response.choices[0].message.content)
+        # Only use if not "skip"
+        if suggestion.get("caption", "").lower() == "skip" or not suggestion.get("query"):
+            return None
+        suggestion["section"] = section_heading
+        return suggestion
+    except Exception as e:
+        print("Section image parse error:", e)
+        return None
+
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
         "Given the article outline and draft below, suggest **EXACTLY 4 distinct sections** where a relevant image would add value. "
@@ -243,7 +289,10 @@ def suggest_image_sections_and_captions(article_md, outline):
     print("Raw image suggestion output:", gpt_output)
     try:
         suggestions = json.loads(gpt_output)
-        if isinstance(suggestions, dict):
+        # If GPT returns {"result": [...]}, use that list
+        if isinstance(suggestions, dict) and "result" in suggestions and isinstance(suggestions["result"], list):
+            suggestions = suggestions["result"]
+        elif isinstance(suggestions, dict):
             suggestions = [suggestions]
         elif not isinstance(suggestions, list) or suggestions is None:
             suggestions = []
@@ -368,34 +417,37 @@ def generate_article_for_today():
     keywords = extract_keywords(headline, post["comments"])
     meta_title, meta_description, outline = generate_outline(headline, keywords)
     article_md = generate_article(headline, outline, keywords)
+    
+    # --- NEW: Split into sections ---
+    sections = split_markdown_sections(article_md)
+    img_count = 0
+    for heading, content in sections:
+        if img_count >= 5:
+            break
+        if not content or len(content.strip()) < 30:
+            continue  # skip super-short sections
+        suggestion = generate_section_image_suggestion(headline, keywords, outline, heading, content)
+        if suggestion:
+            image_url, photographer, image_page = get_unsplash_image(suggestion.get("query", ""))
+            if image_url:
+                article_md = insert_image_markdown(
+                    article_md, image_url,
+                    alt_text=suggestion["caption"],
+                    caption=f"{suggestion['caption']} (Photo by {photographer} on Unsplash)",
+                    after_heading=heading
+                )
+                img_count += 1
 
-    # Try to get 3–5 image suggestions
-    image_suggestions = get_image_suggestions(article_md, outline, min_images=3, max_images=5)
-    for suggestion in image_suggestions:
-        if not isinstance(suggestion, dict):
-            continue
-        image_url, photographer, image_page = get_unsplash_image(suggestion.get("query", ""))
-        if image_url:
-            article_md = insert_image_markdown(
-                article_md, image_url,
-                alt_text=suggestion.get("caption", headline),
-                caption=f"{suggestion.get('caption', '')} (Photo by {photographer} on Unsplash)",
-                after_heading=suggestion.get("section")
-            )
     # ...rest unchanged...
-
     html_content = markdown(article_md)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
-
-    # === Check for duplicates before saving ===
     if CommunityArticle.query.filter_by(filename=filename).first():
         print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
         return filename
-
-    # Pass meta fields!
     save_article_db(headline, article_md, filename, html_content, meta_title, meta_description)
     print(f"✅ Saved to DB: {filename}")
     return filename
+
 
 if __name__ == "__main__":
     from app import create_app
