@@ -26,7 +26,7 @@ if not os.path.exists(ARTICLES_DIR):
 
 openai.api_key = OPENAI_API_KEY
 
-bp = Blueprint("reddit_articles", __name__, url_prefix="/reddit-articles")
+bp = Blueprint("all-articles", __name__, url_prefix="/all-articles")
 
 BANNED_WORDS = [
     "sex", "sexual", "nsfw", "porn", "nude", "nudes", "vagina", "penis", "erection",

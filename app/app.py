@@ -61,7 +61,7 @@ def create_app():
             base_url = "https://therealroundup.com"
             urlset = [
                 f"""<url>
-    <loc>{base_url}{url_for('reddit_articles.read_article', filename=a.filename)}</loc>
+    <loc>{base_url}{url_for('all-articles.read_article', filename=a.filename)}</loc>
     <lastmod>{a.date.strftime('%Y-%m-%d') if a.date else ''}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
