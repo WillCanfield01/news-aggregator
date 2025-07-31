@@ -392,6 +392,28 @@ def read_article(filename):
         meta_description=meta_description
     )
 
+@bp.route("/api/reddit-feature")
+def reddit_feature():
+    today = datetime.now().date()
+    # Get the most recent article or today's if you want
+    article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+    # Or to require only today's:
+    # article = CommunityArticle.query.filter_by(date=today).first()
+    if article:
+        # Create a summary if not present
+        # If you store a summary, use it; otherwise, just take the start of the article
+        plain = re.sub(r'\!\[.*?\]\(.*?\)', '', article.content)  # Remove images
+        plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)  # [link text](url) → link text
+        plain = re.sub(r'\*\*|\*|__|_', '', plain)  # Remove bold/italic
+        words = plain.split()
+        summary = " ".join(words[:55]) + ("..." if len(words) > 55 else "")
+        return jsonify({
+            "title": article.title,
+            "summary": summary
+        })
+    else:
+        return jsonify({"title": "", "summary": ""}), 404
+
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
     title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)

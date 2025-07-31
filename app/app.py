@@ -1,10 +1,11 @@
 import os
 from datetime import datetime
-from flask import Flask, render_template, Response, url_for, current_app
+from flask import Flask, render_template, Response, url_for, current_app, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
+import re
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -81,6 +82,23 @@ def create_app():
         except Exception as e:
             current_app.logger.error(f"Sitemap error: {e}")
             return Response("Internal Server Error", status=500)
+
+    @app.route("/api/reddit-feature")
+    def reddit_feature():
+        today = datetime.now().date()
+        article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+        if article:
+            plain = re.sub(r'\!\[.*?\]\(.*?\)', '', article.content)
+            plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)
+            plain = re.sub(r'\*\*|\*|__|_', '', plain)
+            words = plain.split()
+            summary = " ".join(words[:55]) + ("..." if len(words) > 55 else "")
+            return jsonify({
+                "title": article.title,
+                "summary": summary
+            })
+        else:
+            return jsonify({"title": "", "summary": ""}), 404
 
     @app.route("/robots.txt")
     def robots():
