@@ -199,8 +199,10 @@ def get_unsplash_image(query):
     r = requests.get(url, params=params)
     if r.status_code == 200:
         data = r.json()
-        return data["urls"]["regular"], data["user"]["name"], data["links"]["html"]  # url, photographer, profile
-    return None, None, None
+        # Pull Unsplash's own alt description if present
+        alt = data.get("alt_description") or data.get("description") or ""
+        return data["urls"]["regular"], data["user"]["name"], data["links"]["html"], alt
+    return None, None, None, None
 
 def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_heading=None):
     image_md = f"![{alt_text}]({image_url})"
@@ -428,15 +430,16 @@ def generate_article_for_today():
             continue  # skip super-short sections
         suggestion = generate_section_image_suggestion(headline, keywords, outline, heading, content)
         if suggestion:
-            image_url, photographer, image_page = get_unsplash_image(suggestion.get("query", ""))
-            if image_url:
-                article_md = insert_image_markdown(
-                    article_md, image_url,
-                    alt_text=suggestion["caption"],
-                    caption=f"{suggestion['caption']} (Photo by {photographer} on Unsplash)",
-                    after_heading=heading
-                )
-                img_count += 1
+            image_url, photographer, image_page, unsplash_alt = get_unsplash_image(suggestion.get("query", ""))
+        caption = unsplash_alt or suggestion.get("caption", "Stock photo")
+        if image_url:
+            article_md = insert_image_markdown(
+                article_md, image_url,
+                alt_text=caption,
+                caption=f"{caption} (Photo by {photographer} on Unsplash)",
+                after_heading=heading
+            )
+            img_count += 1
 
     # ...rest unchanged...
     html_content = markdown(article_md)
