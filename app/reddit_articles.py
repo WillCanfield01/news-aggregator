@@ -217,21 +217,25 @@ import json
 
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
-    "Given the following article outline and full draft, suggest exactly **3** different sections where a relevant image would add value. "
-    "For each section, provide:\n"
-    "- The section heading (verbatim, exactly as it appears in the draft, including numbering)\n"
-    "- An image search query\n"
-    "- A short, descriptive caption and alt text for the image\n\n"
-    f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
-    "Format your reply as a JSON list of exactly 3 items (not a single object!):"
-    "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]\n"
-    "Return only valid, parsable JSON, and **always exactly 3 items, no more and no less.**"
+        "Given the article outline and draft below, suggest **EXACTLY 4 distinct sections** where a relevant image would add value. "
+        "For EACH section, provide:\n"
+        "- The full section heading (verbatim, exactly as in the draft)\n"
+        "- An image search query for Unsplash\n"
+        "- A descriptive caption (also used as alt text)\n\n"
+        "DO NOT return fewer or more than 4 items. Format your reply as a valid JSON list, e.g.:\n"
+        "[\n"
+        "  {\"section\": \"1. Introduction to X\", \"query\": \"conceptual intro image\", \"caption\": \"A conceptual image about X...\"},\n"
+        "  {\"section\": \"2. How Y Works\", \"query\": \"technical process\", \"caption\": \"Diagram of how Y works...\"},\n"
+        "  {\"section\": \"3. Benefits of Z\", \"query\": \"happy team working\", \"caption\": \"Happy team collaborating at work...\"},\n"
+        "  {\"section\": \"4. Common Mistakes\", \"query\": \"warning sign business\", \"caption\": \"Warning sign in a business setting...\"}\n"
+        "]\n"
+        "Return only valid, parsable JSON and always exactly 4 items—never more, never less.\n\n"
+        f"Outline:\n{outline}\n\nArticle Draft:\n{article_md}\n"
     )
-    # rest of function...
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=300,
+        max_tokens=340,
         temperature=0.3,
         response_format={"type": "json_object"}
     )
@@ -241,14 +245,13 @@ def suggest_image_sections_and_captions(article_md, outline):
         suggestions = json.loads(gpt_output)
         if isinstance(suggestions, dict):
             suggestions = [suggestions]
-        elif suggestions is None:
+        elif not isinstance(suggestions, list) or suggestions is None:
             suggestions = []
         print("Parsed suggestions:", suggestions)
         return suggestions
     except Exception as e:
         print("AI JSON parse error:", e)
         return []
-
 
 def extract_markdown_title(lines, fallback):
     # Find the first heading line, else fallback
@@ -344,26 +347,30 @@ def clean_title(title):
     title = re.sub(r'\b[Rr]eddit\b:?\s*', '', title)
     return title.strip()
 
+MAX_IMAGE_ATTEMPTS = 2  # Or 3 if you want
+
+def get_image_suggestions(article_md, outline, min_images=3, max_images=5):
+    for attempt in range(MAX_IMAGE_ATTEMPTS):
+        suggestions = suggest_image_sections_and_captions(article_md, outline)
+        # If dict, wrap in a list!
+        if isinstance(suggestions, dict):
+            suggestions = [suggestions]
+        if isinstance(suggestions, list) and len(suggestions) >= min_images:
+            return suggestions[:max_images]
+        print(f"⚠️ Attempt {attempt+1}: Only {len(suggestions)} suggestions. Retrying...")
+    print("⚠️ Could not get enough image suggestions after retrying.")
+    return suggestions if isinstance(suggestions, list) else [suggestions]
+
 def generate_article_for_today():
     post = get_top_askreddit_post()
     cleaned_topic = clean_title(post["title"])
     headline = rewrite_title(cleaned_topic)
     keywords = extract_keywords(headline, post["comments"])
-
-    # Modified: gets meta_title, meta_description, outline
     meta_title, meta_description, outline = generate_outline(headline, keywords)
     article_md = generate_article(headline, outline, keywords)
 
-    image_suggestions = suggest_image_sections_and_captions(article_md, outline)
-    if isinstance(image_suggestions, dict):
-        image_suggestions = [image_suggestions]
-    if not isinstance(image_suggestions, list):
-        image_suggestions = []
-    # Only use up to 5 images, but require at least 3
-    if len(image_suggestions) < 3:
-        print("⚠️ Too few image suggestions. Retrying or skipping images.")
-        # Optionally: retry, or skip images, or fallback to default generic images
-    image_suggestions = image_suggestions[:5]
+    # Try to get 3–5 image suggestions
+    image_suggestions = get_image_suggestions(article_md, outline, min_images=3, max_images=5)
     for suggestion in image_suggestions:
         if not isinstance(suggestion, dict):
             continue
@@ -375,6 +382,7 @@ def generate_article_for_today():
                 caption=f"{suggestion.get('caption', '')} (Photo by {photographer} on Unsplash)",
                 after_heading=suggestion.get("section")
             )
+    # ...rest unchanged...
 
     html_content = markdown(article_md)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
