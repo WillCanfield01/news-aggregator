@@ -191,48 +191,47 @@ def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_head
     if caption:
         image_md += f"\n*{caption}*"
     lines = md_text.splitlines()
-
     inserted = False
     if after_heading:
-        # Try to find the best heading match
-        headings = [i for i, line in enumerate(lines) if line.strip().startswith("#")]
-        best_match_idx = None
-        best_ratio = 0
-        for i in headings:
-            line_clean = re.sub(r'[^a-zA-Z0-9 ]', '', lines[i]).lower()
-            heading_clean = re.sub(r'[^a-zA-Z0-9 ]', '', after_heading).lower()
-            ratio = difflib.SequenceMatcher(None, line_clean, heading_clean).ratio()
-            if ratio > best_ratio and ratio > 0.5:
-                best_ratio = ratio
-                best_match_idx = i
-        if best_match_idx is not None:
-            lines.insert(best_match_idx + 1, image_md)
+        # Try partial, case-insensitive match (ignore number prefixes)
+        heading_found = False
+        for i, line in enumerate(lines):
+            clean_line = re.sub(r"^\d+\.\s*", "", line.lower())
+            if clean_line and after_heading.lower() in clean_line:
+                lines.insert(i + 1, image_md)
+                heading_found = True
+                inserted = True
+                break
+        if not heading_found:
+            # Could not find matching heading, just add to end
+            lines.append(image_md)
             inserted = True
-    if not inserted:
+    else:
         # Default: after first heading
         for i, line in enumerate(lines):
             if line.strip().startswith("#"):
-                lines.insert(i+1, image_md)
+                lines.insert(i + 1, image_md)
                 inserted = True
                 break
-    if not inserted:
-        lines.insert(0, image_md)
+        if not inserted:
+            lines.insert(0, image_md)
     return "\n".join(lines)
 
 import json
 
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
-    "Given the following article outline and the full draft, suggest 3-5 different sections where a relevant image would add value. "
-    "For each section, provide:\n"
-    "- The section heading (verbatim)\n"
-    "- An image search query (e.g. 'family traditions', 'lost customs', 'community gathering')\n"
-    "- A short, descriptive caption and alt text for the image\n\n"
-    f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
-    "Format your reply as a **JSON list** (not a single object!):\n"
-    "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]\n"
-    "Return only valid, parsable JSON, no explanations or comments."
+        "Given the following article outline and the full draft, suggest at least 3-5 different sections where a relevant image would add value. "
+        "For each section, provide:\n"
+        "- The section heading (verbatim, as it appears in the draft)\n"
+        "- An image search query\n"
+        "- A short, descriptive caption and alt text for the image\n\n"
+        f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
+        "Format your reply as a JSON list (not a single object!):"
+        "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]\n"
+        "Return only valid, parsable JSON, no explanations or comments."
     )
+    # rest of function...
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
