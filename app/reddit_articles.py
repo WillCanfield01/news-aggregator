@@ -193,21 +193,17 @@ def insert_image_markdown(md_text, image_url, alt_text, caption=None, after_head
     lines = md_text.splitlines()
     inserted = False
     if after_heading:
-        # Try partial, case-insensitive match (ignore number prefixes)
-        heading_found = False
-        for i, line in enumerate(lines):
-            clean_line = re.sub(r"^\d+\.\s*", "", line.lower())
-            if clean_line and after_heading.lower() in clean_line:
-                lines.insert(i + 1, image_md)
-                heading_found = True
-                inserted = True
-                break
-        if not heading_found:
-            # Could not find matching heading, just add to end
+        headings = [line for line in lines if line.strip().startswith("#")]
+        close = difflib.get_close_matches(after_heading, headings, n=1, cutoff=0.5)
+        if close:
+            idx = lines.index(close[0])
+            lines.insert(idx + 1, image_md)
+            inserted = True
+        else:
             lines.append(image_md)
             inserted = True
     else:
-        # Default: after first heading
+        # Fallback: insert after first heading
         for i, line in enumerate(lines):
             if line.strip().startswith("#"):
                 lines.insert(i + 1, image_md)
@@ -221,15 +217,15 @@ import json
 
 def suggest_image_sections_and_captions(article_md, outline):
     prompt = (
-        "Given the following article outline and the full draft, suggest at least 3-5 different sections where a relevant image would add value. "
-        "For each section, provide:\n"
-        "- The section heading (verbatim, as it appears in the draft)\n"
-        "- An image search query\n"
-        "- A short, descriptive caption and alt text for the image\n\n"
-        f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
-        "Format your reply as a JSON list (not a single object!):"
-        "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]\n"
-        "Return only valid, parsable JSON, no explanations or comments."
+    "Given the following article outline and full draft, suggest exactly **3** different sections where a relevant image would add value. "
+    "For each section, provide:\n"
+    "- The section heading (verbatim, exactly as it appears in the draft, including numbering)\n"
+    "- An image search query\n"
+    "- A short, descriptive caption and alt text for the image\n\n"
+    f"Outline:\n{outline}\n\nArticle Draft (Markdown):\n{article_md}\n\n"
+    "Format your reply as a JSON list of exactly 3 items (not a single object!):"
+    "[{\"section\": \"Section Heading\", \"query\": \"image search term\", \"caption\": \"caption and alt text\"}, ...]\n"
+    "Return only valid, parsable JSON, and **always exactly 3 items, no more and no less.**"
     )
     # rest of function...
     response = openai.chat.completions.create(
@@ -243,15 +239,16 @@ def suggest_image_sections_and_captions(article_md, outline):
     print("Raw image suggestion output:", gpt_output)
     try:
         suggestions = json.loads(gpt_output)
-        if isinstance(image_suggestions, dict):
-            image_suggestions = [image_suggestions]
-        elif image_suggestions is None:
-            image_suggestions = []
+        if isinstance(suggestions, dict):
+            suggestions = [suggestions]
+        elif suggestions is None:
+            suggestions = []
         print("Parsed suggestions:", suggestions)
         return suggestions
     except Exception as e:
         print("AI JSON parse error:", e)
         return []
+
 
 def extract_markdown_title(lines, fallback):
     # Find the first heading line, else fallback
@@ -360,6 +357,13 @@ def generate_article_for_today():
     image_suggestions = suggest_image_sections_and_captions(article_md, outline)
     if isinstance(image_suggestions, dict):
         image_suggestions = [image_suggestions]
+    if not isinstance(image_suggestions, list):
+        image_suggestions = []
+    # Only use up to 5 images, but require at least 3
+    if len(image_suggestions) < 3:
+        print("⚠️ Too few image suggestions. Retrying or skipping images.")
+        # Optionally: retry, or skip images, or fallback to default generic images
+    image_suggestions = image_suggestions[:5]
     for suggestion in image_suggestions:
         if not isinstance(suggestion, dict):
             continue
