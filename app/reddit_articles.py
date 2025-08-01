@@ -488,34 +488,51 @@ def generate_article_for_today():
 
     # --- NEW: Personal intro ---
     personal_intro = generate_personal_intro(headline)
-    article_with_human = personal_intro + "\n\n"
+    article_with_human = personal_intro.strip() + "\n\n"
 
     # --- Split into sections, inject human touch ---
     sections = split_markdown_sections(article_md)
     img_count = 0
-    for heading, content in sections:
-        if heading.strip() == "":
-            continue
-        article_with_human += f"{heading}\n"
-        article_with_human += content + "\n"
-        # Insert personal reflection per section (optional: skip intro)
-        if heading.lower().startswith("#") or heading.lower().startswith("1."):
-            reflection = generate_personal_reflection(headline, heading)
-            article_with_human += f"\n*Personal Note: {reflection}*\n"
-        # --- Your image logic ---
-        if img_count < 5 and content and len(content.strip()) > 30:
-            suggestion = generate_section_image_suggestion(headline, keywords, outline, heading, content)
+
+    for i, (heading, content) in enumerate(sections):
+        clean_heading = heading.strip().lstrip("#").strip()
+        # Only one heading, numbered
+        if clean_heading.lower() in ["faq", "final thoughts"]:
+            article_with_human += f"\n## {clean_heading.title()}\n\n"
+        else:
+            article_with_human += f"\n## {i+1}. {clean_heading}\n\n"
+
+        # Add image right after heading
+        if (
+            img_count < 5 and content and len(content.strip()) > 30
+            and clean_heading.lower() not in ["faq", "final thoughts"]
+        ):
+            suggestion = generate_section_image_suggestion(
+                headline, keywords, outline, clean_heading, content
+            )
             if suggestion:
                 image_url, photographer, image_page, unsplash_alt = get_unsplash_image(suggestion.get("query", ""))
                 caption = unsplash_alt or suggestion.get("caption", "Stock photo")
                 if image_url:
-                    article_with_human = insert_image_markdown(
-                        article_with_human, image_url,
-                        alt_text=caption,
-                        caption=f"{caption} (Photo by {photographer} on Unsplash)",
-                        after_heading=heading
-                    )
+                    article_with_human += f"![{caption}]({image_url})\n*Photo by {photographer} on Unsplash*\n\n"
                     img_count += 1
+
+        # Add section content (remove heading inside the body)
+        # Remove any repeated heading at the start of content
+        content_lines = content.strip().splitlines()
+        if content_lines and content_lines[0].strip().lower() == clean_heading.lower():
+            content_lines = content_lines[1:]
+        body = "\n".join(content_lines).strip()
+        article_with_human += body + "\n\n"
+
+        # Add personal reflection/note at the end of main sections
+        if clean_heading.lower() not in ["faq", "final thoughts"]:
+            reflection = generate_personal_reflection(headline, clean_heading)
+            article_with_human += f"**Personal Note:** {reflection}\n\n"
+
+        # Horizontal rule for readability (except after FAQ/final)
+        if i < len(sections) - 1 and clean_heading.lower() not in ["faq", "final thoughts"]:
+            article_with_human += "---\n"
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
