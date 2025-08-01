@@ -13,6 +13,7 @@ import markdown2
 import requests
 import difflib
 import re
+import random
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
@@ -392,28 +393,6 @@ def read_article(filename):
         meta_description=meta_description
     )
 
-@bp.route("/api/reddit-feature")
-def reddit_feature():
-    today = datetime.now().date()
-    # Get the most recent article or today's if you want
-    article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
-    # Or to require only today's:
-    # article = CommunityArticle.query.filter_by(date=today).first()
-    if article:
-        # Create a summary if not present
-        # If you store a summary, use it; otherwise, just take the start of the article
-        plain = re.sub(r'\!\[.*?\]\(.*?\)', '', article.content)  # Remove images
-        plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)  # [link text](url) → link text
-        plain = re.sub(r'\*\*|\*|__|_', '', plain)  # Remove bold/italic
-        words = plain.split()
-        summary = " ".join(words[:55]) + ("..." if len(words) > 55 else "")
-        return jsonify({
-            "title": article.title,
-            "summary": summary
-        })
-    else:
-        return jsonify({"title": "", "summary": ""}), 404
-
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
     title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)
@@ -434,6 +413,71 @@ def get_image_suggestions(article_md, outline, min_images=3, max_images=5):
     print("⚠️ Could not get enough image suggestions after retrying.")
     return suggestions if isinstance(suggestions, list) else [suggestions]
 
+def generate_personal_intro(topic):
+    prompt = (
+        f"Write a short, authentic introduction (2-4 sentences) for an article on '{topic}'. "
+        "Make it sound like a real person: share a personal memory, opinion, or curiosity about the topic, using a warm, conversational tone."
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=120,
+        temperature=0.8,
+    )
+    return response.choices[0].message.content.strip()
+
+def generate_personal_reflection(topic, section_heading):
+    prompt = (
+        f"For the section '{section_heading}' in an article about '{topic}', "
+        "write a brief (1-2 sentence) personal reflection, anecdote, or observation. "
+        "Make it specific and authentic, as if recalling a real moment or lesson learned. Use natural, informal language."
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=70,
+        temperature=0.8,
+    )
+    return response.choices[0].message.content.strip()
+
+def generate_lighthearted_aside(topic, section_heading=None):
+    if section_heading:
+        prompt = (
+            f"Write a one-sentence lighthearted joke, witty observation, or relatable aside about the section '{section_heading}' "
+            f"in an article about '{topic}'. Make it friendly, not forced—think of something a clever friend would say in passing."
+        )
+    else:
+        prompt = (
+            f"Write a short (1 sentence) playful joke, pun, or funny thought related to the topic '{topic}'. "
+            "Keep it natural, like something you'd say to make a reader smile. Avoid anything cringey or over-the-top."
+        )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=40,
+        temperature=0.9,
+    )
+    return response.choices[0].message.content.strip()
+
+def assemble_article_with_humor(headline, sections):
+    new_sections = []
+    humor_count = 0
+    max_humor = 2  # Don’t overdo it
+
+    for i, (heading, content) in enumerate(sections):
+        # Always add the section
+        new_sections.append(f"{heading}\n{content}")
+
+        # Don't add humor after the last section
+        if i < len(sections) - 1:
+            # 30% chance to add humor, max 2 per article
+            if random.random() < 0.3 and humor_count < max_humor:
+                aside = generate_lighthearted_aside(headline, heading)
+                new_sections.append(f"\n😅 {aside}\n")
+                humor_count += 1
+
+    return "\n\n".join(new_sections)
+
 def generate_article_for_today():
     post = get_top_askreddit_post()
     cleaned_topic = clean_title(post["title"])
@@ -441,38 +485,46 @@ def generate_article_for_today():
     keywords = extract_keywords(headline, post["comments"])
     meta_title, meta_description, outline = generate_outline(headline, keywords)
     article_md = generate_article(headline, outline, keywords)
-    
-    # --- NEW: Split into sections ---
+
+    # --- NEW: Personal intro ---
+    personal_intro = generate_personal_intro(headline)
+    article_with_human = personal_intro + "\n\n"
+
+    # --- Split into sections, inject human touch ---
     sections = split_markdown_sections(article_md)
     img_count = 0
     for heading, content in sections:
-        if img_count >= 5:
-            break
-        if not content or len(content.strip()) < 30:
-            continue  # skip super-short sections
-        suggestion = generate_section_image_suggestion(headline, keywords, outline, heading, content)
-        if suggestion:
-            image_url, photographer, image_page, unsplash_alt = get_unsplash_image(suggestion.get("query", ""))
-        caption = unsplash_alt or suggestion.get("caption", "Stock photo")
-        if image_url:
-            article_md = insert_image_markdown(
-                article_md, image_url,
-                alt_text=caption,
-                caption=f"{caption} (Photo by {photographer} on Unsplash)",
-                after_heading=heading
-            )
-            img_count += 1
+        if heading.strip() == "":
+            continue
+        article_with_human += f"{heading}\n"
+        article_with_human += content + "\n"
+        # Insert personal reflection per section (optional: skip intro)
+        if heading.lower().startswith("#") or heading.lower().startswith("1."):
+            reflection = generate_personal_reflection(headline, heading)
+            article_with_human += f"\n*Personal Note: {reflection}*\n"
+        # --- Your image logic ---
+        if img_count < 5 and content and len(content.strip()) > 30:
+            suggestion = generate_section_image_suggestion(headline, keywords, outline, heading, content)
+            if suggestion:
+                image_url, photographer, image_page, unsplash_alt = get_unsplash_image(suggestion.get("query", ""))
+                caption = unsplash_alt or suggestion.get("caption", "Stock photo")
+                if image_url:
+                    article_with_human = insert_image_markdown(
+                        article_with_human, image_url,
+                        alt_text=caption,
+                        caption=f"{caption} (Photo by {photographer} on Unsplash)",
+                        after_heading=heading
+                    )
+                    img_count += 1
 
-    # ...rest unchanged...
-    html_content = markdown(article_md)
+    html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
     if CommunityArticle.query.filter_by(filename=filename).first():
         print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
         return filename
-    save_article_db(headline, article_md, filename, html_content, meta_title, meta_description)
+    save_article_db(headline, article_with_human, filename, html_content, meta_title, meta_description)
     print(f"✅ Saved to DB: {filename}")
     return filename
-
 
 if __name__ == "__main__":
     from app import create_app
