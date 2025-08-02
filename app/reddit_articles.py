@@ -42,6 +42,35 @@ EXTRA_BANNED = [
     # ...add any other personal names, brands, or keywords you want to avoid in titles
 ]
 
+GPTISMS = [
+    "delve", "dive into", "navigate", "vibrant", "comprehensive", "pivotal", "notably",
+    "realm", "landscape", "tapestry", "embark", "unpack", "delving", "navigating", "explore", 
+    "in today's world", "in today's society", "at the end of the day", "from all walks of life",
+    "it's worth noting", "in conclusion", "ultimately", "delving", "navigating", "pivot", "essentially", "moreover",
+]
+
+def sanitize_gptisms(text):
+    for phrase in GPTISMS:
+        # Remove exact matches or common phrasal forms
+        text = re.sub(rf"\b{re.escape(phrase)}\b", "", text, flags=re.IGNORECASE)
+    # Remove double spaces created by removal
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+def humanize_reflection(text):
+    quirks = [
+        lambda s: re.sub(r"\bthe\b", "teh", s, count=1),
+        lambda s: re.sub(r"\b(I think|I guess|maybe|honestly)\b", r"\1, \1", s, count=1),
+        lambda s: s.rstrip(".!?") + " I dunno.",  # strip punctuation
+        lambda s: s.rstrip(".!?") + " Just saying.",
+        lambda s: re.sub(r"\.$", "…", s, 1),
+        lambda s: s[:random.randint(int(len(s)*0.6), int(len(s)*0.85))].rstrip(".!?") + "…"  # abrupt cut
+    ]
+    if random.random() < 0.40:
+        quirk = random.choice(quirks)
+        text = quirk(text)
+    return text
+
 def is_safe(text):
     text = text.lower()
     for word in BANNED_WORDS:
@@ -427,19 +456,48 @@ def generate_personal_intro(topic):
     return response.choices[0].message.content.strip()
 
 def generate_personal_reflection(topic, section_heading):
+    # Prompt tries to force variety, casualness, and even unfinished thoughts
+    human_styles = [
+        "Blunt, even if it's boring.",
+        "Like a random text message to a friend.",
+        "Make it sound distracted or off-topic for a sentence.",
+        "You can mix 'I', 'we', or 'you' however you want.",
+        "Start with an opinion, but then change your mind mid-sentence.",
+        "Leave it unfinished if you want. Or make a joke.",
+        "If you have a bias, say it, don't hedge.",
+        "A little slang or a typo is fine."
+    ]
+    style = random.choice(human_styles)
     prompt = (
-        f"For the section '{section_heading}' in an article about '{topic}', "
-        "write a brief personal reflection, story, or observation. "
-        "Avoid repeating ideas. It can be an anecdote, a lesson learned, a random memory, a question, a joke, or even a doubt. "
-        "Try for something unique or surprising. Make it sound genuinely human and conversational, not like a formal essay."
+        f"Write a very brief personal note for '{section_heading}' in '{topic}'. {style} "
+        "Do NOT use words like 'delve', 'navigate', 'vibrant', 'comprehensive', or 'landscape'. "
+        "Never try to sound poetic or polished. Use plain, messy, everyday English."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=70,
-        temperature=0.8,
+        temperature=1.0,  # high for wildness!
     )
-    return response.choices[0].message.content.strip()
+    text = response.choices[0].message.content.strip()
+    text = sanitize_gptisms(text)
+    text = humanize_reflection(text)
+    return text
+
+def humanize_faq_answer(answer):
+    openers = [
+        "Honestly, I'm not totally sure. ",
+        "Depends who you ask. ",
+        "I guess it depends, right? ",
+        "No idea, to be honest. ",
+        ""
+    ]
+    # ~20% of time, prepend a "human" uncertainty
+    if random.random() < 0.20:
+        answer = random.choice(openers) + answer
+    answer = sanitize_gptisms(answer)
+    answer = humanize_reflection(answer)
+    return answer
 
 def generate_lighthearted_aside(topic, section_heading=None):
     if section_heading:
@@ -572,8 +630,10 @@ def generate_article_for_today():
 
         # Render each Q/A nicely
         for idx, qa in enumerate(qa_pairs, 1):
-            article_with_human += f"**Q{idx}: {qa['q']}**\n\n"
-            article_with_human += f"{qa['a']}\n\n"
+            question = qa['q']
+            answer = humanize_faq_answer(qa['a'])
+            article_with_human += f"**Q{idx}: {question}**\n\n{answer}\n\n"
+
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
