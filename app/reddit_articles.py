@@ -429,8 +429,9 @@ def generate_personal_intro(topic):
 def generate_personal_reflection(topic, section_heading):
     prompt = (
         f"For the section '{section_heading}' in an article about '{topic}', "
-        "write a brief (1-2 sentence) personal reflection, anecdote, or observation. "
-        "Make it specific and authentic, as if recalling a real moment or lesson learned. Use natural, informal language."
+        "write a brief personal reflection, story, or observation. "
+        "Avoid repeating ideas. It can be an anecdote, a lesson learned, a random memory, a question, a joke, or even a doubt. "
+        "Try for something unique or surprising. Make it sound genuinely human and conversational, not like a formal essay."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
@@ -528,9 +529,9 @@ def generate_article_for_today():
         # Remove repeated heading from content
         content_lines = content.strip().splitlines()
         if content_lines:
-            first_line = content_lines[0].strip().lower()
-            heading_core = re.sub(r"^\d+\.\s*", "", clean_heading.lower())
-            if first_line.startswith(heading_core):
+            heading_match = re.sub(r"[^a-zA-Z0-9]", "", clean_heading.lower())
+            first_line_match = re.sub(r"[^a-zA-Z0-9]", "", content_lines[0].lower())
+            if heading_match and first_line_match.startswith(heading_match):
                 content_lines = content_lines[1:]
         body = "\n".join(content_lines).strip()
         article_with_human += body + "\n\n"
@@ -545,17 +546,34 @@ def generate_article_for_today():
     # Insert FAQ section, cleaned up
     if faq_section:
         article_with_human += "\n## FAQ\n\n"
-        # Format FAQ questions and answers as Q/A, not headings
         faq_lines = faq_section[1].strip().splitlines()
-        q_idx = 1
+        # Split into Q/A pairs
+        qa_pairs = []
+        q = None
         for line in faq_lines:
-            q_match = re.match(r"^Q[0-9]*[:：]?\s*(.+)", line)
-            a_match = re.match(r"^A[0-9]*[:：]?\s*(.+)", line)
-            if q_match:
-                article_with_human += f"**Q{q_idx}: {q_match.group(1).strip()}**\n\n"
-            elif a_match:
-                article_with_human += f"{a_match.group(1).strip()}\n\n"
-                q_idx += 1
+            line = line.strip()
+            if not line:
+                continue
+            if line.lower().startswith("q:") or line.lower().startswith("question"):
+                if q:
+                    qa_pairs.append(q)
+                q = {"q": line[2:].strip() if ":" in line else line.strip(), "a": ""}
+            elif line.lower().startswith("a:") or line.lower().startswith("answer"):
+                if q:
+                    q["a"] = line[2:].strip() if ":" in line else line.strip()
+            else:
+                if q:
+                    if q["a"]:
+                        q["a"] += " " + line
+                    else:
+                        q["q"] += " " + line
+        if q:
+            qa_pairs.append(q)
+
+        # Render each Q/A nicely
+        for idx, qa in enumerate(qa_pairs, 1):
+            article_with_human += f"**Q{idx}: {qa['q']}**\n\n"
+            article_with_human += f"{qa['a']}\n\n"
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
