@@ -79,17 +79,15 @@ def is_safe(text):
     return True
 
 def split_markdown_sections(md):
-    # Matches both "# Title" and "1. Something"
-    pattern = re.compile(r'^(#+ .+|[0-9]+\. .+)$', re.MULTILINE)
-    splits = [m.start() for m in pattern.finditer(md)]
-    splits.append(len(md))
+    # Only split on markdown headings (## or #), not numbered lines
+    pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+    matches = list(pattern.finditer(md))
     sections = []
-    for i in range(len(splits) - 1):
-        section_start = splits[i]
-        section_end = splits[i+1]
-        heading_match = pattern.match(md[section_start:].split('\n', 1)[0])
-        heading = heading_match.group(0) if heading_match else ""
-        content = md[section_start:section_end].strip()
+    for i, match in enumerate(matches):
+        start = match.end()
+        end = matches[i+1].start() if i+1 < len(matches) else len(md)
+        heading = match.group(2).strip()
+        content = md[start:end].strip()
         sections.append((heading, content))
     return sections
 
@@ -553,16 +551,13 @@ def generate_article_for_today():
     faq_section = None
 
     for i, (heading, content) in enumerate(sections):
-        clean_heading = heading.strip().lstrip("#").strip()
-        is_faq = clean_heading.lower().startswith("faq")
-        is_conclusion = clean_heading.lower().startswith("conclusion")
-        
-        # Use original numbering if present, else add your own
+        heading_lower = heading.lower()
+        is_faq = heading_lower.startswith("faq")
+        is_conclusion = heading_lower.startswith("conclusion")
+
+        # Show heading, except for FAQ or Conclusion which get their own style
         if not (is_faq or is_conclusion):
-            if re.match(r"^\d+\.", clean_heading):
-                article_with_human += f"## {clean_heading}\n\n"
-            else:
-                article_with_human += f"## {i+1}. {clean_heading}\n\n"
+            article_with_human += f"## {heading}\n\n"
         elif is_conclusion:
             article_with_human += f"## Conclusion\n\n"
         elif is_faq:
@@ -575,7 +570,7 @@ def generate_article_for_today():
             and not is_faq and not is_conclusion
         ):
             suggestion = generate_section_image_suggestion(
-                headline, keywords, outline, clean_heading, content
+                headline, keywords, outline, heading, content
             )
             if suggestion:
                 image_url, photographer, image_page, unsplash_alt = get_unsplash_image(suggestion.get("query", ""))
@@ -584,18 +579,19 @@ def generate_article_for_today():
                     article_with_human += f"![{caption}]({image_url})\n*Photo by {photographer} on Unsplash*\n\n"
                     img_count += 1
 
-        # Remove repeated heading from content
-        content_lines = content.strip().splitlines()
+        # Strip repeated heading line from start of content (if OpenAI echos it inside)
+        content_lines = content.splitlines()
         if content_lines:
-            heading_match = re.sub(r"[^a-zA-Z0-9]", "", clean_heading.lower())
-            first_line_match = re.sub(r"[^a-zA-Z0-9]", "", content_lines[0].lower())
-            if heading_match and first_line_match.startswith(heading_match):
+            # Look for heading at start of content (case-insensitive, strip non-alphanum)
+            content_first = re.sub(r'\W+', '', content_lines[0].lower())
+            heading_cmp = re.sub(r'\W+', '', heading.lower())
+            if heading_cmp and heading_cmp in content_first:
                 content_lines = content_lines[1:]
         body = "\n".join(content_lines).strip()
         article_with_human += body + "\n\n"
 
         if not (is_faq or is_conclusion):
-            reflection = generate_personal_reflection(headline, clean_heading)
+            reflection = generate_personal_reflection(headline, heading)
             article_with_human += f"> **Personal Note:** {reflection}\n\n"
 
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
