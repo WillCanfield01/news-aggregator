@@ -486,26 +486,33 @@ def generate_article_for_today():
     meta_title, meta_description, outline = generate_outline(headline, keywords)
     article_md = generate_article(headline, outline, keywords)
 
-    # --- NEW: Personal intro ---
     personal_intro = generate_personal_intro(headline)
     article_with_human = personal_intro.strip() + "\n\n"
 
-    # --- Split into sections, inject human touch ---
     sections = split_markdown_sections(article_md)
     img_count = 0
+    faq_section = None
 
     for i, (heading, content) in enumerate(sections):
-        clean_heading = heading.strip().lstrip("#").strip()
-        # Only one heading, numbered
-        if clean_heading.lower() in ["faq", "final thoughts"]:
-            article_with_human += f"\n## {clean_heading.title()}\n\n"
-        else:
-            article_with_human += f"\n## {i+1}. {clean_heading}\n\n"
-
-        # Add image right after heading
+        # Clean up heading: remove numbers/double-numbering, lower extra whitespace, etc.
+        clean_heading = re.sub(r"^\d+\.\s*", "", heading.strip().lstrip("#").strip())
+        # Detect FAQ/Conclusion
+        is_faq = clean_heading.lower().startswith("faq")
+        is_conclusion = clean_heading.lower().startswith("conclusion")
+        
+        # Numbered section headings (except FAQ/Conclusion)
+        if not (is_faq or is_conclusion):
+            article_with_human += f"## {i+1}. {clean_heading}\n\n"
+        elif is_conclusion:
+            article_with_human += f"## Conclusion\n\n"
+        elif is_faq:
+            faq_section = (heading, content)
+            continue  # Don't process FAQ here, do at end
+        
+        # Add image after heading (not for FAQ)
         if (
             img_count < 5 and content and len(content.strip()) > 30
-            and clean_heading.lower() not in ["faq", "final thoughts"]
+            and not is_faq and not is_conclusion
         ):
             suggestion = generate_section_image_suggestion(
                 headline, keywords, outline, clean_heading, content
@@ -517,7 +524,6 @@ def generate_article_for_today():
                     article_with_human += f"![{caption}]({image_url})\n*Photo by {photographer} on Unsplash*\n\n"
                     img_count += 1
 
-        # Add section content (remove heading inside the body)
         # Remove any repeated heading at the start of content
         content_lines = content.strip().splitlines()
         if content_lines and content_lines[0].strip().lower() == clean_heading.lower():
@@ -525,14 +531,29 @@ def generate_article_for_today():
         body = "\n".join(content_lines).strip()
         article_with_human += body + "\n\n"
 
-        # Add personal reflection/note at the end of main sections
-        if clean_heading.lower() not in ["faq", "final thoughts"]:
+        # Add blockquote Personal Note
+        if not (is_faq or is_conclusion):
             reflection = generate_personal_reflection(headline, clean_heading)
-            article_with_human += f"**Personal Note:** {reflection}\n\n"
+            article_with_human += f"> **Personal Note:** {reflection}\n\n"
 
-        # Horizontal rule for readability (except after FAQ/final)
-        if i < len(sections) - 1 and clean_heading.lower() not in ["faq", "final thoughts"]:
+        # Add horizontal rule before FAQ/Conclusion only
+        if (i < len(sections) - 1) and not is_faq and not is_conclusion:
             article_with_human += "---\n"
+
+    # Insert FAQ section, cleaned up
+    if faq_section:
+        article_with_human += "\n## FAQ\n\n"
+        # Format FAQ questions and answers as Q/A, not headings
+        faq_lines = faq_section[1].strip().splitlines()
+        q_idx = 1
+        for line in faq_lines:
+            q_match = re.match(r"^Q[0-9]*[:：]?\s*(.+)", line)
+            a_match = re.match(r"^A[0-9]*[:：]?\s*(.+)", line)
+            if q_match:
+                article_with_human += f"**Q{q_idx}: {q_match.group(1).strip()}**\n\n"
+            elif a_match:
+                article_with_human += f"{a_match.group(1).strip()}\n\n"
+                q_idx += 1
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
