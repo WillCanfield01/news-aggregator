@@ -494,22 +494,23 @@ def generate_article_for_today():
     faq_section = None
 
     for i, (heading, content) in enumerate(sections):
-        # Clean up heading: remove numbers/double-numbering, lower extra whitespace, etc.
-        clean_heading = re.sub(r"^\d+\.\s*", "", heading.strip().lstrip("#").strip())
-        # Detect FAQ/Conclusion
+        clean_heading = heading.strip().lstrip("#").strip()
         is_faq = clean_heading.lower().startswith("faq")
         is_conclusion = clean_heading.lower().startswith("conclusion")
         
-        # Numbered section headings (except FAQ/Conclusion)
+        # Use original numbering if present, else add your own
         if not (is_faq or is_conclusion):
-            article_with_human += f"## {i+1}. {clean_heading}\n\n"
+            if re.match(r"^\d+\.", clean_heading):
+                article_with_human += f"## {clean_heading}\n\n"
+            else:
+                article_with_human += f"## {i+1}. {clean_heading}\n\n"
         elif is_conclusion:
             article_with_human += f"## Conclusion\n\n"
         elif is_faq:
             faq_section = (heading, content)
-            continue  # Don't process FAQ here, do at end
-        
-        # Add image after heading (not for FAQ)
+            continue
+
+        # Add image after heading if appropriate
         if (
             img_count < 5 and content and len(content.strip()) > 30
             and not is_faq and not is_conclusion
@@ -524,19 +525,20 @@ def generate_article_for_today():
                     article_with_human += f"![{caption}]({image_url})\n*Photo by {photographer} on Unsplash*\n\n"
                     img_count += 1
 
-        # Remove any repeated heading at the start of content
+        # Remove repeated heading from content
         content_lines = content.strip().splitlines()
-        if content_lines and content_lines[0].strip().lower() == clean_heading.lower():
-            content_lines = content_lines[1:]
+        if content_lines:
+            first_line = content_lines[0].strip().lower()
+            heading_core = re.sub(r"^\d+\.\s*", "", clean_heading.lower())
+            if first_line.startswith(heading_core):
+                content_lines = content_lines[1:]
         body = "\n".join(content_lines).strip()
         article_with_human += body + "\n\n"
 
-        # Add blockquote Personal Note
         if not (is_faq or is_conclusion):
             reflection = generate_personal_reflection(headline, clean_heading)
             article_with_human += f"> **Personal Note:** {reflection}\n\n"
 
-        # Add horizontal rule before FAQ/Conclusion only
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
             article_with_human += "---\n"
 
