@@ -465,20 +465,21 @@ def generate_personal_intro(topic):
 
 def generate_personal_reflection(topic, section_heading, section_content):
     prompt = (
-        f"Given the following section from an in-depth article about '{topic}', write a concise, thoughtful personal note in a calm, professional yet conversational tone. "
-        "Avoid slang, filler, and excessive informality—just share a quick, genuine impression or insight (not a summary or recap). "
-        "Section Heading: {section_heading}\n"
+        f"Write a personal reflection as if you are the article's author, reacting to the section below. "
+        "Relate to it honestly: share a feeling, a memory, a frustration, or a personal opinion. "
+        "Imagine you're telling a friend what this section made you think about, or how it connects to your life or curiosity. "
+        "Don't just summarize. If you don't have a strong opinion, share a small doubt, hope, or question. "
+        f"\n\nSection Heading: {section_heading}\n"
         f"Section Content: {section_content[:400]}\n"
-        "Length: 1-2 sentences."
+        "Length: 1-2 sentences. Write like a real, thoughtful person, not a robot."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=48,
-        temperature=0.55,
+        max_tokens=56,
+        temperature=0.8,
     )
     return sanitize_gptisms(response.choices[0].message.content.strip())
-
 
 def parse_faq_section(faq_text):
     # Split into Q/A pairs using regex
