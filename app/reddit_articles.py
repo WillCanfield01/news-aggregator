@@ -453,34 +453,46 @@ def generate_personal_intro(topic):
     )
     return response.choices[0].message.content.strip()
 
-def generate_personal_reflection(topic, section_heading):
-    # Prompt tries to force variety, casualness, and even unfinished thoughts
+def generate_personal_reflection(topic, section_heading, section_content):
+    # Pick a style, but reference the section content
     human_styles = [
-        "Blunt, even if it's boring.",
-        "Like a random text message to a friend.",
-        "Make it sound distracted or off-topic for a sentence.",
-        "You can mix 'I', 'we', or 'you' however you want.",
-        "Start with an opinion, but then change your mind mid-sentence.",
-        "Leave it unfinished if you want. Or make a joke.",
-        "If you have a bias, say it, don't hedge.",
-        "A little slang or a typo is fine."
+        "Keep it blunt but relevant.",
+        "React honestly to the section, don't go off-topic.",
+        "If it's surprising, say so. If boring, say that.",
+        "Don't summarize—react."
     ]
     style = random.choice(human_styles)
     prompt = (
-        f"Write a very brief personal note for '{section_heading}' in '{topic}'. {style} "
-        "Do NOT use words like 'delve', 'navigate', 'vibrant', 'comprehensive', or 'landscape'. "
-        "Never try to sound poetic or polished. Use plain, messy, everyday English."
+        f"Read this section from an article on '{topic}'. Write a brief, authentic personal reaction as if you just read it, not a summary or generic note. {style}\n\n"
+        f"Section Heading: {section_heading}\n\n"
+        f"Section Content: {section_content[:500]}\n"  # Clip long content!
+        "Respond as a real person. Don't use fancy words, don't get poetic, just react."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=70,
-        temperature=1.0,  # high for wildness!
+        temperature=0.9,
     )
     text = response.choices[0].message.content.strip()
     text = sanitize_gptisms(text)
     text = humanize_reflection(text)
     return text
+
+def parse_faq_section(faq_text):
+    # Split into Q/A pairs using regex
+    qa_pairs = []
+    # Regex: match Q (or Question), then everything until next Q or end
+    pattern = re.compile(
+        r'(?:Q(?:uestion)?[:\s]+)(.+?)(?:\nA(?:nswer)?[:\s]+(.+?))?(?=\nQ|$)', 
+        re.DOTALL | re.IGNORECASE
+    )
+    for match in pattern.finditer(faq_text):
+        question = match.group(1).strip()
+        answer = (match.group(2) or '').strip()
+        if question:
+            qa_pairs.append({'q': question, 'a': answer})
+    return qa_pairs
 
 def humanize_faq_answer(answer):
     openers = [
@@ -591,7 +603,7 @@ def generate_article_for_today():
         article_with_human += body + "\n\n"
 
         if not (is_faq or is_conclusion):
-            reflection = generate_personal_reflection(headline, heading)
+            reflection = generate_personal_reflection(headline, heading, body)
             article_with_human += f"> **Personal Note:** {reflection}\n\n"
 
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
@@ -600,36 +612,13 @@ def generate_article_for_today():
     # Insert FAQ section, cleaned up
     if faq_section:
         article_with_human += "\n## FAQ\n\n"
-        faq_lines = faq_section[1].strip().splitlines()
-        # Split into Q/A pairs
-        qa_pairs = []
-        q = None
-        for line in faq_lines:
-            line = line.strip()
-            if not line:
-                continue
-            if line.lower().startswith("q:") or line.lower().startswith("question"):
-                if q:
-                    qa_pairs.append(q)
-                q = {"q": line[2:].strip() if ":" in line else line.strip(), "a": ""}
-            elif line.lower().startswith("a:") or line.lower().startswith("answer"):
-                if q:
-                    q["a"] = line[2:].strip() if ":" in line else line.strip()
-            else:
-                if q:
-                    if q["a"]:
-                        q["a"] += " " + line
-                    else:
-                        q["q"] += " " + line
-        if q:
-            qa_pairs.append(q)
-
-        # Render each Q/A nicely
-        for idx, qa in enumerate(qa_pairs, 1):
-            question = qa['q']
-            answer = humanize_faq_answer(qa['a'])
-            article_with_human += f"**Q{idx}: {question}**\n\n{answer}\n\n"
-
+        faq_lines = faq_section[1].strip()
+        qa_pairs = parse_faq_section(faq_lines)
+        if qa_pairs:  # Only render if there's content!
+            for idx, qa in enumerate(qa_pairs, 1):
+                question = qa['q']
+                answer = humanize_faq_answer(qa['a'])
+                article_with_human += f"**Q{idx}: {question}**\n\n{answer}\n\n"
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
