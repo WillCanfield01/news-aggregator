@@ -420,6 +420,16 @@ def read_article(filename):
         meta_description=meta_description
     )
 
+def remove_gpt_dashes(text):
+    # Replace most GPT em dashes with commas, except in number ranges
+    # 1. Spaces around — become comma
+    text = re.sub(r'(\s)—(\s)', r'\1,\2', text)
+    # 2. Standalone em dash after word, not before a number, becomes comma
+    text = re.sub(r'([a-zA-Z]),?\s*—\s*([a-zA-Z])', r'\1, \2', text)
+    # 3. If double em dashes (rare), replace with single
+    text = re.sub(r'—{2,}', '—', text)
+    return text
+
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
     title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)
@@ -454,30 +464,21 @@ def generate_personal_intro(topic):
     return response.choices[0].message.content.strip()
 
 def generate_personal_reflection(topic, section_heading, section_content):
-    # Pick a style, but reference the section content
-    human_styles = [
-        "Keep it blunt but relevant.",
-        "React honestly to the section, don't go off-topic.",
-        "If it's surprising, say so. If boring, say that.",
-        "Don't summarize—react."
-    ]
-    style = random.choice(human_styles)
     prompt = (
-        f"Read this section from an article on '{topic}'. Write a brief, authentic personal reaction as if you just read it, not a summary or generic note. {style}\n\n"
-        f"Section Heading: {section_heading}\n\n"
-        f"Section Content: {section_content[:500]}\n"  # Clip long content!
-        "Respond as a real person. Don't use fancy words, don't get poetic, just react."
+        f"Given the following section from an in-depth article about '{topic}', write a concise, thoughtful personal note in a calm, professional yet conversational tone. "
+        "Avoid slang, filler, and excessive informality—just share a quick, genuine impression or insight (not a summary or recap). "
+        "Section Heading: {section_heading}\n"
+        f"Section Content: {section_content[:400]}\n"
+        "Length: 1-2 sentences."
     )
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=70,
-        temperature=0.9,
+        max_tokens=48,
+        temperature=0.55,
     )
-    text = response.choices[0].message.content.strip()
-    text = sanitize_gptisms(text)
-    text = humanize_reflection(text)
-    return text
+    return sanitize_gptisms(response.choices[0].message.content.strip())
+
 
 def parse_faq_section(faq_text):
     # Split into Q/A pairs using regex
@@ -611,14 +612,16 @@ def generate_article_for_today():
 
     # Insert FAQ section, cleaned up
     if faq_section:
-        article_with_human += "\n## FAQ\n\n"
         faq_lines = faq_section[1].strip()
         qa_pairs = parse_faq_section(faq_lines)
         if qa_pairs:  # Only render if there's content!
+            article_with_human += "\n## FAQ\n\n"
             for idx, qa in enumerate(qa_pairs, 1):
                 question = qa['q']
                 answer = humanize_faq_answer(qa['a'])
                 article_with_human += f"**Q{idx}: {question}**\n\n{answer}\n\n"
+
+    article_with_human = remove_gpt_dashes(article_with_human)
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
