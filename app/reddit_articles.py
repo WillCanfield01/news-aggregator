@@ -66,6 +66,12 @@ def render_faq(qa_pairs):
         result.append(f"**Q{idx}:** {q}\n\n**A:** {a}\n")
     return "\n".join(result)
 
+def force_faq_newlines(faq_text):
+    # Add a newline before each Q: and A: if not already there
+    faq_text = re.sub(r'\s*Q:', '\nQ:', faq_text)
+    faq_text = re.sub(r'\s*A:', '\nA:', faq_text)
+    return faq_text.strip()
+
 def humanize_reflection(text):
     quirks = [
         lambda s: re.sub(r"\bthe\b", "teh", s, count=1),
@@ -672,7 +678,7 @@ def generate_article_for_today():
 
     # Insert FAQ section, cleaned up
     if faq_section:
-        faq_lines = faq_section[1].strip()
+        faq_lines = force_faq_newlines(faq_section[1].strip())
         qa_pairs = parse_faq_section(faq_lines)
         if qa_pairs:  # Only render if there's content!
             article_with_human += "\n## FAQ\n\n"
