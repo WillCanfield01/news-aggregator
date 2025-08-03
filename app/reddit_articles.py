@@ -57,6 +57,15 @@ def sanitize_gptisms(text):
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
 
+def render_faq(qa_pairs):
+    result = []
+    for idx, qa in enumerate(qa_pairs, 1):
+        q = qa['q']
+        a = qa['a']
+        # Add extra line breaks for clarity
+        result.append(f"**Q{idx}:** {q}\n\n**A:** {a}\n")
+    return "\n".join(result)
+
 def humanize_reflection(text):
     quirks = [
         lambda s: re.sub(r"\bthe\b", "teh", s, count=1),
@@ -515,6 +524,8 @@ def generate_personal_reflection(topic, section_heading, section_content):
         f"Don't just summarize. If you don't have a strong opinion, share a small doubt, hope, or question. "
         "Each reflection must sound totally distinct—use different tones, openers, and styles every time. "
         "Avoid starting more than one note in the same way. Basic examples are: 'You know,' 'Sometimes I wonder,' or 'It still surprises me'. We want change it up every time and make them more human and varied then this."
+        "No cliches or generic intros. Avoid phrases like 'I catch myself,' 'sometimes I wonder,' or 'it makes me think.' Get specific, be quirky, or say something a little odd. "
+        "If you can't think of anything, write a mini-confession or random opinion."
         "Keep it first-person, but vary your level of confidence and formality. Embrace oddball takes and variety!\n\n"
         f"\n\nSection Heading: {section_heading}\n"
         f"Section Content: {section_content[:400]}\n"
@@ -524,7 +535,7 @@ def generate_personal_reflection(topic, section_heading, section_content):
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=56,
-        temperature=0.8,
+        temperature=1.2,
     )
     return sanitize_gptisms(response.choices[0].message.content.strip())
 
