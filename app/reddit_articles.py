@@ -175,6 +175,23 @@ def generate_article(topic, outline, keywords):
     )
     return response.choices[0].message.content
 
+def fix_broken_personal_note(note):
+    # Collapse 2+ newlines to a single space
+    note = re.sub(r'\n{2,}', ' ', note)
+    # Remove isolated italicized words/lines (e.g. "*really*")
+    note = re.sub(r'\n?\*(\w+)\*\n?', '', note)
+    # Remove lingering single-word lines
+    note = re.sub(r'\n([a-zA-Z]{1,10})\n', ' ', note)
+    # Collapse awkward linebreaks inside sentences
+    note = re.sub(r'\n+', ' ', note)
+    # Remove leading/trailing whitespace
+    note = note.strip()
+    # Optionally: Truncate to 2 sentences if too long
+    sentences = re.split(r'(?<=[.!?]) +', note)
+    if len(sentences) > 2:
+        note = ' '.join(sentences[:2])
+    return note
+
 def rewrite_title(original_title):
     # Remove banned words first
     text = unidecode(original_title)
@@ -490,6 +507,7 @@ def generate_personal_reflection(topic, section_heading, section_content):
         f"As the author, pause and add a personal aside in first-person. "
         f"Let yourself react to what you just wrote about '{section_heading}'—share a memory, an honest opinion, a frustration, a curiosity, or even a confession. "
         f"Vary the opener and dont always use phrases like 'Honestly' or 'I wonder.' Sometimes use humor, sometimes curiosity, sometimes mild skepticism, and sometimes just a single, authentic sentence."
+        f"Make sure the format of personl notes are always varied. DO NOT SOUND LIKE A ROBOT. We want the personal notes to all be unique and human not formulatic."
         f"Write as if you're journaling or talking to a friend, not as a separate reader. "
         f"Do NOT start with 'Reading this section' or 'Reading about.' Avoid restating what was already said. Instead, make it feel authentic, like your own voice coming through. "
         f"Relate to it honestly: share a feeling, a memory, a frustration, or a personal opinion. "
@@ -632,6 +650,7 @@ def generate_article_for_today():
 
         if not (is_faq or is_conclusion):
             reflection = generate_personal_reflection(headline, heading, body)
+            reflection = fix_broken_personal_note(reflection)
             article_with_human += f"> **Personal Note:** {reflection}\n\n"
 
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
