@@ -465,10 +465,13 @@ def generate_personal_intro(topic):
 
 def generate_personal_reflection(topic, section_heading, section_content):
     prompt = (
-        f"Write a personal reflection as if you are the article's author, reacting to the section below. "
-        "Relate to it honestly: share a feeling, a memory, a frustration, or a personal opinion. "
-        "Imagine you're telling a friend what this section made you think about, or how it connects to your life or curiosity. "
-        "Don't just summarize. If you don't have a strong opinion, share a small doubt, hope, or question. "
+        f"As the author, pause and add a personal aside in first-person. "
+        f"Let yourself react to what you just wrote about '{section_heading}'—share a memory, an honest opinion, a frustration, a curiosity, or even a confession. "
+        f"Write as if you're journaling or talking to a friend, not as a separate reader. "
+        f"Do NOT start with 'Reading this section' or 'Reading about.' Avoid restating what was already said. Instead, make it feel authentic, like your own voice coming through. "
+        f"Relate to it honestly: share a feeling, a memory, a frustration, or a personal opinion. "
+        f"Imagine you're telling a friend what this section made you think about, or how it connects to your life or curiosity. "
+        f"Don't just summarize. If you don't have a strong opinion, share a small doubt, hope, or question. "
         f"\n\nSection Heading: {section_heading}\n"
         f"Section Content: {section_content[:400]}\n"
         "Length: 1-2 sentences. Write like a real, thoughtful person, not a robot."
