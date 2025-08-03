@@ -430,6 +430,28 @@ def remove_gpt_dashes(text):
     text = re.sub(r'—{2,}', '—', text)
     return text
 
+def strip_unwanted_bold(text):
+    # Only keep bold around "Personal Note:"
+    # 1. Remove all ** that don't wrap "Personal Note:"
+    # 2. Optionally, remove single * too if you see stray italics
+    # (But keep bold for section headings if needed)
+    # Remove ** unless at "> **Personal Note:**"
+    def replacer(match):
+        # Only keep if it's a proper Personal Note label
+        content = match.group(1)
+        if content.strip().lower() == 'personal note:':
+            return f"**Personal Note:**"
+        else:
+            return content
+
+    # This replaces any **...** except the label
+    text = re.sub(r"\*\*(.*?)\*\*", replacer, text)
+
+    # Optionally, remove single * (italics) everywhere
+    # text = re.sub(r"\*(.*?)\*", r"\1", text)
+
+    return text
+
 def clean_title(title):
     # Remove mentions of Reddit, AskReddit, r/AskReddit, etc.
     title = re.sub(r'\b([Rr]/)?AskReddit\b:?\s*', '', title)
@@ -467,6 +489,7 @@ def generate_personal_reflection(topic, section_heading, section_content):
     prompt = (
         f"As the author, pause and add a personal aside in first-person. "
         f"Let yourself react to what you just wrote about '{section_heading}'—share a memory, an honest opinion, a frustration, a curiosity, or even a confession. "
+        f"Vary the opener and dont always use phrases like 'Honestly' or 'I wonder.' Sometimes use humor, sometimes curiosity, sometimes mild skepticism, and sometimes just a single, authentic sentence."
         f"Write as if you're journaling or talking to a friend, not as a separate reader. "
         f"Do NOT start with 'Reading this section' or 'Reading about.' Avoid restating what was already said. Instead, make it feel authentic, like your own voice coming through. "
         f"Relate to it honestly: share a feeling, a memory, a frustration, or a personal opinion. "
@@ -626,6 +649,7 @@ def generate_article_for_today():
                 article_with_human += f"**Q{idx}: {question}**\n\n{answer}\n\n"
 
     article_with_human = remove_gpt_dashes(article_with_human)
+    article_with_human = strip_unwanted_bold(article_with_human)
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
