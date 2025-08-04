@@ -462,6 +462,12 @@ def remove_gpt_dashes(text):
     text = re.sub(r'—{2,}', '—', text)
     return text
 
+def remove_orphaned_author_line(text):
+    # Remove lines that are just "your name" or similar author placeholders
+    lines = text.splitlines()
+    cleaned = [line for line in lines if line.strip().lower() not in {"your name", "author", "insert name", "[your name]", "(your name)"}]
+    return "\n".join(cleaned)
+
 def strip_unwanted_bold(text):
     # Only keep bold around "Personal Note:"
     # 1. Remove all ** that don't wrap "Personal Note:"
@@ -671,6 +677,7 @@ def generate_article_for_today():
         if not (is_faq or is_conclusion):
             reflection = generate_personal_reflection(headline, heading, body)
             reflection = fix_broken_personal_note(reflection)
+            reflection = remove_orphaned_author_line(reflection)
             article_with_human += f"> **Personal Note:** {reflection}\n\n"
 
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
