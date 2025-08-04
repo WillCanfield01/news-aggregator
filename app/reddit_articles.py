@@ -175,6 +175,22 @@ def generate_outline(topic, keywords):
     outline = ol.group(1).strip() if ol else content
     return meta_title, meta_description, outline
 
+def generate_reel_script(article_text, topic):
+    prompt = (
+        f"Summarize the key point of this article for a 30-60 second Instagram Reel. "
+        f"Speak directly to the viewer, highlight the most interesting idea, and use a friendly, energetic style. "
+        f"Topic: {topic}\n\n"
+        f"Article:\n{article_text}\n\n"
+        "Script:"
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=220,
+        temperature=0.8,
+    )
+    return response.choices[0].message.content.strip()
+
 def generate_article(topic, outline, keywords):
     prompt = (
         f"Using this outline:\n{outline}\n\n"
@@ -235,7 +251,7 @@ def rewrite_title(original_title):
     headline = headline.strip(' "\'')
     return headline or "Untitled Article"
 
-def save_article_db(title, content_md, filename, html_content=None, meta_title=None, meta_description=None):
+def save_article_db(title, content_md, filename, html_content=None, meta_title=None, meta_description=None, reel_script=None):
     article = CommunityArticle(
         date=date.today(),
         filename=filename,
@@ -243,7 +259,8 @@ def save_article_db(title, content_md, filename, html_content=None, meta_title=N
         content=content_md,
         html_content=html_content or markdown(content_md),
         meta_title=meta_title,
-        meta_description=meta_description
+        meta_description=meta_description,
+        reel_script=reel_script
     )
     db.session.add(article)
     db.session.commit()
@@ -623,6 +640,8 @@ def assemble_article_with_humor(headline, sections):
     max_humor = 2  # Don’t overdo it
 
     for i, (heading, content) in enumerate(sections):
+        if is_useless_section(heading, content):
+            continue
         # Always add the section
         new_sections.append(f"{heading}\n{content}")
 
@@ -646,6 +665,7 @@ def generate_article_for_today():
 
     personal_intro = generate_personal_intro(headline)
     article_with_human = personal_intro.strip() + "\n\n"
+    reel_script = generate_reel_script(article_with_human, headline)
 
     sections = split_markdown_sections(article_md)
     img_count = 0
@@ -719,7 +739,7 @@ def generate_article_for_today():
     if CommunityArticle.query.filter_by(filename=filename).first():
         print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
         return filename
-    save_article_db(headline, article_with_human, filename, html_content, meta_title, meta_description)
+    save_article_db(headline, article_with_human, filename, html_content, meta_title, meta_description, reel_script)
     print(f"✅ Saved to DB: {filename}")
     return filename
 
