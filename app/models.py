@@ -11,3 +11,4 @@ class CommunityArticle(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     meta_title = db.Column(db.String(255), nullable=True)
     meta_description = db.Column(db.Text, nullable=True)
+    reel_script = db.Column(db.Text)
