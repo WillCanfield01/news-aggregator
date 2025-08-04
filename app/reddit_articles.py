@@ -600,6 +600,23 @@ def generate_lighthearted_aside(topic, section_heading=None):
     )
     return response.choices[0].message.content.strip()
 
+def is_useless_section(heading, content):
+    # Skip headings that are just numbers or extremely short
+    if re.match(r'^\d+(\.|:)?\s*$', heading.strip()):
+        return True
+    # Skip sections where content is empty or just a repeat of the heading
+    if not content.strip():
+        return True
+    # Skip if content just echoes heading (with or without punctuation)
+    heading_no_punct = re.sub(r'\W+', '', heading).lower()
+    content_no_punct = re.sub(r'\W+', '', content).lower()
+    if heading_no_punct and heading_no_punct == content_no_punct:
+        return True
+    # Skip if content starts with the prompt echo
+    if content.strip().lower().startswith("here’s the section content"):
+        return True
+    return False
+
 def assemble_article_with_humor(headline, sections):
     new_sections = []
     humor_count = 0
