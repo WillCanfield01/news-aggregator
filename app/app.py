@@ -31,6 +31,7 @@ def create_app():
     # ---- Configs ----
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///local.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True}  # <- add this line here!
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-dev-key")
     app.config.update(
         SESSION_COOKIE_SECURE=True,
