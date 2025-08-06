@@ -57,6 +57,28 @@ def sanitize_gptisms(text):
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
 
+def fix_fafo_phrase(text, censor=False):
+    """
+    Force-corrects 'FAFO' in the article to mean 'Fuck Around and Find Out', with optional censorship.
+    """
+    fafo_full = "F*** Around and Find Out" if censor else "Fuck Around and Find Out"
+    # Remove any wrong definitions (like 'Find Out, Act, Consequences')
+    text = re.sub(
+        r'\bFAFO\b[^.,;:]*?(Find Out|Act|Consequences)[^.,;:]*[.,;:]?', 
+        'FAFO, short for "{}",'.format(fafo_full), 
+        text, 
+        flags=re.IGNORECASE
+    )
+    text = re.sub(
+        r'\bFAFO\b[^.,;:]*?\bmeans\b[^.,;:]*[.,;:]*', 
+        'FAFO, short for "{}",'.format(fafo_full), 
+        text, 
+        flags=re.IGNORECASE
+    )
+    if "FAFO" in text and fafo_full not in text:
+        text = re.sub(r'\bFAFO\b', f'FAFO (“{fafo_full}”)', text, count=1)
+    return text
+
 def render_faq(qa_pairs):
     result = []
     for idx, qa in enumerate(qa_pairs, 1):
@@ -666,6 +688,7 @@ def generate_article_for_today():
     personal_intro = generate_personal_intro(headline)
     article_with_human = personal_intro.strip() + "\n\n"
     reel_script = generate_reel_script(article_with_human, headline)
+    reel_script = fix_fafo_phrase(reel_script, censor=True)
 
     sections = split_markdown_sections(article_md)
     img_count = 0
@@ -733,6 +756,7 @@ def generate_article_for_today():
 
     article_with_human = remove_gpt_dashes(article_with_human)
     article_with_human = strip_unwanted_bold(article_with_human)
+    article_with_human = fix_fafo_phrase(article_with_human, censor=True)
 
     html_content = markdown(article_with_human)
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
