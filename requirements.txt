@@ -91,3 +91,11 @@ python-dotenv
 markdown==3.6
 unidecode
 markdown2
+tweepy
+pytrends
+feedparser
+SQLAlchemy
+psycopg2-binary
+pandas
+scikit-learn
+python-dotenv
