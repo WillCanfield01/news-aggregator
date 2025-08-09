@@ -11,6 +11,18 @@
     <meta property="og:type" content="article">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link rel="canonical" href="https://therealroundup.com/" />
+    <link rel="canonical" href="https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "{{ meta_title or title }}",
+      "description": "{{ meta_description }}",
+      "datePublished": "{{ date.isoformat() }}",
+      "author": {"@type": "Person", "name": "The Roundup"},
+      "mainEntityOfPage": {"@type": "WebPage","@id": "https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
+    }
+    </script>
     <style>
         body {
             background: #f6f4ed;
@@ -124,9 +136,11 @@
         {% if date %}
         <div class="article-meta">{{ date.strftime('%B %d, %Y') }}</div>
         {% endif %}
-        <hr class="divider">
-        <div class="article-content">
-            {{ content | safe }}
+        <hr>
+        <div class="card p-3 my-4">
+            <strong>Want a new AI money idea every day?</strong>
+            <div>Get simple tools, steps, pricing, and pitfalls—free.</div>
+            <a href="/" class="btn btn-primary btn-sm mt-2">See today’s guide</a>
         </div>
     </div>
 </body>

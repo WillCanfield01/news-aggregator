@@ -3,18 +3,14 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>The Daily Feature – Smart News & Q&A</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Smart summaries plus one standout community Q&A each day—no spin, just clarity.">
+    <title>AI Money Daily – One Actionable Idea, Every Day</title>
+    <meta name="description"
+        content="One beginner-friendly way to make money with AI—tools, steps, pricing, pitfalls—daily.">
     <link rel="canonical" href="https://therealroundup.com/">
-    <!-- OG/Twitter for reels/link previews -->
-    <meta property="og:title" content="The Daily Feature – Smart News & Q&A">
-    <meta property="og:description" content="One standout discussion a day. No spin.">
+    <meta property="og:title" content="AI Money Daily – One Actionable Idea, Every Day">
+    <meta property="og:description" content="Tools, steps, pricing, pitfalls—new AI income idea daily.">
     <meta property="og:url" content="https://therealroundup.com/">
     <meta name="twitter:card" content="summary_large_image">
-    <meta property="og:image" content="https://therealroundup.com/static/og/home-1200x630.jpg">
-    <meta name="twitter:image" content="https://therealroundup.com/static/og/home-1200x630.jpg">
-    <meta property="og:type" content="website">
     <style>
         body {
             background: #f6f9fb;
@@ -91,30 +87,29 @@
 <body>
     <section class="hero">
         <div class="container">
-            <h1 class="site-title">The Daily Feature</h1>
-            <div class="subtext">Every day: One thought-provoking Q&A or trending community discussion.<br>No bias, no
-                spin,
-                just clarity.</div>
+            <h1 class="site-title">AI Money Daily</h1>
+            <div class="subtext">
+                Every day: one actionable way to make money with AI.<br>Simple tools, clear steps, realistic earnings.
+            </div>
             <a href="#feature" class="btn btn-primary shadow-sm btn-lg btn-explore">See Today's Featured Article</a>
         </div>
     </section>
 
     <main class="container">
+        <!-- Feature card -->
         <section id="feature" class="feature shadow mt-5 mb-5">
-            <div class="badge-feature">Today's Top Discussion</div>
+            <div class="badge-feature">Today’s AI Income Idea</div>
 
             {% if latest %}
             <div id="headline" class="headline">{{ latest.title }}</div>
-            <div id="summary" class="summary">
-                {{ (latest.content | striptags)[:220] }}...
-            </div>
+            <div id="summary" class="summary">{{ (latest.content | striptags)[:220] }}...</div>
             <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}"
-                class="btn btn-outline-primary btn-sm mt-2">Read full story</a>
+                class="btn btn-outline-primary btn-sm mt-2">Read the full guide</a>
             {% else %}
-            <div id="headline" class="headline">Loading today's featured article...</div>
-            <div id="summary" class="summary"></div>
+            <div id="headline" class="headline">New guide drops daily. Check back soon.</div>
             {% endif %}
         </section>
+
         <div class="text-center">
             <a href="/all-articles/articles" class="btn btn-outline-dark btn-lg mt-2">
                 Explore All Published Articles
