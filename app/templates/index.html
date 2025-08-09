@@ -3,12 +3,15 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Daily Community Q&A – Your Smart News Digest</title>
+    <title>The Daily Feature – Smart News & Q&A</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description"
-        content="Get the smartest news summaries, plus one must-see community Q&A or big question every day. No bias, just clarity.">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-    <link rel="canonical" href="https://therealroundup.com/" />
+    <meta name="description" content="Smart summaries plus one standout community Q&A each day—no spin, just clarity.">
+    <link rel="canonical" href="https://therealroundup.com/">
+    <!-- OG/Twitter for reels/link previews -->
+    <meta property="og:title" content="The Daily Feature – Smart News & Q&A">
+    <meta property="og:description" content="One standout discussion a day. No spin.">
+    <meta property="og:url" content="https://therealroundup.com/">
+    <meta name="twitter:card" content="summary_large_image">
     <style>
         body {
             background: #f6f9fb;
@@ -86,10 +89,9 @@
     <section class="hero">
         <div class="container">
             <h1 class="site-title">The Daily Feature</h1>
-            <div class="subtext">
-                Every day: One thought-provoking Q&A or trending community discussion.<br>
-                No bias, no spin, just clarity.
-            </div>
+            <div class="subtext">Every day: One thought-provoking Q&A or trending community discussion.<br>No bias, no
+                spin,
+                just clarity.</div>
             <a href="#feature" class="btn btn-primary shadow-sm btn-lg btn-explore">See Today's Featured Article</a>
         </div>
     </section>
@@ -97,10 +99,18 @@
     <main class="container">
         <section id="feature" class="feature shadow mt-5 mb-5">
             <div class="badge-feature">Today's Top Discussion</div>
+
+            {% if latest %}
+            <div id="headline" class="headline">{{ latest.title }}</div>
+            <div id="summary" class="summary">
+                {{ (latest.content | striptags)[:220] }}...
+            </div>
+            <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}"
+                class="btn btn-outline-primary btn-sm mt-2">Read full story</a>
+            {% else %}
             <div id="headline" class="headline">Loading today's featured article...</div>
             <div id="summary" class="summary"></div>
-            <!-- Optionally, you can add a link to "original discussion" but hide it by default or only show if wanted -->
-            <!-- <a id="discussion-link" href="#" target="_blank" style="display: none;" class="btn btn-outline-info btn-sm">See Original Discussion</a> -->
+            {% endif %}
         </section>
         <div class="text-center">
             <a href="/all-articles/articles" class="btn btn-outline-dark btn-lg mt-2">

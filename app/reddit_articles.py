@@ -27,7 +27,7 @@ if not os.path.exists(ARTICLES_DIR):
 
 openai.api_key = OPENAI_API_KEY
 
-bp = Blueprint("all-articles", __name__, url_prefix="/all-articles")
+bp = Blueprint("all_articles", __name__, url_prefix="/all-articles")
 
 BANNED_WORDS = [
     "sex", "sexual", "nsfw", "porn", "nude", "nudes", "vagina", "penis", "erection",
@@ -199,25 +199,26 @@ def generate_outline(topic, keywords):
 
 def generate_reel_script(article_text, topic):
     prompt = (
-        f"Summarize the key point of this article for a 30-60 second Instagram Reel. "
-        f"Speak directly to the viewer, highlight the most interesting idea, and use a friendly, energetic style. "
-        f"Topic: {topic}\n\n"
-        f"Article:\n{article_text}\n\n"
-        "Script:"
+        "Write a 35–45s vertical video script with:\n"
+        "- Cold-hook in first 2 seconds (question or startling claim).\n"
+        "- 3 quick beats (numbered) delivering value.\n"
+        "- Conversational, simple words, no fluff.\n"
+        "- Strong CTA to read the full story at TheRealRoundup.com (say the URL).\n"
+        "- Add on-screen text cues in [BRACKETS].\n"
+        f"Topic: {topic}\n\nSource:\n{article_text}\n\nScript:"
     )
-    response = openai.chat.completions.create(
+    resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=220,
-        temperature=0.8,
+        messages=[{"role":"user","content":prompt}],
+        max_tokens=260, temperature=0.7
     )
-    return response.choices[0].message.content.strip()
+    return resp.choices[0].message.content.strip()
 
 def generate_article(topic, outline, keywords):
     prompt = (
         f"Using this outline:\n{outline}\n\n"
         f"Write a 1000+ word SEO blog article on '{topic}' targeting these keywords: {', '.join(keywords)}. "
-        "Write it as a helpful, original, and engaging advice column—share insights and practical wisdom, as if from a personal blog or expert contributor. "
+        "Write it as a helpful, original, and engaging advice column—share insights and practical wisdom, as if from a personal blog or expert contributor. If possible make it interesting and teach stuff the normal person wouldn't know "
         "Absolutely avoid any mention of Reddit, forums, or social media. The article must be fully independent. End with an FAQ."
     )
     response = openai.chat.completions.create(

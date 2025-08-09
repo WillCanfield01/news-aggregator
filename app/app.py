@@ -54,52 +54,55 @@ def create_app():
 
     @app.route("/")
     def landing():
-        return render_template("index.html", year=datetime.now().year)
+        latest = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+        return render_template("index.html", year=datetime.now().year, latest=latest)
+
 
     @app.route("/sitemap.xml")
     def sitemap():
         try:
             articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
-            base_url = "https://therealroundup.com"
-            urlset = [
-                f"""<url>
-    <loc>{base_url}{url_for('all-articles.read_article', filename=a.filename)}</loc>
-    <lastmod>{a.date.strftime('%Y-%m-%d') if a.date else ''}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-</url>""" for a in articles
-            ]
-            home_url = f"""<url>
-    <loc>{base_url}/</loc>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-</url>"""
+            urlset = []
+            # Homepage
+            urlset.append(f"""<url>
+    <loc>{url_for('landing', _external=True)}</loc>
+    <changefreq>daily</changefreq><priority>1.0</priority>
+    </url>""")
+            # Articles
+            for a in articles:
+                loc = url_for('all_articles.read_article', filename=a.filename, _external=True)
+                lastmod = a.date.strftime('%Y-%m-%d') if a.date else ''
+                urlset.append(f"""<url>
+    <loc>{loc}</loc>
+    <lastmod>{lastmod}</lastmod>
+    <changefreq>weekly</changefreq><priority>0.8</priority>
+    </url>""")
+
             sitemap_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{home_url}
-{''.join(urlset)}
-</urlset>"""
-            return Response(sitemap_xml, mimetype="application/xml")
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    {''.join(urlset)}
+    </urlset>"""
+            return Response(sitemap_xml, content_type="application/xml; charset=utf-8")
         except Exception as e:
             current_app.logger.error(f"Sitemap error: {e}")
             return Response("Internal Server Error", status=500)
 
     @app.route("/api/reddit-feature")
     def reddit_feature():
-        today = datetime.now().date()
-        article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
-        if article:
-            plain = re.sub(r'\!\[.*?\]\(.*?\)', '', article.content)
-            plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)
-            plain = re.sub(r'\*\*|\*|__|_', '', plain)
-            words = plain.split()
-            summary = " ".join(words[:55]) + ("..." if len(words) > 55 else "")
-            return jsonify({
-                "title": article.title,
-                "summary": summary
-            })
-        else:
+        a = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+        if not a:
             return jsonify({"title": "", "summary": ""}), 404
+        plain = re.sub(r'\!\[.*?\]\(.*?\)', '', a.content)
+        plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)
+        plain = re.sub(r'\*\*|\*|__|_', '', plain)
+        words = plain.split()
+        summary = " ".join(words[:55]) + ("..." if len(words) > 55 else "")
+        return jsonify({
+            "title": a.title,
+            "summary": summary,
+            "url": url_for('all_articles.read_article', filename=a.filename, _external=True)
+        })
+
 
     @app.route("/robots.txt")
     def robots():
