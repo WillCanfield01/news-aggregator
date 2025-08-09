@@ -17,7 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 BASE_URL = os.getenv("BASE_URL", "https://therealroundup.com")
 SIM_THRESHOLD = float(os.getenv("SIM_THRESHOLD", "0.25"))
 POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))
-COOLDOWN_HOURS = int(os.getenv("COOLDOWN_HOURS", "1"))  # don’t tweet same article/trend within X hours
+COOLDOWN_HOURS = int(os.getenv("COOLDOWN_HOURS", "2"))  # don’t tweet same article/trend within X hours
 
 X_CONSUMER_KEY     = os.getenv("X_CONSUMER_KEY")
 X_CONSUMER_SECRET  = os.getenv("X_CONSUMER_SECRET")
