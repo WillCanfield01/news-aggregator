@@ -440,15 +440,15 @@ def generate():
 
 @bp.route("/articles")
 def published_articles():
+    import re
     articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
+
     for a in articles:
-        # Use plain text from markdown, or truncate rendered HTML if you prefer
-        import re
-        # Remove markdown/image links and limit length
-        plain = re.sub(r'\!\[.*?\]\(.*?\)', '', a.content)  # Remove images
-        plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)  # [link text](url) → link text
-        plain = re.sub(r'\*\*|\*|__|_', '', plain)  # Remove bold/italic
-        # Get first 30 words or 300 chars as excerpt
+        # Use whatever text exists; guard against None
+        source = (a.content or a.html_content or "")
+        plain = re.sub(r'\!\[.*?\]\(.*?\)', '', source)
+        plain = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)
+        plain = re.sub(r'\*\*|\*|__|_', '', plain)
         words = plain.split()
         a.excerpt = " ".join(words[:40]) + ("..." if len(words) > 40 else "")
     return render_template("published_articles.html", articles=articles)

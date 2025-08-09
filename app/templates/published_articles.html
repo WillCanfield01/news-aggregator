@@ -110,13 +110,13 @@
         <div class="articles-list">
             {% for article in articles %}
             <div class="article-card">
-                <a class="article-title" href="{{ url_for('all-articles.read_article', filename=article.filename) }}">
+                <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
                     {{ article.title }}
                 </a>
                 <div class="article-excerpt">
                     {{ article.excerpt }}
                 </div>
-                <a class="article-btn" href="{{ url_for('all-articles.read_article', filename=article.filename) }}">
+                <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
                     Read Full Article
                 </a>
             </div>

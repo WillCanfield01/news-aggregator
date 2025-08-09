@@ -12,6 +12,9 @@
     <meta property="og:description" content="One standout discussion a day. No spin.">
     <meta property="og:url" content="https://therealroundup.com/">
     <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:image" content="https://therealroundup.com/static/og/home-1200x630.jpg">
+    <meta name="twitter:image" content="https://therealroundup.com/static/og/home-1200x630.jpg">
+    <meta property="og:type" content="website">
     <style>
         body {
             background: #f6f9fb;
@@ -125,23 +128,17 @@
     </footer>
 
     <script>
-        // You may want to expose an endpoint like /api/daily-feature
         fetch('/api/reddit-feature')
-            .then(res => res.json())
+            .then(res => res.ok ? res.json() : Promise.reject())
             .then(data => {
-                document.getElementById('headline').innerText = data.title || "No feature found today.";
-                document.getElementById('summary').innerText = data.summary || "";
-                // Optionally show "original discussion" link:
-                // if (data.url) {
-                //     let btn = document.getElementById('discussion-link');
-                //     btn.href = data.url;
-                //     btn.style.display = "inline-block";
-                // }
+                if (data && data.title) {
+                    document.getElementById('headline').innerText = data.title;
+                    document.getElementById('summary').innerText = data.summary || "";
+                }
             })
-            .catch(() => {
-                document.getElementById('headline').innerText = "Could not load today's featured article.";
-            });
+            .catch(() => {/* keep SSR content */ });
     </script>
+
 </body>
 
 </html>
