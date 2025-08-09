@@ -199,7 +199,7 @@ def generate_outline(topic, keywords):
 
 def generate_reel_script(article_text, topic):
     prompt = (
-        "Write a 35–45s vertical video script with:\n"
+        "Write a 30–40s vertical video script with:\n"
         "- Cold-hook in first 2 seconds (question or startling claim).\n"
         "- 3 quick beats (numbered) delivering value.\n"
         "- Conversational, simple words, no fluff.\n"
@@ -224,7 +224,7 @@ def generate_article(topic, outline, keywords):
     response = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1800,
+        max_tokens=1500,
         temperature=0.5,
     )
     return response.choices[0].message.content
