@@ -226,24 +226,85 @@ def get_best_ai_money_post():
 # ------------------------------
 # Generation prompts (new format)
 # ------------------------------
-def rewrite_title_for_ai_money(original_title: str) -> str:
-    text = unidecode(original_title or "")
-    words = text.split()
-    cleaned = [w for w in words if w.lower() not in BANNED_WORDS + EXTRA_BANNED]
-    text = ' '.join(cleaned)
+def rewrite_title_for_ai_money(original_title: str, seed_text: str = "") -> str:
+    """
+    Generate specific, helpful, non-generic titles and pick one that:
+    - names an exact tool/tech or niche
+    - states the outcome/benefit
+    - calls out audience/use case
+    - avoids generic phrases and past-title near-duplicates
+    - stays under 80 chars (soft 72–78 sweet spot)
+    """
+    banned_phrases = [
+        "beginner’s guide", "beginners guide", "how to use ai", "start earning",
+        "from scratch", "ways to make money", "how to make money", "side hustle",
+        "friendly guide", "build confidence"
+    ]
 
-    prompt = (
-        "Rewrite this as a clean, compelling headline for a beginner-friendly guide on making money with AI. "
-        "Avoid clickbait, no mention of Reddit or social media, keep it under 70 chars.\n\n"
-        f"Input: {text}\nOutput:"
-    )
-    resp = openai.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=40, temperature=0.3,
-    )
-    headline = (resp.choices[0].message.content or "").strip().strip('"').strip("'")
-    return headline or "Make Money with AI: A Simple Guide"
+    # Ask the model for multiple concrete options so we can pick the best
+    prompt = f"""
+You will propose 8 SPECIFIC article titles. Rules:
+- Include at least one concrete element: tool/stack (e.g., ChatGPT, Midjourney, Zapier), niche (e.g., realtors, Etsy mugs), or workflow (e.g., voiceover → reels).
+- State a clear outcome/benefit or deliverable (e.g., "book 5 demos", "sell 20 listings", "ship an MVP").
+- Optionally include a time frame or scope (e.g., "in 7 days", "with 3 automations").
+- Avoid generic phrases like: {", ".join(banned_phrases)}.
+- Do NOT mention Reddit or social media.
+- Keep ≤ 80 characters; prefer 48–78.
+Input idea: {original_title}
+Seed/context (optional): {seed_text[:500]}
+
+Return JSON: {{"titles": ["t1","t2","t3","t4","t5","t6","t7","t8"]}}
+"""
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=220,
+            temperature=0.7,
+            response_format={"type":"json_object"}
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        candidates = [t.strip() for t in data.get("titles", []) if t.strip()]
+    except Exception:
+        candidates = []
+
+    if not candidates:
+        # very safe fallback
+        candidates = [original_title[:78]]
+
+    # Pull previous titles to avoid near-dupes
+    past = [a.title for a in CommunityArticle.query.all()]
+
+    def looks_generic(t: str) -> bool:
+        low = t.lower()
+        return any(p in low for p in banned_phrases)
+
+    def has_specific_signal(t: str) -> int:
+        low = t.lower()
+        signals = 0
+        signals += any(k in low for k in ["chatgpt","gpt","midjourney","stable diffusion","dall-e","elevenlabs","zapier","make.com","notion ai","perplexity","elicit","research rabbit"])
+        signals += any(k in low for k in ["etsy","airbnb","realtor","local business","podcast","youtube","tiktok","shopify","webflow","wordpress"])
+        signals += any(k in low for k in ["workflow","pipeline","automation","prompt","template","mvp","landing page","agent"])
+        return int(signals)
+
+    def score(t: str) -> float:
+        # higher is better
+        length = len(t)
+        length_pen = 0 if 48 <= length <= 78 else abs(63 - min(length, 80)) * 0.6
+        spec = has_specific_signal(t)
+        # similarity penalty vs past titles
+        dup_pen = max((fuzz.ratio(t.lower(), p.lower()) for p in past), default=0)
+        return spec*10 - length_pen - (dup_pen > 85)*20 - (looks_generic(t))*15
+
+    # Filter & pick best
+    filtered = [t for t in candidates if not looks_generic(t)]
+    if not filtered:
+        filtered = candidates
+
+    best = max(filtered, key=score)
+    # Final trim/sanitize
+    best = best.strip().strip('"').strip("'")
+    return best[:80]
 
 def generate_outline_for_ai_money(topic: str, seed_text: str):
     """
@@ -416,7 +477,7 @@ def generate_article_for_today():
         post = sorted(candidates, key=score_candidate, reverse=True)[0]
 
     cleaned_topic = clean_title(post["title"])
-    headline = rewrite_title_for_ai_money(cleaned_topic)
+    headline = rewrite_title_for_ai_money(cleaned_topic, post.get("selftext",""))
 
     outline = generate_outline_for_ai_money(headline, post.get("selftext", ""))
     article_md = generate_article_body(headline, outline, post.get("selftext", ""))
