@@ -236,7 +236,6 @@ def generate_article_body(topic: str, outline_md: str, seed_text: str):
         "Write a 500–700 word, beginner-friendly guide based on the outline below.\n"
         "Tone: clear, calm, encouraging. No fluff, no corporate-speak. No mention of Reddit.\n"
         "Include: Hook, Tools, Steps, Pricing/Earnings, Pitfalls, Scale, Checklist, FAQ (3 Q&As).\n"
-        "Add 1–2 short first-person 'Personal Note' asides that feel human.\n"
         f"Topic: {topic}\n\n"
         f"Seed notes (optional context from source):\n{seed_text[:800]}\n\n"
         f"Outline:\n{outline_md}\n\n"
@@ -414,38 +413,30 @@ def generate_article_for_today():
             faq_section = (heading, content)
             continue
 
-        # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
+    # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
+    inline_qa_pat = r'(?mis)(^|\n)\s*(\**Q\d+:\s.*?)(?=(?:\n\s*\**Q\d+:|\n##\s|\Z))'
+    inline_qas = [m.group(2).lstrip('*').strip() for m in re.finditer(inline_qa_pat, article_with_human)]
+    article_with_human = re.sub(inline_qa_pat, r'\1', article_with_human).strip()
 
-        # Matches lines like "Q1: ...", "  Q2: ...", or "**Q3: ..." (case-insensitive),
-        # and captures each whole Q/A block until the next Q#, a new heading, or EOF.
-        inline_qa_pat = r'(?mis)(^|\n)\s*(\**Q\d+:\s.*?)(?=(?:\n\s*\**Q\d+:|\n##\s|\Z))'
+    synth_faq = ""
+    if not faq_section and inline_qas:
+        synth_faq = "\n\n".join(inline_qas)
 
-        # Collect cleaned Q/A blocks
-        inline_qas = [m.group(2).lstrip('*').strip() for m in re.finditer(inline_qa_pat, article_with_human)]
+    already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
 
-        # Remove them from the body
-        article_with_human = re.sub(inline_qa_pat, r'\1', article_with_human).strip()
+    if not already_has_faq:
+        if faq_section:
+            article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
+        elif synth_faq:
+            article_with_human += "\n## FAQ\n\n" + synth_faq.strip() + "\n\n"
+        else:
+            gen_faq = generate_faq_from_body(article_with_human)
+            if gen_faq:
+                article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
 
-        # If we didn’t get an explicit FAQ section, synthesize one from the inline Q/As
-        synth_faq = ""
-        if not faq_section and inline_qas:
-            synth_faq = "\n\n".join(inline_qas)
-
-        already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
-
-        if not already_has_faq:
-            if faq_section:
-                article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
-            elif synth_faq:
-                article_with_human += "\n## FAQ\n\n" + synth_faq.strip() + "\n\n"
-            else:
-                gen_faq = generate_faq_from_body(article_with_human)
-                if gen_faq:
-                    article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
-
-    # Final cleanups
-    article_with_human = remove_gpt_dashes(article_with_human)
-    article_with_human = strip_unwanted_bold(article_with_human)
+    # Layout normalization (spacing + stray 'FAQ' lines)
+    article_with_human = re.sub(r'(?im)^\s*faq\s*$', '', article_with_human).strip()
+    article_with_human = re.sub(r'(?m)([^\n])\n##', r'\1\n\n##', article_with_human)
 
     # 4) Reel script
     reel_script = generate_reel_script(article_with_human, headline)
