@@ -23,6 +23,7 @@ REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
+ADD_PERSONAL_NOTES = False  # set True if you want exactly one clean note
 
 openai.api_key = OPENAI_API_KEY
 
@@ -323,6 +324,38 @@ def fix_broken_personal_note(note: str) -> str:
     sentences = re.split(r'(?<=[.!?]) +', note)
     return ' '.join(sentences[:2]) if len(sentences) > 2 else note
 
+def generate_faq_from_body(body_text: str) -> str:
+    """
+    Generate 3 compact Q&As from the article body as a last-resort fallback.
+    Returns markdown like:
+    Q1: ...
+    A:  ...
+    (blank line between items)
+    """
+    try:
+        prompt = (
+            "From the article below, write exactly 3 short FAQ Q&As for beginners. "
+            "Use this exact format without headings:\n"
+            "Q1: <question>\nA: <answer>\n\nQ2: ...\nA: ...\n\nQ3: ...\nA: ...\n\n"
+            "Keep each answer under 2 sentences.\n\nArticle:\n" + body_text[:4000]
+        )
+        resp = openai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=260, temperature=0.2,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception:
+        # ultra-safe static fallback
+        return (
+            "Q1: What do I need to get started?\n"
+            "A: Pick one tool, try a small test task, and follow the built-in tutorial.\n\n"
+            "Q2: How long before I see results?\n"
+            "A: Usually within a week if you practice daily and take 1–2 paid micro-tasks.\n\n"
+            "Q3: Any risks to watch for?\n"
+            "A: Double-check facts, respect copyrights, and be transparent with clients."
+        )
+
 # ------------------------------
 # Main daily generator
 # ------------------------------
@@ -335,7 +368,7 @@ def generate_article_for_today():
     # 2) Outline & article body
     outline = generate_outline_for_ai_money(headline, post["selftext"])
     article_md = generate_article_body(headline, outline, post["selftext"])
-    article_md = re.sub(r'(?mis)^##\s*FAQ\b.*?(?=^##\s|\Z)', '', article_md)
+    article_md = re.sub(r'(?im)^\s*>?\s*\**\s*personal\s*note\s*:\s*.*$', '', article_md)
 
     # 3) Light post-processing
     #    (Keep your personal-notes quirks and cleanup)
@@ -379,15 +412,7 @@ def generate_article_for_today():
 
         if is_faq:
             faq_section = (heading, content)
-        else:
-            # Add one short personal note occasionally
-            if random.random() < 0.35 and len(body) > 120:
-                reflection = humanize_reflection(body.split(".")[0][:180])
-                reflection = fix_broken_personal_note(reflection)
-                article_with_human += f"> **Personal Note:** {reflection}\n\n"
-
-        if (i < len(sections) - 1) and not is_faq and not is_conclusion:
-            article_with_human += "---\n"
+            continue
 
     # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
 
@@ -403,14 +428,19 @@ def generate_article_for_today():
     synth_faq = ""
     if not faq_section and inline_qas:
         synth_faq = "\n\n".join(inline_qas)
-
     already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
 
     if not already_has_faq:
         if faq_section:
             article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
         elif synth_faq:
-            article_with_human += "\n## FAQ\n\n" + synth_faq + "\n\n"
+            article_with_human += "\n## FAQ\n\n" + synth_faq.strip() + "\n\n"
+        else:
+            # NEW: final safety net
+            gen_faq = generate_faq_from_body(article_with_human)
+            if gen_faq:
+                article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
+
 
     # Final cleanups
     article_with_human = remove_gpt_dashes(article_with_human)
