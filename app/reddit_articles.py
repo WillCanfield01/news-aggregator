@@ -15,7 +15,6 @@ from unidecode import unidecode
 from app.models import CommunityArticle
 from app import db
 from rapidfuzz import fuzz
-from app.models import CommunityArticle
 
 # ------------------------------
 # Config & constants
