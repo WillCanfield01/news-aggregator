@@ -336,6 +336,7 @@ def generate_article_for_today():
     # 2) Outline & article body
     outline = generate_outline_for_ai_money(headline, post["selftext"])
     article_md = generate_article_body(headline, outline, post["selftext"])
+    article_md = re.sub(r'(?mis)^##\s*FAQ\b.*?(?=^##\s|\Z)', '', article_md)
 
     # 3) Light post-processing
     #    (Keep your personal-notes quirks and cleanup)
@@ -389,9 +390,11 @@ def generate_article_for_today():
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
             article_with_human += "---\n"
 
-    # Keep FAQ if present
-    if faq_section:
+    already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
+
+    if faq_section and not already_has_faq:
         article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
+
 
     # Final cleanups
     article_with_human = remove_gpt_dashes(article_with_human)

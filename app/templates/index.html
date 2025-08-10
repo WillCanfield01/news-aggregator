@@ -2,8 +2,9 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <title>AI Money Daily – One Actionable Idea, Every Day</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description"
         content="One beginner-friendly way to make money with AI—tools, steps, pricing, pitfalls—daily.">
     <link rel="canonical" href="https://therealroundup.com/">
@@ -12,74 +13,127 @@
     <meta property="og:url" content="https://therealroundup.com/">
     <meta name="twitter:card" content="summary_large_image">
     <style>
+        :root {
+            --brand: #58bbff;
+            --ink: #242424;
+            --sub: #55606d;
+            --card: #ffffff;
+            --bg: #f6f9fb;
+            --shadow: 0 6px 24px rgba(0, 0, 0, .08);
+            --radius: 18px;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
         body {
-            background: #f6f9fb;
+            margin: 0;
+            padding: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif
+        }
+
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 0 20px
         }
 
         .hero {
-            background: linear-gradient(90deg, #58bbff 0%, #e9ecef 100%);
-            padding: 3rem 0 2rem 0;
-            color: #242424;
-            text-align: center;
-            border-radius: 0 0 2rem 2rem;
+            background: linear-gradient(90deg, var(--brand) 0%, #e9ecef 100%);
+            padding: 48px 0 32px;
+            border-radius: 0 0 24px 24px;
+            text-align: center
         }
 
         .site-title {
-            font-weight: bold;
-            font-size: 2.7rem;
-            letter-spacing: -1px;
-            margin-bottom: .5rem;
+            font-weight: 800;
+            font-size: 42px;
+            letter-spacing: -.5px;
+            margin: 4px 0 8px
         }
 
         .subtext {
-            color: #444b;
-            font-size: 1.1rem;
-            margin-bottom: 2rem;
+            color: #31455a;
+            opacity: .9;
+            font-size: 18px;
+            line-height: 1.5;
+            margin: 0 auto 18px
+        }
+
+        .btn-primary {
+            display: inline-block;
+            background: #1845a3;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 700;
+            padding: 10px 16px;
+            border-radius: 10px
         }
 
         .feature {
-            background: #fff;
-            border-radius: 1.2rem;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
-            margin-top: -2.5rem;
-            padding: 2.2rem 1.5rem 1.5rem 1.5rem;
-            max-width: 680px;
-            margin-left: auto;
-            margin-right: auto;
-            position: relative;
+            background: var(--card);
+            box-shadow: var(--shadow);
+            border-radius: var(--radius);
+            margin-top: -28px;
+            padding: 26px 22px
         }
 
         .badge-feature {
-            background: #58bbff;
+            background: var(--brand);
             color: #fff;
-            padding: 0.2em 0.7em;
-            font-size: 1em;
-            border-radius: 0.5em;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.7em;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-weight: 700;
             display: inline-block;
+            font-size: 14px;
+            margin-bottom: 10px
         }
 
         .headline {
-            font-size: 1.35rem;
-            font-weight: 600;
-            margin-bottom: .5em;
+            font-size: 26px;
+            font-weight: 800;
+            line-height: 1.25;
+            margin: 4px 0 8px
         }
 
         .summary {
-            color: #222b;
-            font-size: 1.05rem;
-            margin-bottom: 1em;
+            color: var(--sub);
+            font-size: 16px;
+            line-height: 1.5;
+            margin: 8px 0 12px
         }
 
-        .btn-explore {
-            margin-top: 2.5rem;
+        .link {
+            color: #1845a3;
+            text-decoration: none;
+            font-weight: 700
+        }
+
+        .link:hover {
+            text-decoration: underline
+        }
+
+        .center {
+            text-align: center
         }
 
         footer {
-            margin-top: 4rem;
-            padding-top: 2rem;
-            color: #888;
+            color: #7a8796;
+            margin: 48px 0 24px
+        }
+
+        @media (max-width:640px) {
+            .site-title {
+                font-size: 34px
+            }
+
+            .headline {
+                font-size: 22px
+            }
         }
     </style>
 </head>
@@ -88,42 +142,63 @@
     <section class="hero">
         <div class="container">
             <h1 class="site-title">AI Money Daily</h1>
-            <div class="subtext">
-                Every day: one actionable way to make money with AI.<br>Simple tools, clear steps, realistic earnings.
-            </div>
-            <a href="#feature" class="btn btn-primary shadow-sm btn-lg btn-explore">See Today's Featured Article</a>
+            <p class="subtext">
+                Every day: one actionable way to make money with AI.<br />
+                Simple tools, clear steps, realistic earnings.
+            </p>
+            <a href="#feature" class="btn-primary">See Today’s Featured Article</a>
         </div>
     </section>
 
     <main class="container">
-        <!-- Feature card -->
-        <section id="feature" class="feature shadow mt-5 mb-5">
+        <section id="feature" class="feature">
             <div class="badge-feature">Today’s AI Income Idea</div>
 
             {% if latest %}
             <div id="headline" class="headline">{{ latest.title }}</div>
+
+            {# Prefer HTML content if it exists; otherwise fall back to markdown text #}
+            {% set raw = (latest.html_content or latest.content or '') %}
+            {# Remove any "Photo by ... Unsplash" or stray markdown/image lines #}
+            {% set clean = raw
+            | replace('##',' ')
+            | replace('*',' ')
+            | replace('Photo by',' ')
+            %}
             <div id="summary" class="summary">
-                {{ (latest.html_content | striptags)[:220] }}...
+                {{ (clean | striptags)[:220] ~ ('…' if (clean | striptags)|length > 220 else '') }}
             </div>
-            <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}"
-                class="btn btn-outline-primary btn-sm mt-2">Read the full guide</a>
+
+            <a class="link" href="{{ url_for('all_articles.read_article', filename=latest.filename) }}">Read the full
+                guide</a>
             {% else %}
-            <div id="headline" class="headline">New guide drops daily. Check back soon.</div>
+            <div class="headline">New guide drops daily. Check back soon.</div>
             {% endif %}
         </section>
 
-        <div class="text-center">
-            <a href="/all-articles/articles" class="btn btn-outline-dark btn-lg mt-2">
-                Explore All Published Articles
-            </a>
-        </div>
+        <p class="center" style="margin-top:14px">
+            <a class="link" href="/all-articles/articles">Explore all published articles</a>
+        </p>
     </main>
 
-    <footer class="text-center small">
-        &copy; {{ year or 2025 }} AI Money Daily &mdash;
-        <a href="https://therealroundup.com" class="text-decoration-none">Powered by The Roundup</a>
+    <footer class="center">
+        © {{ year or 2025 }} AI Money Daily — <a class="link" href="https://therealroundup.com">Powered by The
+            Roundup</a>
     </footer>
 
+    <script>
+        // Optional progressive enhancement: if you keep the JSON endpoint.
+        fetch('/api/reddit-feature').then(r => r.ok ? r.json() : null).then(data => {
+            if (!data) return;
+            const h = document.getElementById('headline'), s = document.getElementById('summary');
+            if (h && data.title) h.textContent = data.title;
+            if (s && data.summary) {
+                // clip client-side too; keep it neat
+                const txt = data.summary.replace(/Photo by.*Unsplash/gi, '').slice(0, 220);
+                s.textContent = txt + (data.summary.length > 220 ? '…' : '');
+            }
+        }).catch(() => { });
+    </script>
 </body>
 
 </html>
