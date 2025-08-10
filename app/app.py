@@ -115,11 +115,16 @@ def create_app():
             {"Content-Type": "text/plain"}
         )
 
-    with app.app_context():
-        start_background_tasks()
-        schedule_daily_reddit_article(app)
+    @app.route('/articles/<slug>')
+    def article_page(slug):
+        # existing logic here
 
-    return app
+
+        with app.app_context():
+            start_background_tasks()
+            schedule_daily_reddit_article(app)
+
+        return app
 
 if __name__ == "__main__":
     app = create_app()

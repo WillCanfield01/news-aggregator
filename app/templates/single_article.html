@@ -135,6 +135,24 @@
         .article-content .faq-a {
             margin-bottom: 22px;
         }
+
+        .latest-cta {
+            text-align: center;
+            margin-top: 3rem;
+            padding: 1.5rem;
+            border-top: 1px solid #ddd;
+            font-size: 1.1rem;
+        }
+
+        .latest-cta .cta-link {
+            color: #004aad;
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+        .latest-cta .cta-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
@@ -144,16 +162,6 @@
 
         <h1 class="article-title">{{ title }}</h1>
         <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
-
-        <hr class="divider" />
-
-        <section class="cta">
-            <h3>Want a new AI money idea every day?</h3>
-            <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
-            <a href="/">See today’s guide</a>
-        </section>
-
-        <hr class="divider" />
 
         <!-- Render the article HTML -->
         <div class="article-content">
@@ -172,6 +180,15 @@
     "mainEntityOfPage":{"@type":"WebPage","@id":"https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
   }
   </script>
+
+    <hr>
+    <div class="latest-cta">
+        <p><strong>Want a new AI money idea every day?</strong><br>
+            Get simple tools, steps, pricing, and pitfalls—free.</p>
+        <a href="{{ url_for('view_article', slug=latest_article.slug) }}" class="cta-link">
+            See today’s guide
+        </a>
+
 </body>
 
 </html>

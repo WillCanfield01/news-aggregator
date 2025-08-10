@@ -389,11 +389,28 @@ def generate_article_for_today():
         if (i < len(sections) - 1) and not is_faq and not is_conclusion:
             article_with_human += "---\n"
 
+    # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
+
+    # Collect inline Q/A blocks like "Q1: ..." that might appear in the body
+    inline_qa_pat = r'(?mis)(^|\n)(Q\d+:\s.*?)(?=(?:\nQ\d+:|\n##\s|\Z))'
+    inline_qas = [m[1].strip() for m in re.findall(inline_qa_pat, article_with_human)]
+
+    # Remove those inline Q/A from the body (we’ll reuse them only if no FAQ section exists)
+    article_with_human = re.sub(inline_qa_pat, r'\1', article_with_human).strip()
+
+    # If the model DIDN’T provide an explicit FAQ section in the outline,
+    # but we saw inline Q/A blocks, we’ll synthesize a clean FAQ from them.
+    synth_faq = ""
+    if not faq_section and inline_qas:
+        synth_faq = "\n\n".join(inline_qas)
+
     already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
 
-    if faq_section and not already_has_faq:
-        article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
-
+    if not already_has_faq:
+        if faq_section:
+            article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
+        elif synth_faq:
+            article_with_human += "\n## FAQ\n\n" + synth_faq + "\n\n"
 
     # Final cleanups
     article_with_human = remove_gpt_dashes(article_with_human)
@@ -463,9 +480,17 @@ def published_articles():
     articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
     for a in articles:
         source = (a.content or a.html_content or "")
+        # Remove images
         plain = _re.sub(r'\!\[.*?\]\(.*?\)', '', source)
+        # Remove links but keep text
         plain = _re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', plain)
+        # Remove bold/italic markers
         plain = _re.sub(r'\*\*|\*|__|_', '', plain)
+        # Remove Markdown headings (##, ###, etc.)
+        plain = _re.sub(r'^\s*#{1,6}\s*', '', plain, flags=_re.MULTILINE)
+        # Remove "Photo by ..." credits
+        plain = _re.sub(r'Photo by .*? on Unsplash', '', plain, flags=_re.IGNORECASE)
+
         words = plain.split()
         a.excerpt = " ".join(words[:40]) + ("..." if len(words) > 40 else "")
     return render_template("published_articles.html", articles=articles)
