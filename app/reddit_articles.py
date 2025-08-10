@@ -4,14 +4,12 @@ import json
 import random
 import difflib
 import requests
-from datetime import datetime, date
-
-import openai
 import praw
+from datetime import datetime, date, timedelta
+import openai
 from flask import Blueprint, render_template, jsonify
 from markdown2 import markdown
 from unidecode import unidecode
-
 from app.models import CommunityArticle
 from app import db
 from rapidfuzz import fuzz
@@ -57,6 +55,26 @@ GPTISMS = [
     "it's worth noting", "in conclusion", "ultimately", "pivot", "essentially", "moreover",
 ]
 
+GENERIC_PHRASES = [
+    "how to make money with ai",
+    "ways to make money",
+    "side hustle",
+    "earn money",
+    "build confidence",
+    "general tips"
+]
+
+AI_TOOL_KEYWORDS = [
+    "chatgpt", "midjourney", "dall-e", "stability ai", "elevenlabs", 
+    "runwayml", "firefly", "gpt", "stable diffusion", "claude",
+    "notion ai", "jasper", "copy ai", "perplexity", "elicit", "research rabbit"
+]
+
+ACTION_KEYWORDS = [
+    "sell", "create", "generate", "design", "automate", 
+    "write", "build", "develop", "publish", "train", "launch"
+]
+
 # ------------------------------
 # Helpers
 # ------------------------------
@@ -81,6 +99,16 @@ def sanitize_gptisms(text: str) -> str:
         text = re.sub(rf"\b{re.escape(phrase)}\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
+
+def is_generic(text):
+    t = text.lower()
+    return any(phrase in t for phrase in GENERIC_PHRASES)
+
+def contains_tool_and_action(text):
+    t = text.lower()
+    has_tool = any(tool in t for tool in AI_TOOL_KEYWORDS)
+    has_action = any(action in t for action in ACTION_KEYWORDS)
+    return has_tool and has_action
 
 def remove_gpt_dashes(text: str) -> str:
     text = re.sub(r'(\s)—(\s)', r'\1,\2', text)
@@ -164,24 +192,36 @@ def score_candidate(c):
     return base - length_penalty
 
 def get_best_ai_money_post():
-    candidates = fetch_candidates_from_reddit()
-    if not candidates:
-        raise Exception("No candidates from Reddit.")
-    ranked = sorted(candidates, key=score_candidate, reverse=True)
-    for c in ranked:
-        text = (c["title"] + " " + c["selftext"]).lower()
-        if any(k in text for k in AI_KEYWORDS):
-            # skip if headline would be a dupe after rewrite
-            trial_headline = rewrite_title_for_ai_money(clean_title(c["title"]))
-            if not is_duplicate(trial_headline):
-                return c
-    # fallback: first non-duplicate even if no AI keyword
-    for c in ranked:
-        trial_headline = rewrite_title_for_ai_money(clean_title(c["title"]))
-        if not is_duplicate(trial_headline):
-            return c
-    # worst-case: return the top candidate
-    return ranked[0]
+    reddit = praw.Reddit(
+        client_id=os.getenv("REDDIT_CLIENT_ID"),
+        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+        user_agent="daily_ai_money"
+    )
+
+    # fixed spelling + combined subs
+    subreddit = reddit.subreddit("sidehustle+Entrepreneur+ArtificialIntelligence+ChatGPT")
+    posts = subreddit.top(time_filter="day", limit=50)
+
+    candidates = []
+    for post in posts:
+        title = (post.title or "").strip()
+        body = (post.selftext or "").strip()
+
+        if is_generic(title) or is_generic(body):
+            continue
+        if not contains_tool_and_action(f"{title} {body}"):
+            continue
+
+        candidates.append({
+            "title": title,
+            "selftext": body,        # ← include for downstream use
+            "score": getattr(post, "score", 0),
+            "url": f"https://reddit.com{getattr(post, 'permalink', '')}",
+            "id": post.id
+        })
+
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+    return candidates[0] if candidates else None
 
 # ------------------------------
 # Generation prompts (new format)
@@ -210,20 +250,28 @@ def generate_outline_for_ai_money(topic: str, seed_text: str):
     Force a consistent, action-first outline. No Reddit references.
     """
     prompt = (
-        "Create a tight outline for a daily article called 'One New Way to Make Money With AI: "
-        f"{topic}'. Audience: total beginners, action-first.\n\n"
-        "Sections:\n"
-        "1) Hook (why this is worth trying)\n"
-        "2) Tools you need (bullet list, links placeholders)\n"
-        "3) Step-by-step setup (5–8 numbered steps)\n"
-        "4) Pricing & earnings potential (realistic ranges)\n"
-        "5) Pitfalls & how to avoid them\n"
-        "6) Scale it (automation, distribution, upsells)\n"
-        "7) 30-second checklist (bullets)\n"
-        "8) FAQ (3 concise Q&As)\n\n"
-        "Constraints: No mention of Reddit or social media sourcing. Keep it practical.\n"
-        "Return only markdown headings and bullets."
-    )
+    f"You are writing a daily guide called 'One New Way to Make Money With AI: {topic}'. "
+    "Rules:\n"
+    "- Focus on ONE specific AI use case, not general freelancing.\n"
+    "- Include exact tools (by name), where to get them (with placeholder URLs), and free/paid options.\n"
+    "- Give numbered setup steps that a total beginner could follow today, including menu clicks, settings, and file formats.\n"
+    "- Include at least ONE real-world example, case study, or mini scenario showing how someone actually earned money this way.\n"
+    "- Include realistic earnings figures from known marketplaces.\n"
+    "- Include at least ONE unique tip or trick not found in generic blog posts.\n"
+    "- Do not use phrases like 'build confidence', 'start small', or 'be patient' unless directly tied to the method.\n"
+    "- Avoid generic side hustle language. Make it actionable and specific.\n"
+    "- No social media sourcing or Reddit references.\n"
+    "- Sections:\n"
+    "  1) Hook: Why this specific AI use case works now\n"
+    "  2) Tools you need (name + placeholder link + cost)\n"
+    "  3) Exact setup steps (numbered, 7–10 steps)\n"
+    "  4) Example earning scenario (numbers)\n"
+    "  5) Pitfalls & solutions\n"
+    "  6) Scaling & automation tips\n"
+    "  7) Quick checklist\n"
+    "  8) FAQ (3 items)\n"
+    "Return in Markdown headings and bullet points."
+)
     resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
@@ -233,7 +281,7 @@ def generate_outline_for_ai_money(topic: str, seed_text: str):
 
 def generate_article_body(topic: str, outline_md: str, seed_text: str):
     prompt = (
-        "Write a 500–700 word, beginner-friendly guide based on the outline below.\n"
+        "Write a 700–900 word, beginner-friendly guide based on the outline below.\n"
         "Tone: clear, calm, encouraging. No fluff, no corporate-speak. No mention of Reddit.\n"
         "Include: Hook, Tools, Steps, Pricing/Earnings, Pitfalls, Scale, Checklist, FAQ (3 Q&As).\n"
         f"Topic: {topic}\n\n"
@@ -244,7 +292,7 @@ def generate_article_body(topic: str, outline_md: str, seed_text: str):
     resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1200, temperature=0.45,
+        max_tokens=1500, temperature=0.45,
     )
     return resp.choices[0].message.content
 
@@ -359,15 +407,20 @@ def generate_faq_from_body(body_text: str) -> str:
 # Main daily generator
 # ------------------------------
 def generate_article_for_today():
-    # 1) Source: best AI money post from target subs
     post = get_best_ai_money_post()
+    if not post:
+        # fallback to your older ranking method or bail gracefully
+        candidates = fetch_candidates_from_reddit()
+        if not candidates:
+            raise Exception("No suitable Reddit posts found this day.")
+        post = sorted(candidates, key=score_candidate, reverse=True)[0]
+
     cleaned_topic = clean_title(post["title"])
     headline = rewrite_title_for_ai_money(cleaned_topic)
 
-    # 2) Outline & article body
-    outline = generate_outline_for_ai_money(headline, post["selftext"])
-    article_md = generate_article_body(headline, outline, post["selftext"])
-    article_md = re.sub(r'(?im)^\s*>?\s*\**\s*personal\s*note\s*:\s*.*$', '', article_md)
+    outline = generate_outline_for_ai_money(headline, post.get("selftext", ""))
+    article_md = generate_article_body(headline, outline, post.get("selftext", ""))
+    article_md = re.sub(r'(?i)\*\*?\s*personal\s*note\s*:\s*.*?(?:\n|$)', '', article_md)
 
     # 3) Light post-processing
     #    (Keep your personal-notes quirks and cleanup)
@@ -437,6 +490,8 @@ def generate_article_for_today():
     # Layout normalization (spacing + stray 'FAQ' lines)
     article_with_human = re.sub(r'(?im)^\s*faq\s*$', '', article_with_human).strip()
     article_with_human = re.sub(r'(?m)([^\n])\n##', r'\1\n\n##', article_with_human)
+    article_with_human = remove_gpt_dashes(article_with_human)
+    article_with_human = strip_unwanted_bold(article_with_human)
 
     # 4) Reel script
     reel_script = generate_reel_script(article_with_human, headline)
@@ -514,7 +569,7 @@ def published_articles():
         plain = _re.sub(r'Photo by .*? on Unsplash', '', plain, flags=_re.IGNORECASE)
 
         words = plain.split()
-        a.excerpt = " ".join(words[:40]) + ("..." if len(words) > 40 else "")
+        a.snippet = " ".join(words[:40]) + ("..." if len(words) > 40 else "")
     return render_template("published_articles.html", articles=articles)
 
 @bp.route("/articles/<filename>")
