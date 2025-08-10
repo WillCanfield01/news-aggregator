@@ -182,12 +182,24 @@
   </script>
 
     <hr>
-    <div class="latest-cta">
-        <p><strong>Want a new AI money idea every day?</strong><br>
-            Get simple tools, steps, pricing, and pitfalls—free.</p>
-        <a href="{{ url_for('view_article', slug=latest_article.slug) }}" class="cta-link">
-            See today’s guide
-        </a>
+
+    <section class="cta">
+        <h3>Want a new AI money idea every day?</h3>
+        <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
+
+        {% if latest_article %}
+        {# If we’re not already on the latest, link to it; otherwise link to the list #}
+        {% if current_filename and latest_article.filename != current_filename %}
+        <a href="{{ url_for('all_articles.read_article', filename=latest_article.filename) }}">See today’s guide</a>
+        {% else %}
+        <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
+        {% endif %}
+        {% else %}
+        <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
+        {% endif %}
+    </section>
+
+    <hr>
 
 </body>
 

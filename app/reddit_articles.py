@@ -520,13 +520,18 @@ def read_article(filename):
         plain = re.sub(r'<.*?>', '', html_content)
         meta_description = plain[:160]
 
+    # NEW: fetch newest article to power the CTA
+    latest_article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+
     return render_template(
         "single_article.html",
         title=article.title,
         date=article.date,
         content=html_content,
         meta_title=meta_title,
-        meta_description=meta_description
+        meta_description=meta_description,
+        latest_article=latest_article,          # <-- pass it
+        current_filename=article.filename       # (optional) for self-check in template
     )
 
 # CLI run
