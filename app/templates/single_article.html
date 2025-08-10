@@ -3,41 +3,30 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ meta_title or title }} – The Roundup</title>
-    <meta name="description" content="{{ meta_description or (content[:160] if content else '') }}">
-    <meta property="og:title" content="{{ meta_title or title }}">
-    <meta property="og:description" content="{{ meta_description or (content[:160] if content else '') }}">
-    <meta property="og:type" content="article">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link rel="canonical" href="https://therealroundup.com/" />
-    <link rel="canonical" href="https://therealroundup.com/all_articles/articles/{{ request.view_args['filename'] }}">
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Article",
-      "headline": "{{ meta_title or title }}",
-      "description": "{{ meta_description }}",
-      "datePublished": "{{ date.isoformat() }}",
-      "author": {"@type": "Person", "name": "The Roundup"},
-      "mainEntityOfPage": {"@type": "WebPage","@id": "https://therealroundup.com/all_articles/articles/{{ request.view_args['filename'] }}"}
-    }
-    </script>
+    <meta name="description" content="{{ meta_description or (content[:160] if content else '') }}" />
+    <meta property="og:title" content="{{ meta_title or title }}" />
+    <meta property="og:description" content="{{ meta_description or (content[:160] if content else '') }}" />
+    <meta property="og:type" content="article" />
+    <!-- Single, correct canonical -->
+    <link rel="canonical" href="https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}" />
+
     <style>
         body {
             background: #f6f4ed;
             font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
             margin: 0;
-            padding: 0;
         }
 
         .container {
             max-width: 740px;
-            margin: 48px auto 0 auto;
+            margin: 48px auto 0;
             background: #fff;
             border-radius: 18px;
-            box-shadow: 0 6px 30px rgba(60, 60, 60, 0.09);
-            padding: 44px 34px 56px 34px;
+            box-shadow: 0 6px 30px rgba(60, 60, 60, .09);
+            padding: 44px 34px 56px;
         }
 
         .back-link {
@@ -54,11 +43,13 @@
             text-decoration: underline;
         }
 
+        /* use the class names that appear in markup */
         .article-title {
             font-size: 2.2rem;
             font-weight: 800;
             color: #14345b;
-            margin: 0 0 10px 0;
+            margin: 0 0 10px;
+            text-wrap: balance;
         }
 
         .article-meta {
@@ -67,6 +58,34 @@
             margin-bottom: 18px;
         }
 
+        .divider {
+            border: none;
+            border-top: 1px solid #e2e4ea;
+            margin: 32px 0;
+        }
+
+        .cta {
+            text-align: center;
+            margin: 8px 0 22px;
+        }
+
+        .cta h3 {
+            margin: 0 0 6px;
+            color: #14345b;
+        }
+
+        .cta p {
+            margin: 0 0 10px;
+            color: #6e7a8a;
+        }
+
+        .cta a {
+            color: #1845a3;
+            font-weight: 700;
+            text-decoration: underline;
+        }
+
+        /* this must match the content wrapper class below */
         .article-content {
             font-size: 1.16rem;
             line-height: 1.7;
@@ -91,18 +110,13 @@
             color: #1845a3;
         }
 
-        .divider {
-            border: none;
-            border-top: 1px solid #e2e4ea;
-            margin: 32px 0 32px 0;
-        }
-
         .article-content img {
             max-width: 100%;
+            height: auto;
             border-radius: 12px;
             display: block;
-            margin: 24px auto 8px auto;
-            box-shadow: 0 2px 12px rgba(60, 60, 60, 0.11);
+            margin: 24px auto 8px;
+            box-shadow: 0 2px 12px rgba(60, 60, 60, .11);
         }
 
         .article-content em {
@@ -111,11 +125,6 @@
             color: #888;
             margin-bottom: 28px;
             font-size: 1.06rem;
-        }
-
-        .article-content strong {
-            color: #1845a3;
-            font-weight: 700;
         }
 
         .article-content .faq-q {
@@ -133,23 +142,36 @@
     <div class="container">
         <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Articles</a>
 
-        <h1 class="title">{{ title }}</h1>
-        <p class="date">{{ date.strftime('%B %d, %Y') }}</p>
+        <h1 class="article-title">{{ title }}</h1>
+        <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
 
-        <hr>
+        <hr class="divider" />
 
         <section class="cta">
             <h3>Want a new AI money idea every day?</h3>
             <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
-            <a href="{{ url_for('all_articles.published_articles') }}">See today’s guide</a>
+            <a href="/">See today’s guide</a>
         </section>
 
-        <hr>
+        <hr class="divider" />
 
         <!-- Render the article HTML -->
-        <div class="article-body">
+        <div class="article-content">
             {{ content | safe }}
         </div>
+    </div> <!-- ✅ close .container -->
+
+    <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"Article",
+    "headline":"{{ meta_title or title }}",
+    "description":"{{ meta_description }}",
+    "datePublished":"{{ date.isoformat() }}",
+    "author":{"@type":"Person","name":"The Roundup"},
+    "mainEntityOfPage":{"@type":"WebPage","@id":"https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
+  }
+  </script>
 </body>
 
 </html>

@@ -120,21 +120,9 @@
     </main>
 
     <footer class="text-center small">
-        &copy; {{ year or 2025 }} The Daily Feature &mdash;
+        &copy; {{ year or 2025 }} AI Money Daily &mdash;
         <a href="https://therealroundup.com" class="text-decoration-none">Powered by The Roundup</a>
     </footer>
-
-    <script>
-        fetch('/api/reddit-feature')
-            .then(res => res.ok ? res.json() : Promise.reject())
-            .then(data => {
-                if (data && data.title) {
-                    document.getElementById('headline').innerText = data.title;
-                    document.getElementById('summary').innerText = data.summary || "";
-                }
-            })
-            .catch(() => {/* keep SSR content */ });
-    </script>
 
 </body>
 
