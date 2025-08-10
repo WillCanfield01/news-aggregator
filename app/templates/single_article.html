@@ -132,17 +132,24 @@
 <body>
     <div class="container">
         <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Articles</a>
-        <h1 class="article-title">{{ title }}</h1>
-        {% if date %}
-        <div class="article-meta">{{ date.strftime('%B %d, %Y') }}</div>
-        {% endif %}
+
+        <h1 class="title">{{ title }}</h1>
+        <p class="date">{{ date.strftime('%B %d, %Y') }}</p>
+
         <hr>
-        <div class="card p-3 my-4">
-            <strong>Want a new AI money idea every day?</strong>
-            <div>Get simple tools, steps, pricing, and pitfalls—free.</div>
-            <a href="/" class="btn btn-primary btn-sm mt-2">See today’s guide</a>
+
+        <section class="cta">
+            <h3>Want a new AI money idea every day?</h3>
+            <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
+            <a href="{{ url_for('all_articles.published_articles') }}">See today’s guide</a>
+        </section>
+
+        <hr>
+
+        <!-- Render the article HTML -->
+        <div class="article-body">
+            {{ content | safe }}
         </div>
-    </div>
 </body>
 
 </html>

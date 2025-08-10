@@ -102,7 +102,9 @@
 
             {% if latest %}
             <div id="headline" class="headline">{{ latest.title }}</div>
-            <div id="summary" class="summary">{{ (latest.content | striptags)[:220] }}...</div>
+            <div id="summary" class="summary">
+                {{ (latest.html_content | striptags)[:220] }}...
+            </div>
             <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}"
                 class="btn btn-outline-primary btn-sm mt-2">Read the full guide</a>
             {% else %}
