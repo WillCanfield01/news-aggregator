@@ -414,33 +414,34 @@ def generate_article_for_today():
             faq_section = (heading, content)
             continue
 
-    # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
+        # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
 
-    # Collect inline Q/A blocks like "Q1: ..." that might appear in the body
-    inline_qa_pat = r'(?mis)(^|\n)(Q\d+:\s.*?)(?=(?:\nQ\d+:|\n##\s|\Z))'
-    inline_qas = [m[1].strip() for m in re.findall(inline_qa_pat, article_with_human)]
+        # Matches lines like "Q1: ...", "  Q2: ...", or "**Q3: ..." (case-insensitive),
+        # and captures each whole Q/A block until the next Q#, a new heading, or EOF.
+        inline_qa_pat = r'(?mis)(^|\n)\s*(\**Q\d+:\s.*?)(?=(?:\n\s*\**Q\d+:|\n##\s|\Z))'
 
-    # Remove those inline Q/A from the body (we’ll reuse them only if no FAQ section exists)
-    article_with_human = re.sub(inline_qa_pat, r'\1', article_with_human).strip()
+        # Collect cleaned Q/A blocks
+        inline_qas = [m.group(2).lstrip('*').strip() for m in re.finditer(inline_qa_pat, article_with_human)]
 
-    # If the model DIDN’T provide an explicit FAQ section in the outline,
-    # but we saw inline Q/A blocks, we’ll synthesize a clean FAQ from them.
-    synth_faq = ""
-    if not faq_section and inline_qas:
-        synth_faq = "\n\n".join(inline_qas)
-    already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
+        # Remove them from the body
+        article_with_human = re.sub(inline_qa_pat, r'\1', article_with_human).strip()
 
-    if not already_has_faq:
-        if faq_section:
-            article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
-        elif synth_faq:
-            article_with_human += "\n## FAQ\n\n" + synth_faq.strip() + "\n\n"
-        else:
-            # NEW: final safety net
-            gen_faq = generate_faq_from_body(article_with_human)
-            if gen_faq:
-                article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
+        # If we didn’t get an explicit FAQ section, synthesize one from the inline Q/As
+        synth_faq = ""
+        if not faq_section and inline_qas:
+            synth_faq = "\n\n".join(inline_qas)
 
+        already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
+
+        if not already_has_faq:
+            if faq_section:
+                article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
+            elif synth_faq:
+                article_with_human += "\n## FAQ\n\n" + synth_faq.strip() + "\n\n"
+            else:
+                gen_faq = generate_faq_from_body(article_with_human)
+                if gen_faq:
+                    article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
 
     # Final cleanups
     article_with_human = remove_gpt_dashes(article_with_human)
