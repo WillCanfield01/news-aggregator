@@ -11,7 +11,7 @@
     <meta property="og:type" content="article">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link rel="canonical" href="https://therealroundup.com/" />
-    <link rel="canonical" href="https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}">
+    <link rel="canonical" href="https://therealroundup.com/all_articles/articles/{{ request.view_args['filename'] }}">
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -20,7 +20,7 @@
       "description": "{{ meta_description }}",
       "datePublished": "{{ date.isoformat() }}",
       "author": {"@type": "Person", "name": "The Roundup"},
-      "mainEntityOfPage": {"@type": "WebPage","@id": "https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
+      "mainEntityOfPage": {"@type": "WebPage","@id": "https://therealroundup.com/all_articles/articles/{{ request.view_args['filename'] }}"}
     }
     </script>
     <style>
@@ -131,7 +131,7 @@
 
 <body>
     <div class="container">
-        <a class="back-link" href="{{ url_for('all-articles.published_articles') }}">← Back to All Articles</a>
+        <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Articles</a>
         <h1 class="article-title">{{ title }}</h1>
         {% if date %}
         <div class="article-meta">{{ date.strftime('%B %d, %Y') }}</div>
