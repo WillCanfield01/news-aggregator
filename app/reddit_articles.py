@@ -22,6 +22,8 @@ REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 ADD_PERSONAL_NOTES = False  # set True if you want exactly one clean note
+RECENT_WINDOW = 10  # last 10 days
+VARIETY_PENALTY = 40
 
 openai.api_key = OPENAI_API_KEY
 
@@ -75,6 +77,17 @@ ACTION_KEYWORDS = [
     "write", "build", "develop", "publish", "train", "launch"
 ]
 
+IT_BANNED_TOPICS = [
+    "identity", "workflow", "authentication", "sso", "iam",
+    "infrastructure", "firewall", "endpoint", "it management",
+    "ticketing", "active directory"
+]
+
+MONETIZATION_KEYWORDS = [
+    "etsy", "fiverr", "upwork", "youtube", "tiktok", "shopify", 
+    "airbnb", "gumroad", "amazon", "kdp", "patreon", "substack"
+]
+
 # ------------------------------
 # Helpers
 # ------------------------------
@@ -86,6 +99,13 @@ def is_safe(text: str) -> bool:
         if w in t:
             return False
     return True
+
+def detect_monetization_method(text):
+    t = text.lower()
+    for kw in MONETIZATION_KEYWORDS:
+        if kw in t:
+            return kw
+    return None
 
 def is_duplicate(title):
     existing = [a.title for a in CommunityArticle.query.all()]
@@ -108,7 +128,18 @@ def contains_tool_and_action(text):
     t = text.lower()
     has_tool = any(tool in t for tool in AI_TOOL_KEYWORDS)
     has_action = any(action in t for action in ACTION_KEYWORDS)
-    return has_tool and has_action
+    has_it_banned = any(bad in t for bad in IT_BANNED_TOPICS)
+    return has_tool and has_action and not has_it_banned
+
+def is_monetizable_side_gig(title):
+    t = title.lower()
+    # must contain a tool + action
+    if not contains_tool_and_action(t):
+        return False
+    # must NOT be enterprise IT
+    if any(bad in t for bad in IT_BANNED_TOPICS):
+        return False
+    return True
 
 def remove_gpt_dashes(text: str) -> str:
     text = re.sub(r'(\s)—(\s)', r'\1,\2', text)
@@ -183,13 +214,29 @@ def fetch_candidates_from_reddit():
             continue
     return results
 
+def monetization_variety_penalty(candidate_method):
+    recent_methods = [
+        detect_monetization_method(a.title)
+        for a in CommunityArticle.query.order_by(CommunityArticle.date.desc()).limit(RECENT_WINDOW)
+    ]
+    recent_methods = [m for m in recent_methods if m]
+    return VARIETY_PENALTY if candidate_method in recent_methods else 0
+
+def get_reddit_client():
+    return praw.Reddit(
+        client_id=REDDIT_CLIENT_ID,
+        client_secret=REDDIT_CLIENT_SECRET,
+        user_agent="RealRoundup/AI-Money-Daily 1.0"
+    )
+
 def score_candidate(c):
-    t = (c["title"] + " " + c["selftext"]).lower()
+    t = (c["title"] + " " + c.get("selftext", "")).lower()
     ai_hits = sum(1 for k in AI_KEYWORDS if k in t)
-    # Prefer AI-related + higher score + shorter titles
     base = c["score"] + ai_hits * 50
     length_penalty = max(0, len(c["title"]) - 120) // 10
-    return base - length_penalty
+    method = detect_monetization_method(t)
+    score = base - length_penalty - monetization_variety_penalty(method)
+    return score
 
 def get_best_ai_money_post():
     reddit = praw.Reddit(
@@ -243,18 +290,28 @@ def rewrite_title_for_ai_money(original_title: str, seed_text: str = "") -> str:
 
     # Ask the model for multiple concrete options so we can pick the best
     prompt = f"""
-You will propose 8 SPECIFIC article titles. Rules:
-- Include at least one concrete element: tool/stack (e.g., ChatGPT, Midjourney, Zapier), niche (e.g., realtors, Etsy mugs), or workflow (e.g., voiceover → reels).
-- State a clear outcome/benefit or deliverable (e.g., "book 5 demos", "sell 20 listings", "ship an MVP").
-- Optionally include a time frame or scope (e.g., "in 7 days", "with 3 automations").
+You are creating article titles for a daily blog helping everyday people find
+new AI-powered side gigs they can start this week.
+
+Rules:
+- Each title must clearly describe a monetizable AI use case for beginners.
+- Must include BOTH:
+    1. A specific AI tool, model, or platform by name
+       (e.g., ChatGPT, Midjourney, DALL·E, ElevenLabs, Perplexity, Stable Diffusion)
+    2. An income-related activity or deliverable
+       (e.g., selling Etsy printables, writing product descriptions, creating YouTube shorts)
+- Keep the focus on small-scale, realistic side hustles — NOT enterprise IT, cybersecurity, workflows, or admin tasks.
+- Avoid jargon, corporate language, or references to IT departments.
 - Avoid generic phrases like: {", ".join(banned_phrases)}.
-- Do NOT mention Reddit or social media.
 - Keep ≤ 80 characters; prefer 48–78.
+- Do NOT mention Reddit, enterprise identity, IT workflow, or any topic unrelated to earning money.
+
 Input idea: {original_title}
 Seed/context (optional): {seed_text[:500]}
 
 Return JSON: {{"titles": ["t1","t2","t3","t4","t5","t6","t7","t8"]}}
 """
+
     try:
         resp = openai.chat.completions.create(
             model="gpt-4.1-mini",
@@ -547,6 +604,10 @@ def generate_article_for_today():
             gen_faq = generate_faq_from_body(article_with_human)
             if gen_faq:
                 article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
+
+    if not is_monetizable_side_gig(headline):
+        print(f"⚠️ Rejected headline '{headline}' — not a monetizable everyday side gig.")
+        return None
 
     # Layout normalization (spacing + stray 'FAQ' lines)
     article_with_human = re.sub(r'(?im)^\s*faq\s*$', '', article_with_human).strip()
