@@ -619,7 +619,7 @@ def generate_article_for_today():
     reel_script = generate_reel_script(article_with_human, headline)
 
     # 5) Save
-    html_content = markdown(article_with_human)
+    html_content = markdown(article_with_human, extras=["tables"])
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
     if CommunityArticle.query.filter_by(filename=filename).first():
         print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
@@ -665,7 +665,9 @@ def save_article_db(title, content_md, filename, html_content=None, meta_title=N
 
 @bp.route("/")
 def show_articles():
-    articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
+    articles = (CommunityArticle.query
+            .order_by(CommunityArticle.date.desc(), CommunityArticle.id.desc())
+            .all())
     return render_template("reddit_articles.html", articles=articles)
 
 @bp.route("/generate", methods=["POST"])
@@ -676,7 +678,9 @@ def generate():
 @bp.route("/articles")
 def published_articles():
     import re as _re
-    articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
+    articles = (CommunityArticle.query
+            .order_by(CommunityArticle.date.desc(), CommunityArticle.id.desc())
+            .all())
     for a in articles:
         source = (a.content or a.html_content or "")
         # Remove images
@@ -710,7 +714,7 @@ def read_article(filename):
         return "\n".join(output)
 
     cleaned_md = remove_first_heading(article.content or "")
-    html_content = markdown(cleaned_md)
+    html_content = markdown(cleaned_md, extras=["tables"])
 
     meta_title = article.meta_title or article.title
     if article.meta_description:
