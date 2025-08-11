@@ -421,7 +421,6 @@ def generate_reel_script(article_text: str, topic: str):
         "- 3 numbered beats showing how to make money with this AI idea.\n"
         "- Simple words; no jargon.\n"
         "- Strong CTA: 'Read the full guide at TheRealRoundup.com'.\n"
-        "- On-screen text cues in [BRACKETS].\n"
         f"Topic: {topic}\n\nSource:\n{article_text[:1200]}\n\nScript:"
     )
     resp = openai.chat.completions.create(
