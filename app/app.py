@@ -52,26 +52,54 @@ def create_app():
 
     @app.route("/sitemap.xml")
     def sitemap():
+        from flask import make_response
         try:
-            articles = CommunityArticle.query.order_by(CommunityArticle.date.desc()).all()
-            urlset = []
-            urlset.append(f"""<url>
-<loc>{url_for('landing', _external=True)}</loc>
-<changefreq>daily</changefreq><priority>1.0</priority>
-</url>""")
+            articles = (CommunityArticle.query
+                        .order_by(CommunityArticle.date.desc(), CommunityArticle.id.desc())
+                        .all())
+
+            latest_date = (articles[0].date if articles and articles[0].date else None)
+
+            urls = []
+
+            # Homepage
+            urls.append(f"""<url>
+    <loc>{url_for('landing', _external=True, _scheme='https')}</loc>
+    {f"<lastmod>{latest_date.strftime('%Y-%m-%d')}</lastmod>" if latest_date else ""}
+    <changefreq>daily</changefreq><priority>1.0</priority>
+    </url>""")
+
+            # “All Published Articles” index page
+            urls.append(f"""<url>
+    <loc>{url_for('all_articles.published_articles', _external=True, _scheme='https')}</loc>
+    {f"<lastmod>{latest_date.strftime('%Y-%m-%d')}</lastmod>" if latest_date else ""}
+    <changefreq>daily</changefreq><priority>0.9</priority>
+    </url>""")
+
+            # Individual articles
             for a in articles:
-                loc = url_for("all_articles.read_article", filename=a.filename, _external=True)
+                loc = url_for("all_articles.read_article",
+                            filename=a.filename, _external=True, _scheme='https')
                 lastmod = a.date.strftime("%Y-%m-%d") if a.date else ""
-                urlset.append(f"""<url>
-<loc>{loc}</loc>
-<lastmod>{lastmod}</lastmod>
-<changefreq>weekly</changefreq><priority>0.8</priority>
-</url>""")
-            sitemap_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{''.join(urlset)}
-</urlset>"""
-            return Response(sitemap_xml, content_type="application/xml; charset=utf-8")
+                urls.append(f"""<url>
+    <loc>{loc}</loc>
+    {f"<lastmod>{lastmod}</lastmod>" if lastmod else ""}
+    <changefreq>weekly</changefreq><priority>0.8</priority>
+    </url>""")
+
+            xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    {''.join(urls)}
+    </urlset>"""
+
+            resp = make_response(xml, 200)
+            resp.headers["Content-Type"] = "application/xml; charset=utf-8"
+            # keep it fresh so GSC doesn’t hold onto an old 2-URL version
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+            return resp
+
         except Exception as e:
             current_app.logger.error(f"Sitemap error: {e}")
             return Response("Internal Server Error", status=500)
