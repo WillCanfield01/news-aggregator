@@ -88,6 +88,27 @@ MONETIZATION_KEYWORDS = [
     "airbnb", "gumroad", "amazon", "kdp", "patreon", "substack"
 ]
 
+# Who we write for (helps generate distinct angles)
+AUDIENCE_KEYWORDS = {
+    "teachers": ["teacher", "classroom", "lesson", "worksheet", "students", "school"],
+    "students": ["student", "college", "campus", "dorm", "exam"],
+    "parents": ["parent", "stay-at-home", "mom", "dad", "family", "kids"],
+    "retirees": ["retiree", "retirement", "senior"],
+    "freelancers": ["freelancer", "client", "gig", "portfolio"],
+    "local businesses": ["local business", "restaurant", "salon", "gym", "realtor", "plumber"],
+    "creators": ["youtuber", "tiktok", "podcast", "channel", "creator", "blog"],
+    "etsy sellers": ["etsy", "printables", "stickers", "svg", "planner"],
+}
+
+# Monetization “models” (broader than marketplace keywords)
+MONETIZATION_MODELS = {
+    "content": ["youtube", "tiktok", "shorts", "channel", "podcast", "blog", "newsletter", "substack", "patreon"],
+    "services": ["fiverr", "upwork", "client", "gig", "freelance", "agency"],
+    "products": ["etsy", "gumroad", "shopify", "kdp", "amazon", "print on demand", "print-on-demand"],
+    "affiliate": ["affiliate", "review site", "roundup", "comparison", "seo"],
+    "data/research": ["dataset", "research", "summary", "lead list", "prospect list"],
+}
+
 # ------------------------------
 # Helpers
 # ------------------------------
@@ -99,6 +120,87 @@ def is_safe(text: str) -> bool:
         if w in t:
             return False
     return True
+
+def detect_tool(text: str):
+    low = text.lower()
+    for k in AI_TOOL_KEYWORDS:
+        if k in low:
+            return k
+    return None
+
+def detect_action_kw(text: str):
+    low = text.lower()
+    for k in ACTION_KEYWORDS:
+        if k in low:
+            return k
+    return None
+
+def detect_platform(text: str):
+    # finer than detect_monetization_method
+    low = text.lower()
+    for kw in MONETIZATION_KEYWORDS:
+        if kw in low:
+            return kw
+    return None
+
+def detect_model_bucket(text: str):
+    low = text.lower()
+    for model, words in MONETIZATION_MODELS.items():
+        if any(w in low for w in words):
+            return model
+    return None
+
+def detect_audience(text: str):
+    low = text.lower()
+    for audience, words in AUDIENCE_KEYWORDS.items():
+        if any(w in low for w in words):
+            return audience
+    # light heuristics
+    if "teacher" in low or "worksheet" in low: return "teachers"
+    if "realtor" in low: return "local businesses"
+    return None
+
+def build_signature(tool, action, platform, audience):
+    # compact signature for variety tracking
+    return "|".join([tool or "-", action or "-", platform or "-", audience or "-"])
+
+def recent_signatures(window=RECENT_WINDOW):
+    recents = (CommunityArticle.query
+               .order_by(CommunityArticle.date.desc(), CommunityArticle.id.desc())
+               .limit(window)
+               .all())
+    sigs = []
+    for a in recents:
+        t = (a.title or "")
+        tool = detect_tool(t)
+        action = detect_action_kw(t)
+        platform = detect_platform(t)
+        audience = detect_audience(t)
+        sigs.append(build_signature(tool, action, platform, audience))
+    return set(sigs)
+
+def uniqueness_penalty_for_title(title: str, window=RECENT_WINDOW):
+    tool = detect_tool(title)
+    action = detect_action_kw(title)
+    platform = detect_platform(title)
+    audience = detect_audience(title)
+    sig = build_signature(tool, action, platform, audience)
+
+    recents = recent_signatures(window)
+    penalty = 0
+    # Heavy hit if the exact combo appeared recently
+    if sig in recents:
+        penalty += 60
+    # Lighter hits if individual pieces are overused
+    if any(s.split("|")[0] == (tool or "-") for s in recents):      # tool seen
+        penalty += 15
+    if any(s.split("|")[1] == (action or "-") for s in recents):    # action seen
+        penalty += 10
+    if any(s.split("|")[2] == (platform or "-") for s in recents):  # platform seen
+        penalty += 25
+    if audience and any(s.split("|")[3] == audience for s in recents):
+        penalty += 8
+    return penalty
 
 def detect_monetization_method(text):
     t = text.lower()
@@ -267,7 +369,7 @@ def get_best_ai_money_post():
             "id": post.id
         })
 
-    candidates.sort(key=lambda c: c["score"], reverse=True)
+    candidates.sort(key=score_candidate, reverse=True)
     return candidates[0] if candidates else None
 
 # ------------------------------
@@ -275,50 +377,45 @@ def get_best_ai_money_post():
 # ------------------------------
 def rewrite_title_for_ai_money(original_title: str, seed_text: str = "") -> str:
     """
-    Generate specific, helpful, non-generic titles and pick one that:
-    - names an exact tool/tech or niche
-    - states the outcome/benefit
-    - calls out audience/use case
-    - avoids generic phrases and past-title near-duplicates
-    - stays under 80 chars (soft 72–78 sweet spot)
+    Generate specific, non-generic titles and pick one that maximizes
+    variety across tool/platform/action/audience.
     """
     banned_phrases = [
         "beginner’s guide", "beginners guide", "how to use ai", "start earning",
         "from scratch", "ways to make money", "how to make money", "side hustle",
-        "friendly guide", "build confidence"
+        "friendly guide", "build confidence",
     ]
 
-    # Ask the model for multiple concrete options so we can pick the best
     prompt = f"""
-You are creating article titles for a daily blog helping everyday people find
-new AI-powered side gigs they can start this week.
+You create article titles for a daily blog that helps everyday people start small,
+realistic AI side gigs THIS WEEK.
 
-Rules:
-- Each title must clearly describe a monetizable AI use case for beginners.
-- Must include BOTH:
-    1. A specific AI tool, model, or platform by name
-       (e.g., ChatGPT, Midjourney, DALL·E, ElevenLabs, Perplexity, Stable Diffusion)
-    2. An income-related activity or deliverable
-       (e.g., selling Etsy printables, writing product descriptions, creating YouTube shorts)
-- Keep the focus on small-scale, realistic side hustles — NOT enterprise IT, cybersecurity, workflows, or admin tasks.
-- Avoid jargon, corporate language, or references to IT departments.
-- Avoid generic phrases like: {", ".join(banned_phrases)}.
-- Keep ≤ 80 characters; prefer 48–78.
-- Do NOT mention Reddit, enterprise identity, IT workflow, or any topic unrelated to earning money.
+Rules for EVERY title:
+- Name a specific AI tool/model/platform (e.g., ChatGPT, Midjourney, ElevenLabs).
+- Name a money activity/deliverable (e.g., Etsy printables, YouTube shorts, Fiverr gigs).
+- Include a target audience or niche when possible (e.g., teachers, local businesses, new Etsy sellers).
+- Keep it concrete (≤ 80 chars; prefer 48–78). Avoid generic phrases: {", ".join(banned_phrases)}.
+- No enterprise IT/security/identity talk. No Reddit mentions.
 
 Input idea: {original_title}
-Seed/context (optional): {seed_text[:500]}
+Seed/context: {seed_text[:500]}
 
-Return JSON: {{"titles": ["t1","t2","t3","t4","t5","t6","t7","t8"]}}
+Return JSON like:
+{{"titles": [
+  "Use Midjourney to Sell Nursery Wall Art on Etsy (for New Parents)",
+  "ElevenLabs Voiceovers for Local Gyms’ Promo Reels",
+  "ChatGPT Product Descriptions for Handmade Soap Sellers on Etsy",
+  "Perplexity Research Summaries for Busy Realtors’ Listing Sheets"
+]}}
 """
 
     try:
         resp = openai.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[{"role":"user","content":prompt}],
-            max_tokens=220,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=260,
             temperature=0.7,
-            response_format={"type":"json_object"}
+            response_format={"type": "json_object"},
         )
         data = json.loads(resp.choices[0].message.content or "{}")
         candidates = [t.strip() for t in data.get("titles", []) if t.strip()]
@@ -326,10 +423,8 @@ Return JSON: {{"titles": ["t1","t2","t3","t4","t5","t6","t7","t8"]}}
         candidates = []
 
     if not candidates:
-        # very safe fallback
         candidates = [original_title[:78]]
 
-    # Pull previous titles to avoid near-dupes
     past = [a.title for a in CommunityArticle.query.all()]
 
     def looks_generic(t: str) -> bool:
@@ -339,57 +434,55 @@ Return JSON: {{"titles": ["t1","t2","t3","t4","t5","t6","t7","t8"]}}
     def has_specific_signal(t: str) -> int:
         low = t.lower()
         signals = 0
-        signals += any(k in low for k in ["chatgpt","gpt","midjourney","stable diffusion","dall-e","elevenlabs","zapier","make.com","notion ai","perplexity","elicit","research rabbit"])
-        signals += any(k in low for k in ["etsy","airbnb","realtor","local business","podcast","youtube","tiktok","shopify","webflow","wordpress"])
-        signals += any(k in low for k in ["workflow","pipeline","automation","prompt","template","mvp","landing page","agent"])
+        signals += any(k in low for k in AI_TOOL_KEYWORDS)
+        signals += any(k in low for k in MONETIZATION_KEYWORDS)
+        signals += any(k in low for k in ACTION_KEYWORDS)
         return int(signals)
 
-    def score(t: str) -> float:
-        # higher is better
+    def base_score(t: str) -> float:
         length = len(t)
         length_pen = 0 if 48 <= length <= 78 else abs(63 - min(length, 80)) * 0.6
         spec = has_specific_signal(t)
-        # similarity penalty vs past titles
         dup_pen = max((fuzz.ratio(t.lower(), p.lower()) for p in past), default=0)
-        return spec*10 - length_pen - (dup_pen > 85)*20 - (looks_generic(t))*15
+        return spec * 10 - length_pen - (dup_pen > 85) * 20 - looks_generic(t) * 15
 
-    # Filter & pick best
-    filtered = [t for t in candidates if not looks_generic(t)]
-    if not filtered:
-        filtered = candidates
+    # score with uniqueness penalty
+    scored = []
+    for t in (c for c in candidates if not looks_generic(c)):
+        scored.append((base_score(t) - uniqueness_penalty_for_title(t), t))
+    if not scored:
+        scored = [(base_score(candidates[0]) - uniqueness_penalty_for_title(candidates[0]), candidates[0])]
 
-    best = max(filtered, key=score)
-    # Final trim/sanitize
-    best = best.strip().strip('"').strip("'")
+    best = max(scored, key=lambda x: x[0])[1].strip().strip('"').strip("'")
     return best[:80]
 
 def generate_outline_for_ai_money(topic: str, seed_text: str):
-    """
-    Force a consistent, action-first outline. No Reddit references.
-    """
+    audience = detect_audience(topic + " " + (seed_text or "")) or "everyday beginners"
+    platform = detect_platform(topic + " " + (seed_text or "")) or "general marketplace"
+    action = detect_action_kw(topic + " " + (seed_text or "")) or "create"
+
     prompt = (
-    f"You are writing a daily guide called 'One New Way to Make Money With AI: {topic}'. "
-    "Rules:\n"
-    "- Focus on ONE specific AI use case, not general freelancing.\n"
-    "- Include exact tools (by name), where to get them (with placeholder URLs), and free/paid options.\n"
-    "- Give numbered setup steps that a total beginner could follow today, including menu clicks, settings, and file formats.\n"
-    "- Include at least ONE real-world example, case study, or mini scenario showing how someone actually earned money this way.\n"
-    "- Include realistic earnings figures from known marketplaces.\n"
-    "- Include at least ONE unique tip or trick not found in generic blog posts.\n"
-    "- Do not use phrases like 'build confidence', 'start small', or 'be patient' unless directly tied to the method.\n"
-    "- Avoid generic side hustle language. Make it actionable and specific.\n"
-    "- No social media sourcing or Reddit references.\n"
-    "- Sections:\n"
-    "  1) Hook: Why this specific AI use case works now\n"
-    "  2) Tools you need (name + placeholder link + cost)\n"
-    "  3) Exact setup steps (numbered, 7–10 steps)\n"
-    "  4) Example earning scenario (numbers)\n"
-    "  5) Pitfalls & solutions\n"
-    "  6) Scaling & automation tips\n"
-    "  7) Quick checklist\n"
-    "  8) FAQ (3 items)\n"
-    "Return in Markdown headings and bullet points."
-)
+        f"You are writing a daily guide called 'One New Way to Make Money With AI: {topic}'.\n"
+        f"Primary audience: {audience}.\n"
+        f"Platform/context: {platform}. Core action: {action}.\n"
+        "Rules:\n"
+        "- Focus on ONE specific AI use case, not general freelancing.\n"
+        "- Include exact tools (by name), where to get them (placeholder URLs ok), and free/paid options.\n"
+        "- Give numbered setup steps a total beginner could follow today (menu clicks, settings, file formats).\n"
+        "- Include at least ONE real-world example with realistic earnings from known marketplaces.\n"
+        "- Include at least ONE unique tip or trick not found in generic blog posts.\n"
+        "- Avoid generic side-hustle language. No Reddit references.\n"
+        "- Sections:\n"
+        "  1) Hook: Why this specific AI use case works now\n"
+        "  2) Tools you need (name + placeholder link + cost) — output as a clean 4-column Markdown table\n"
+        "  3) Exact setup steps (numbered, 7–10 steps)\n"
+        "  4) Example earning scenario (numbers)\n"
+        "  5) Pitfalls & solutions\n"
+        "  6) Scaling & automation tips\n"
+        "  7) Quick checklist\n"
+        "  8) FAQ (3 items)\n"
+        "Return in Markdown headings and bullet points."
+    )
     resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
@@ -400,10 +493,13 @@ def generate_outline_for_ai_money(topic: str, seed_text: str):
 def generate_article_body(topic: str, outline_md: str, seed_text: str):
     prompt = (
         "Write a 700–900 word, beginner-friendly guide based on the outline below.\n"
-        "Tone: clear, calm, encouraging. No fluff, no corporate-speak. No mention of Reddit.\n"
-        "Include: Hook, Tools, Steps, Pricing/Earnings, Pitfalls, Scale, Checklist, FAQ (3 Q&As).\n"
+        "Tone: clear, calm, encouraging. No fluff or corporate-speak. No Reddit.\n"
+        "Requirements:\n"
+        "- The 'Tools you need' section MUST be a 4-column Markdown table exactly in this order:\n"
+        "  | Tool | Purpose | Where to Get It | Cost |\n"
+        "- Avoid stray pipes or extra columns.\n"
         f"Topic: {topic}\n\n"
-        f"Seed notes (optional context from source):\n{seed_text[:800]}\n\n"
+        f"Seed notes (optional):\n{seed_text[:800]}\n\n"
         f"Outline:\n{outline_md}\n\n"
         "Article:"
     )
