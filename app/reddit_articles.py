@@ -109,6 +109,51 @@ MONETIZATION_MODELS = {
     "data/research": ["dataset", "research", "summary", "lead list", "prospect list"],
 }
 
+BUZZWORD_PENALTIES = [
+    "easy money", "quick cash", "get rich", "make money fast",
+    "passive income overnight", "no work", "in minutes", "side hustle hack"
+]
+NICHE_HINTS = [
+    "etsy", "youtube", "shorts", "tiktok", "fiverr", "upwork",
+    "plumber", "realtor", "teacher", "wedding", "podcast", "printables",
+    "voiceover", "local business", "newsletter"
+]
+TOOL_HINTS = [
+    "chatgpt", "gpt", "midjourney", "elevenlabs", "stable diffusion",
+    "perplexity", "notion ai", "zapier", "make.com", "canva"
+]
+
+def _score_reel_variant(text: str) -> float:
+    """Heuristic score: prefer concrete, honest, curiosity-driving openings."""
+    t = text.lower()
+
+    # 1) Hook length (first line should be ≤ 8 words)
+    first_line = text.splitlines()[0].strip()
+    hook_words = len(first_line.split())
+    hook_score = 8 if 1 <= hook_words <= 8 else max(0, 12 - hook_words)
+
+    # 2) Numbers & specifics (+$ amounts, %, steps, time)
+    numerics = len(re.findall(r'(\$?\d+[%]?)', t))
+    time_refs = len(re.findall(r'\b(\d+\s*(min|mins|minute|minutes|hour|hours|days))\b', t))
+    steps_refs = len(re.findall(r'\b(step|steps|beat|beats)\b', t))
+    specifics_score = numerics * 3 + time_refs * 2 + steps_refs
+
+    # 3) Mentions of niche/tool terms
+    niche_score = sum(1 for k in NICHE_HINTS if k in t)
+    tool_score = sum(1 for k in TOOL_HINTS if k in t)
+
+    # 4) Honesty bonus: “not instant”, “no magic”, “but here’s how”
+    honesty_bonus = 2 if re.search(r"\b(not\s+instant|not\s+overnight|no\s+magic)\b", t) else 0
+
+    # 5) Penalties for hype/buzzwords
+    hype_pen = sum(2 for b in BUZZWORD_PENALTIES if b in t)
+
+    # 6) Total length cap (keep it tight; 30–40s ~= 85–110 words spoken)
+    words = len(re.findall(r'\w+', t))
+    length_pen = 0 if 70 <= words <= 120 else abs(words - 95) * 0.5
+
+    return hook_score + specifics_score + niche_score + tool_score + honesty_bonus - hype_pen - length_pen
+
 # ------------------------------
 # Helpers
 # ------------------------------
@@ -510,21 +555,62 @@ def generate_article_body(topic: str, outline_md: str, seed_text: str):
     )
     return resp.choices[0].message.content
 
-def generate_reel_script(article_text: str, topic: str):
-    prompt = (
-        "Write a 30–40s vertical video script with:\n"
-        "- Cold hook in first 2s.\n"
-        "- 3 numbered beats showing how to make money with this AI idea.\n"
-        "- Simple words; no jargon.\n"
-        "- Strong CTA: 'Read the full guide at TheRealRoundup.com'.\n"
-        f"Topic: {topic}\n\nSource:\n{article_text[:1200]}\n\nScript:"
-    )
-    resp = openai.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=260, temperature=0.7
-    )
-    return resp.choices[0].message.content.strip()
+def generate_reel_script_veed(article_text: str, topic: str):
+    """
+    Generates a Veed.io-friendly reel script:
+    - Short caption-friendly lines
+    - [BRACKETED] visual cues for stock/B-roll
+    - Honest hook (no hype)
+    - Tool/Niche-specific beats
+    """
+    prompt = f"""
+Create 5 short vertical video script VARIANTS for Veed.io editing.
+Each variant must:
+- Be 30–40 seconds spoken length (~90–110 words)
+- First line: [HOOK] max 8 words, curiosity-based, no hype
+- Break into short lines (≤ 8 words) so captions sync naturally in Veed
+- Include [BRACKETED] visual cues for B-roll at least 3 times
+- Include concrete numbers (prices, minutes, %, steps) and name actual tools or niches
+- Be honest: acknowledge it's not instant, but doable
+- End with [CTA] “Read the full guide at TheRealRoundup.com”
+
+Topic: {topic}
+
+Reference info from this article:
+{article_text[:1000]}
+
+Return JSON with an array 'variants': ["...","...","...","...","..."]
+"""
+
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.6,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        variants = [v.strip() for v in data.get("variants", []) if v.strip()]
+    except Exception:
+        variants = []
+
+    if not variants:
+        return (
+            "[HOOK] This won’t make you rich overnight\n"
+            "But it can cover your grocery bill\n"
+            "[B-ROLL: Typing on laptop in coffee shop]\n"
+            "Step 1: Use ChatGPT to draft three Etsy titles\n"
+            "Step 2: Add AI art from Midjourney in Canva\n"
+            "[B-ROLL: Canva screen with printable template]\n"
+            "Step 3: Upload to Etsy for $5–$10 each\n"
+            "[B-ROLL: Etsy shop page with digital listings]\n"
+            "[CTA] Read the full guide at TheRealRoundup.com"
+        )
+
+    # Optional: use your _score_reel_variant() function to pick the best
+    best = max(variants, key=_score_reel_variant)
+    return best
 
 # ------------------------------
 # Image suggestions (unchanged pattern)
