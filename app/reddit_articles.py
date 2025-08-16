@@ -100,6 +100,14 @@ AUDIENCE_KEYWORDS = {
     "etsy sellers": ["etsy", "printables", "stickers", "svg", "planner"],
 }
 
+DELIVERABLE_KEYWORDS = [
+    "printables","journal","journals","planner","planners","worksheet","worksheets",
+    "wall art","poster","posters","stickers","svg","templates","template",
+    "thumbnails","voiceover","voiceovers","e-cards","ecards","e-card","cover","covers",
+    "intro","outro","scripts","script","prompts","prompt","logo","logos","mockups",
+    "pack","bundle","bundles"
+]
+
 # Monetization “models” (broader than marketplace keywords)
 MONETIZATION_MODELS = {
     "content": ["youtube", "tiktok", "shorts", "channel", "podcast", "blog", "newsletter", "substack", "patreon"],
@@ -275,18 +283,14 @@ def contains_tool_and_action(text):
     t = text.lower()
     has_tool = any(tool in t for tool in AI_TOOL_KEYWORDS)
     has_action = any(action in t for action in ACTION_KEYWORDS)
+    has_deliverable = any(d in t for d in DELIVERABLE_KEYWORDS)
     has_it_banned = any(bad in t for bad in IT_BANNED_TOPICS)
-    return has_tool and has_action and not has_it_banned
+    # accept tool + (action OR deliverable)
+    return has_tool and (has_action or has_deliverable) and not has_it_banned
 
 def is_monetizable_side_gig(title):
     t = title.lower()
-    # must contain a tool + action
-    if not contains_tool_and_action(t):
-        return False
-    # must NOT be enterprise IT
-    if any(bad in t for bad in IT_BANNED_TOPICS):
-        return False
-    return True
+    return contains_tool_and_action(t) and not any(bad in t for bad in IT_BANNED_TOPICS)
 
 def remove_gpt_dashes(text: str) -> str:
     text = re.sub(r'(\s)—(\s)', r'\1,\2', text)
@@ -706,19 +710,43 @@ def generate_faq_from_body(body_text: str) -> str:
 # Main daily generator
 # ------------------------------
 def generate_article_for_today():
-    post = get_best_ai_money_post()
-    if not post:
-        # fallback to your older ranking method or bail gracefully
-        candidates = fetch_candidates_from_reddit()
-        if not candidates:
-            raise Exception("No suitable Reddit posts found this day.")
-        post = sorted(candidates, key=score_candidate, reverse=True)[0]
+    # 1) Build a candidate list (primary + fallbacks)
+    primary = get_best_ai_money_post()
+    fallbacks = fetch_candidates_from_reddit()
+    if fallbacks:
+        fallbacks = sorted(fallbacks, key=score_candidate, reverse=True)
+    candidates = []
+    if primary: 
+        candidates.append(primary)
+    candidates.extend(fallbacks)
 
-    cleaned_topic = clean_title(post["title"])
-    headline = rewrite_title_for_ai_money(cleaned_topic, post.get("selftext",""))
+    if not candidates:
+        raise Exception("No suitable Reddit posts found this day.")
 
-    outline = generate_outline_for_ai_money(headline, post.get("selftext", ""))
-    article_md = generate_article_body(headline, outline, post.get("selftext", ""))
+    # 2) Find the first candidate that yields a monetizable headline
+    chosen = None
+    headline = None
+    for c in candidates[:15]:  # don’t loop forever
+        cleaned_topic = clean_title(c["title"])
+        # try a few rewrites for the same idea
+        for _ in range(3):
+            h = rewrite_title_for_ai_money(cleaned_topic, c.get("selftext",""))
+            if is_monetizable_side_gig(h) and not is_duplicate(h):
+                chosen = c
+                headline = h
+                break
+        if headline:
+            break
+
+    if not headline:
+        print("⚠️ No viable headline after tries; relaxing constraint with the top candidate.")
+        # last-resort: just use cleaned topic trimmed
+        chosen = candidates[0]
+        headline = rewrite_title_for_ai_money(clean_title(chosen["title"]), chosen.get("selftext",""))
+
+    # 3) Proceed with outline/body generation
+    outline = generate_outline_for_ai_money(headline, chosen.get("selftext", ""))
+    article_md = generate_article_body(headline, outline, chosen.get("selftext", ""))
     article_md = re.sub(r'(?i)\*\*?\s*personal\s*note\s*:\s*.*?(?:\n|$)', '', article_md)
 
     # 3) Light post-processing
@@ -797,7 +825,7 @@ def generate_article_for_today():
     article_with_human = strip_unwanted_bold(article_with_human)
 
     # 4) Reel script
-    reel_script = generate_reel_script(article_with_human, headline)
+    reel_script = generate_reel_script_veed(article_with_human, headline)
 
     # 5) Save
     html_content = markdown(article_with_human, extras=["tables"])
