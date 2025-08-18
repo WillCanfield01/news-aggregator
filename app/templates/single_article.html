@@ -50,6 +50,9 @@
         font-size: 1.16rem;
         line-height: 1.7;
         color: #1a2331;
+        overflow-wrap: break-word;
+        word-wrap: break-word;
+        word-break: break-word;
     }
 
     .article-content h2,
@@ -68,6 +71,24 @@
         display: block;
         margin: 24px auto 8px;
         box-shadow: 0 2px 12px rgba(60, 60, 60, .11);
+    }
+
+    .article-content table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow-x: auto;
+        display: block;
+    }
+
+    .article-content table th,
+    .article-content table td {
+        border: 1px solid #ddd;
+        padding: 8px;
+    }
+
+    .article-content table th {
+        background-color: #f8f9fa;
+        font-weight: 600;
     }
 
     .cta {
@@ -95,16 +116,6 @@
         padding: 10px 14px;
         border-radius: 10px;
         background: #eef3ff;
-    }
-
-    .footer-note {
-        text-align: center;
-        padding: 20px;
-        font-size: 0.95rem;
-        color: #666;
-        background: #fafafa;
-        border-top: 1px solid #e0e0e0;
-        margin-top: 40px;
     }
 </style>
 {% endblock %}
@@ -144,9 +155,4 @@
     <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
     {% endif %}
 </section>
-
-<div class="footer-note">
-    © {{ current_year }} The Roundup. All rights reserved.<br>
-    This site may contain affiliate links. Content is for informational purposes only.
-</div>
 {% endblock %}

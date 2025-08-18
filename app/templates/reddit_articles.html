@@ -6,25 +6,33 @@
 <meta name="description" content="Browse all daily AI-generated community advice and trending discussion articles.">
 <link rel="canonical" href="https://therealroundup.com/">
 <style>
-    body {
-        font-family: 'Segoe UI', Arial, sans-serif;
-        background: #f8fafc;
-        color: #2b2b2b;
-        margin: 0;
-    }
-
     .container {
         max-width: 750px;
         margin: 2.5rem auto;
         background: #fff;
         border-radius: 1.2rem;
-        box-shadow: 0 3px 18px #0002;
+        box-shadow: 0 3px 18px rgba(0, 0, 0, 0.12);
         padding: 2rem;
+    }
+
+    .back-link {
+        display: inline-block;
+        margin-bottom: 1.5rem;
+        color: #1845a3;
+        font-weight: 600;
+        text-decoration: none;
+        font-size: 1rem;
+    }
+
+    .back-link:hover {
+        color: #2863fa;
+        text-decoration: underline;
     }
 
     h1 {
         font-size: 2.1rem;
         margin-bottom: 1.2rem;
+        color: #14345b;
     }
 
     form {
@@ -48,6 +56,7 @@
     ul {
         list-style: none;
         padding: 0;
+        margin: 0;
     }
 
     li {
@@ -57,9 +66,16 @@
     }
 
     .article-title {
-        font-weight: bold;
+        font-weight: 700;
         font-size: 1.25rem;
         margin-bottom: 0.6rem;
+        color: #1a2331;
+    }
+
+    .article-date {
+        color: #888;
+        font-size: 0.95rem;
+        margin-bottom: 0.5rem;
     }
 
     .snippet {
@@ -67,24 +83,22 @@
         border-radius: 0.6rem;
         padding: 1rem;
         white-space: pre-wrap;
+        word-wrap: break-word;
+        word-break: break-word;
         font-size: 1.02rem;
+        color: #2b2b2b;
     }
 
     .read-link {
         display: inline-block;
         margin-top: 0.6rem;
         color: #2973e8;
+        font-weight: 500;
         text-decoration: none;
     }
 
     .read-link:hover {
         text-decoration: underline;
-    }
-
-    .article-date {
-        color: #888;
-        font-size: 0.98rem;
-        margin-bottom: 0.4rem;
     }
 </style>
 {% endblock %}
