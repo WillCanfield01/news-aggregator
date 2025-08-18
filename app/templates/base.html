@@ -15,11 +15,75 @@
         gtag('config', 'G-D17GBM8019');
     </script>
 
+    <style>
+        /* Layout for footer always at bottom */
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            background: #f6f4ed;
+        }
+
+        .page-wrapper {
+            flex: 1;
+        }
+
+        footer.footer-note {
+            text-align: center;
+            padding: 20px;
+            font-size: 0.95rem;
+            color: #666;
+            background: #fafafa;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        /* Responsive article content */
+        .article-content {
+            font-size: 1.16rem;
+            line-height: 1.7;
+            color: #1a2331;
+            overflow-x: auto;
+        }
+
+        .article-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        .article-content th,
+        .article-content td {
+            padding: 8px;
+            border: 1px solid #ddd;
+        }
+
+        /* Mobile adjustments */
+        @media (max-width: 768px) {
+            .article-title {
+                font-size: 1.6rem;
+            }
+
+            .article-content {
+                font-size: 1rem;
+                line-height: 1.5;
+            }
+        }
+    </style>
+
     {% block head %}{% endblock %}
 </head>
 
 <body>
-    {% block content %}{% endblock %}
+    <div class="page-wrapper">
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer class="footer-note">
+        © {{ current_year }} The Roundup. All rights reserved. <br />
+        This site may contain affiliate links. Content is for informational purposes only.
+    </footer>
 </body>
 
 </html>
