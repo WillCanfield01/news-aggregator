@@ -1,129 +1,125 @@
-<!-- templates/published_articles.html -->
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <title>All Published Articles – The Roundup</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <a href="/" class="back-btn">← Back to Home</a>
-    <style>
-        body {
-            background: #f6f4ed;
-            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-        }
+{% block title %}All Published Articles – The Roundup{% endblock %}
 
-        .container {
-            max-width: 900px;
-            margin: 40px auto 0 auto;
-            padding: 32px 24px 64px 24px;
-            background: #fff;
-            border-radius: 18px;
-            box-shadow: 0 6px 30px rgba(60, 60, 60, 0.10);
-        }
+{% block head %}
+<style>
+    body {
+        background: #f6f4ed;
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+    }
 
-        h1 {
-            font-size: 2.4rem;
-            font-weight: 800;
-            color: #14345b;
-            margin-bottom: 24px;
-            text-align: center;
-        }
+    .container {
+        max-width: 900px;
+        margin: 40px auto 0 auto;
+        padding: 32px 24px 64px 24px;
+        background: #fff;
+        border-radius: 18px;
+        box-shadow: 0 6px 30px rgba(60, 60, 60, 0.10);
+    }
 
+    h1 {
+        font-size: 2.4rem;
+        font-weight: 800;
+        color: #14345b;
+        margin-bottom: 24px;
+        text-align: center;
+    }
+
+    .articles-list {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 32px;
+    }
+
+    @media (min-width: 700px) {
         .articles-list {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 32px;
+            grid-template-columns: 1fr 1fr;
         }
+    }
 
-        @media (min-width: 700px) {
-            .articles-list {
-                grid-template-columns: 1fr 1fr;
-            }
-        }
+    .article-card {
+        background: #f4f8fc;
+        border-radius: 14px;
+        padding: 28px 22px 22px 22px;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
 
-        .article-card {
-            background: #f4f8fc;
-            border-radius: 14px;
-            padding: 28px 22px 22px 22px;
-            box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
+    .article-title {
+        color: #14345b;
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 0 0 10px 0;
+        text-decoration: none;
+    }
 
-        .article-title {
-            color: #14345b;
-            font-size: 1.25rem;
-            font-weight: 700;
-            margin: 0 0 10px 0;
-            text-decoration: none;
-        }
+    .article-excerpt {
+        color: #333;
+        font-size: 1rem;
+        margin-bottom: 18px;
+        min-height: 48px;
+    }
 
-        .article-excerpt {
-            color: #333;
-            font-size: 1rem;
-            margin-bottom: 18px;
-            min-height: 48px;
-        }
+    .article-btn {
+        align-self: flex-start;
+        background: #2863fa;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 9px 18px;
+        font-weight: 600;
+        font-size: 1rem;
+        text-decoration: none;
+        transition: background 0.18s;
+        margin-bottom: 8px;
+    }
 
-        .article-btn {
-            align-self: flex-start;
-            background: #2863fa;
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            padding: 9px 18px;
-            font-weight: 600;
-            font-size: 1rem;
-            text-decoration: none;
-            transition: background 0.18s;
-            margin-bottom: 8px;
-        }
+    .article-btn:hover {
+        background: #1845a3;
+    }
 
-        .article-btn:hover {
-            background: #1845a3;
-        }
+    .back-btn {
+        display: block;
+        margin: 40px auto 0 auto;
+        background: none;
+        color: #14345b;
+        font-weight: 700;
+        text-decoration: underline;
+        border: none;
+        font-size: 1.08rem;
+    }
 
-        .back-btn {
-            display: block;
-            margin: 40px auto 0 auto;
-            background: none;
-            color: #14345b;
-            font-weight: 700;
-            text-decoration: underline;
-            border: none;
-            font-size: 1.08rem;
-        }
+    .back-btn:hover {
+        color: #2863fa;
+        text-decoration: none;
+    }
+</style>
+{% endblock %}
 
-        .back-btn:hover {
-            color: #2863fa;
-            text-decoration: none;
-        }
-    </style>
-</head>
-
-<body>
-    <div class="container">
-        <h1>All Published Articles</h1>
-        <div class="articles-list">
-            {% for article in articles %}
-            <div class="article-card">
-                <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
-                    {{ article.title }}
-                </a>
-                <div class="article-excerpt">
-                    {{ article.excerpt }}
-                </div>
-                <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
-                    Read Full Article
-                </a>
+{% block content %}
+<div class="container">
+    <h1>All Published Articles</h1>
+    <div class="articles-list">
+        {% for article in articles %}
+        <div class="article-card">
+            <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
+                {{ article.title }}
+            </a>
+            <div class="article-excerpt">
+                {{ article.excerpt }}
             </div>
-            {% endfor %}
+            <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
+                Read Full Article
+            </a>
         </div>
+        {% endfor %}
     </div>
-</body>
+</div>
 
-</html>
+<a href="/" class="back-btn">← Back to Home</a>
+{% endblock %}

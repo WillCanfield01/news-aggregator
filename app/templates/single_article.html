@@ -1,213 +1,152 @@
-<!-- templates/read_article.html -->
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ meta_title or title }} – The Roundup</title>
-    <meta name="description" content="{{ meta_description or (content[:160] if content else '') }}" />
-    <meta property="og:title" content="{{ meta_title or title }}" />
-    <meta property="og:description" content="{{ meta_description or (content[:160] if content else '') }}" />
-    <meta property="og:type" content="article" />
-    <!-- Single, correct canonical -->
-    <link rel="canonical" href="https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}" />
+{% block title %}{{ meta_title or title }} – The Roundup{% endblock %}
 
-    <style>
-        body {
-            background: #f6f4ed;
-            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-            margin: 0;
-        }
+{% block head %}
+<meta name="description" content="{{ meta_description or (content[:160] if content else '') }}" />
+<meta property="og:title" content="{{ meta_title or title }}" />
+<meta property="og:description" content="{{ meta_description or (content[:160] if content else '') }}" />
+<meta property="og:type" content="article" />
+<link rel="canonical" href="https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}" />
 
-        .container {
-            max-width: 740px;
-            margin: 48px auto 0;
-            background: #fff;
-            border-radius: 18px;
-            box-shadow: 0 6px 30px rgba(60, 60, 60, .09);
-            padding: 44px 34px 56px;
-        }
+<style>
+    .container {
+        max-width: 740px;
+        margin: 48px auto 0;
+        background: #fff;
+        border-radius: 18px;
+        box-shadow: 0 6px 30px rgba(60, 60, 60, .09);
+        padding: 44px 34px 56px;
+    }
 
-        .back-link {
-            display: block;
-            margin-bottom: 28px;
-            color: #1845a3;
-            font-weight: 600;
-            text-decoration: none;
-            font-size: 1.07rem;
-        }
+    .back-link {
+        display: block;
+        margin-bottom: 28px;
+        color: #1845a3;
+        font-weight: 600;
+        text-decoration: none;
+        font-size: 1.07rem;
+    }
 
-        .back-link:hover {
-            color: #2863fa;
-            text-decoration: underline;
-        }
+    .back-link:hover {
+        color: #2863fa;
+        text-decoration: underline;
+    }
 
-        /* use the class names that appear in markup */
-        .article-title {
-            font-size: 2.2rem;
-            font-weight: 800;
-            color: #14345b;
-            margin: 0 0 10px;
-            text-wrap: balance;
-        }
+    .article-title {
+        font-size: 2.2rem;
+        font-weight: 800;
+        color: #14345b;
+        margin: 0 0 10px;
+    }
 
-        .article-meta {
-            color: #6e7a8a;
-            font-size: 1rem;
-            margin-bottom: 18px;
-        }
+    .article-meta {
+        color: #6e7a8a;
+        font-size: 1rem;
+        margin-bottom: 18px;
+    }
 
-        .divider {
-            border: none;
-            border-top: 1px solid #e2e4ea;
-            margin: 32px 0;
-        }
+    .article-content {
+        font-size: 1.16rem;
+        line-height: 1.7;
+        color: #1a2331;
+    }
 
-        .cta {
-            max-width: 740px;
-            margin: 28px auto 40px;
-            padding: 20px 18px;
-            background: #fff;
-            border: 1px solid #e8ebf2;
-            border-radius: 14px;
-            box-shadow: 0 6px 20px rgba(22, 33, 68, .06);
-        }
+    .article-content h2,
+    .article-content h3,
+    .article-content h4 {
+        margin-top: 28px;
+        margin-bottom: 14px;
+        color: #183561;
+        font-weight: 700;
+    }
 
-        .cta a {
-            display: inline-block;
-            padding: 10px 14px;
-            border-radius: 10px;
-            background: #eef3ff;
-        }
+    .article-content img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 12px;
+        display: block;
+        margin: 24px auto 8px;
+        box-shadow: 0 2px 12px rgba(60, 60, 60, .11);
+    }
 
+    .cta {
+        max-width: 740px;
+        margin: 28px auto 40px;
+        padding: 20px 18px;
+        background: #fff;
+        border: 1px solid #e8ebf2;
+        border-radius: 14px;
+        box-shadow: 0 6px 20px rgba(22, 33, 68, .06);
+    }
 
-        .cta h3 {
-            margin: 0 0 6px;
-            color: #14345b;
-        }
+    .cta h3 {
+        margin: 0 0 6px;
+        color: #14345b;
+    }
 
-        .cta p {
-            margin: 0 0 10px;
-            color: #6e7a8a;
-        }
+    .cta p {
+        margin: 0 0 10px;
+        color: #6e7a8a;
+    }
 
-        /* this must match the content wrapper class below */
-        .article-content {
-            font-size: 1.16rem;
-            line-height: 1.7;
-            color: #1a2331;
-        }
+    .cta a {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #eef3ff;
+    }
 
-        .article-content h2,
-        .article-content h3,
-        .article-content h4 {
-            margin-top: 28px;
-            margin-bottom: 14px;
-            color: #183561;
-            font-weight: 700;
-        }
+    .footer-note {
+        text-align: center;
+        padding: 20px;
+        font-size: 0.95rem;
+        color: #666;
+        background: #fafafa;
+        border-top: 1px solid #e0e0e0;
+        margin-top: 40px;
+    }
+</style>
+{% endblock %}
 
-        .article-content p {
-            margin-bottom: 18px;
-        }
+{% block content %}
+<div class="container">
+    <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Articles</a>
+    <h1 class="article-title">{{ title }}</h1>
+    <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
+    <div class="article-content">
+        {{ content | safe }}
+    </div>
+</div>
 
-        .article-content strong,
-        .article-content b {
-            color: #1845a3;
-        }
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"Article",
+  "headline":"{{ meta_title or title }}",
+  "description":"{{ meta_description }}",
+  "datePublished":"{{ date.isoformat() }}",
+  "author":{"@type":"Person","name":"The Roundup"},
+  "mainEntityOfPage":{"@type":"WebPage","@id":"https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
+}
+</script>
 
-        .article-content img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 12px;
-            display: block;
-            margin: 24px auto 8px;
-            box-shadow: 0 2px 12px rgba(60, 60, 60, .11);
-        }
+<section class="cta">
+    <h3>Want a new AI money idea every day?</h3>
+    <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
+    {% if latest_article %}
+    {% if current_filename and latest_article.filename != current_filename %}
+    <a href="{{ url_for('all_articles.read_article', filename=latest_article.filename) }}">See today’s guide</a>
+    {% else %}
+    <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
+    {% endif %}
+    {% else %}
+    <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
+    {% endif %}
+</section>
 
-        .article-content em {
-            display: block;
-            text-align: center;
-            color: #888;
-            margin-bottom: 28px;
-            font-size: 1.06rem;
-        }
-
-        .article-content .faq-q {
-            margin-top: 16px;
-            margin-bottom: 6px;
-        }
-
-        .article-content .faq-a {
-            margin-bottom: 22px;
-        }
-
-        .latest-cta {
-            text-align: center;
-            margin-top: 3rem;
-            padding: 1.5rem;
-            border-top: 1px solid #ddd;
-            font-size: 1.1rem;
-        }
-
-        .latest-cta .cta-link {
-            color: #004aad;
-            font-weight: bold;
-            text-decoration: none;
-        }
-
-        .latest-cta .cta-link:hover {
-            text-decoration: underline;
-        }
-    </style>
-</head>
-
-<body>
-    <div class="container">
-        <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Articles</a>
-
-        <h1 class="article-title">{{ title }}</h1>
-        <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
-
-        <!-- Render the article HTML -->
-        <div class="article-content">
-            {{ content | safe }}
-        </div>
-    </div> <!-- ✅ close .container -->
-
-    <script type="application/ld+json">
-  {
-    "@context":"https://schema.org",
-    "@type":"Article",
-    "headline":"{{ meta_title or title }}",
-    "description":"{{ meta_description }}",
-    "datePublished":"{{ date.isoformat() }}",
-    "author":{"@type":"Person","name":"The Roundup"},
-    "mainEntityOfPage":{"@type":"WebPage","@id":"https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
-  }
-  </script>
-
-    <hr>
-
-    <section class="cta">
-        <h3>Want a new AI money idea every day?</h3>
-        <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
-
-        {% if latest_article %}
-        {# If we’re not already on the latest, link to it; otherwise link to the list #}
-        {% if current_filename and latest_article.filename != current_filename %}
-        <a href="{{ url_for('all_articles.read_article', filename=latest_article.filename) }}">See today’s guide</a>
-        {% else %}
-        <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
-        {% endif %}
-        {% else %}
-        <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
-        {% endif %}
-    </section>
-
-    <hr>
-
-</body>
-
-</html>
+<div class="footer-note">
+    © {{ current_year }} The Roundup. All rights reserved.<br>
+    This site may contain affiliate links. Content is for informational purposes only.
+</div>
+{% endblock %}

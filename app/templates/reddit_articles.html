@@ -1,116 +1,112 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <title>Latest Community Topics</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Browse all daily AI-generated community advice and trending discussion articles.">
-    <link rel="canonical" href="https://therealroundup.com/" />
-    <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            background: #f8fafc;
-            color: #2b2b2b;
-            margin: 0;
-        }
+{% block title %}Latest Community Topics – The Roundup{% endblock %}
 
-        .container {
-            max-width: 750px;
-            margin: 2.5rem auto;
-            background: #fff;
-            border-radius: 1.2rem;
-            box-shadow: 0 3px 18px #0002;
-            padding: 2rem;
-        }
+{% block head %}
+<meta name="description" content="Browse all daily AI-generated community advice and trending discussion articles.">
+<link rel="canonical" href="https://therealroundup.com/">
+<style>
+    body {
+        font-family: 'Segoe UI', Arial, sans-serif;
+        background: #f8fafc;
+        color: #2b2b2b;
+        margin: 0;
+    }
 
-        h1 {
-            font-size: 2.1rem;
-            margin-bottom: 1.2rem;
-        }
+    .container {
+        max-width: 750px;
+        margin: 2.5rem auto;
+        background: #fff;
+        border-radius: 1.2rem;
+        box-shadow: 0 3px 18px #0002;
+        padding: 2rem;
+    }
 
-        form {
-            margin-bottom: 2rem;
-        }
+    h1 {
+        font-size: 2.1rem;
+        margin-bottom: 1.2rem;
+    }
 
-        button {
-            background: #2973e8;
-            color: #fff;
-            border: none;
-            padding: 0.7rem 1.5rem;
-            font-size: 1.1rem;
-            border-radius: 0.5em;
-            cursor: pointer;
-        }
+    form {
+        margin-bottom: 2rem;
+    }
 
-        button:hover {
-            background: #185abd;
-        }
+    button {
+        background: #2973e8;
+        color: #fff;
+        border: none;
+        padding: 0.7rem 1.5rem;
+        font-size: 1.1rem;
+        border-radius: 0.5em;
+        cursor: pointer;
+    }
 
-        ul {
-            list-style: none;
-            padding: 0;
-        }
+    button:hover {
+        background: #185abd;
+    }
 
-        li {
-            margin-bottom: 2.2rem;
-            border-bottom: 1px solid #ececec;
-            padding-bottom: 1.5rem;
-        }
+    ul {
+        list-style: none;
+        padding: 0;
+    }
 
-        .article-title {
-            font-weight: bold;
-            font-size: 1.25rem;
-            margin-bottom: 0.6rem;
-        }
+    li {
+        margin-bottom: 2.2rem;
+        border-bottom: 1px solid #ececec;
+        padding-bottom: 1.5rem;
+    }
 
-        .snippet {
-            background: #f7f7fa;
-            border-radius: 0.6rem;
-            padding: 1rem;
-            white-space: pre-wrap;
-            font-size: 1.02rem;
-        }
+    .article-title {
+        font-weight: bold;
+        font-size: 1.25rem;
+        margin-bottom: 0.6rem;
+    }
 
-        .read-link {
-            display: inline-block;
-            margin-top: 0.6rem;
-            color: #2973e8;
-            text-decoration: none;
-        }
+    .snippet {
+        background: #f7f7fa;
+        border-radius: 0.6rem;
+        padding: 1rem;
+        white-space: pre-wrap;
+        font-size: 1.02rem;
+    }
 
-        .read-link:hover {
-            text-decoration: underline;
-        }
+    .read-link {
+        display: inline-block;
+        margin-top: 0.6rem;
+        color: #2973e8;
+        text-decoration: none;
+    }
 
-        .article-date {
-            color: #888;
-            font-size: 0.98rem;
-            margin-bottom: 0.4rem;
-        }
-    </style>
-</head>
+    .read-link:hover {
+        text-decoration: underline;
+    }
 
-<body>
-    <div class="container">
-        <a href="/" class="back-link">← Back to Home</a>
-        <h1>Daily Community Articles</h1>
-        <ul>
-            {% for article in articles %}
-            <li>
-                <div class="article-title">{{ article.title }}</div>
-                {% if article.date %}
-                <div class="article-date">{{ article.date.strftime('%B %d, %Y') }}</div>
-                {% endif %}
-                <div class="snippet">{{ article.snippet | safe }}</div>
-                <a href="/all-articles/articles/{{ article.filename }}" class="read-link" target="_blank"
-                    aria-label="Read full article: {{ article.title }}">
-                    Read Full Article &rarr;
-                </a>
-            </li>
-            {% endfor %}
-        </ul>
-    </div>
-</body>
+    .article-date {
+        color: #888;
+        font-size: 0.98rem;
+        margin-bottom: 0.4rem;
+    }
+</style>
+{% endblock %}
 
-</html>
+{% block content %}
+<div class="container">
+    <a href="/" class="back-link">← Back to Home</a>
+    <h1>Daily Community Articles</h1>
+    <ul>
+        {% for article in articles %}
+        <li>
+            <div class="article-title">{{ article.title }}</div>
+            {% if article.date %}
+            <div class="article-date">{{ article.date.strftime('%B %d, %Y') }}</div>
+            {% endif %}
+            <div class="snippet">{{ article.snippet | safe }}</div>
+            <a href="/all-articles/articles/{{ article.filename }}" class="read-link" target="_blank"
+                aria-label="Read full article: {{ article.title }}">
+                Read Full Article &rarr;
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}

@@ -1,222 +1,201 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8" />
-    <title>AI Money Daily – One Actionable Idea, Every Day</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description"
-        content="One beginner-friendly way to make money with AI—tools, steps, pricing, pitfalls—daily.">
-    <link rel="canonical" href="https://therealroundup.com/">
-    <meta property="og:title" content="AI Money Daily – One Actionable Idea, Every Day">
-    <meta property="og:description" content="Tools, steps, pricing, pitfalls—new AI income idea daily.">
-    <meta property="og:url" content="https://therealroundup.com/">
-    <meta name="twitter:card" content="summary_large_image">
-    <style>
-        :root {
-            --brand: #1f57ff;
-            --brand-2: #58bbff;
-            --ink: #0f1b2d;
-            --muted: #5c6b80;
-            --card: #ffffff;
-            --bg: #f6f9fb;
-            --radius: 18px;
-        }
+{% block title %}AI Money Daily – One Actionable Idea, Every Day{% endblock %}
+{% block description %}One beginner-friendly way to make money with AI—tools, steps, pricing, pitfalls—daily.{% endblock
+%}
+{% block canonical %}https://therealroundup.com/{% endblock %}
 
-        * {
-            box-sizing: border-box
-        }
+{% block head %}
+<style>
+    :root {
+        --brand: #1f57ff;
+        --brand-2: #58bbff;
+        --ink: #0f1b2d;
+        --muted: #5c6b80;
+        --card: #ffffff;
+        --bg: #f6f9fb;
+        --radius: 18px;
+    }
 
-        html,
-        body {
-            height: 100%
-        }
+    body {
+        background: var(--bg);
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        color: var(--ink);
+    }
 
-        body {
-            background: var(--bg);
-            margin: 0;
-            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-            color: var(--ink);
-        }
+    .container {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 24px;
+    }
 
-        .container {
-            max-width: 1120px;
-            margin: 0 auto;
-            padding: 0 24px;
-        }
+    /* Hero */
+    .hero-wrap {
+        background: linear-gradient(120deg, var(--brand-2) 0%, #e9eef5 100%);
+        border-radius: 0 0 28px 28px;
+        box-shadow: 0 10px 30px rgba(22, 33, 68, .08) inset;
+    }
 
-        /* Hero */
-        .hero-wrap {
-            background: linear-gradient(120deg, var(--brand-2) 0%, #e9eef5 100%);
-            border-radius: 0 0 28px 28px;
-            box-shadow: 0 10px 30px rgba(22, 33, 68, .08) inset;
-        }
+    .hero {
+        padding: 64px 0 56px;
+        text-align: center;
+    }
 
-        .hero {
-            padding: 64px 0 56px;
-            text-align: center;
-        }
+    .site-title {
+        font-weight: 800;
+        letter-spacing: -.02em;
+        margin: 0 0 12px;
+        font-size: clamp(2.2rem, 2.5vw + 1.6rem, 3.25rem);
+    }
 
-        .site-title {
-            font-weight: 800;
-            letter-spacing: -.02em;
-            margin: 0 0 12px;
-            font-size: clamp(2.2rem, 2.5vw + 1.6rem, 3.25rem);
-        }
+    .subtext {
+        color: var(--muted);
+        font-size: clamp(1rem, .4vw + .9rem, 1.125rem);
+        line-height: 1.6;
+        margin-bottom: 28px;
+    }
 
-        .subtext {
-            color: var(--muted);
-            font-size: clamp(1rem, .4vw + .9rem, 1.125rem);
-            line-height: 1.6;
-            margin-bottom: 28px;
-        }
+    .cta-primary {
+        display: inline-block;
+        padding: 14px 22px;
+        background: var(--brand);
+        color: #fff;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 700;
+        box-shadow: 0 10px 20px rgba(31, 87, 255, .18);
+        transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+    }
 
-        .cta-primary {
-            display: inline-block;
-            padding: 14px 22px;
-            background: var(--brand);
-            color: #fff;
-            border-radius: 999px;
-            text-decoration: none;
-            font-weight: 700;
-            box-shadow: 0 10px 20px rgba(31, 87, 255, .18);
-            transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
-        }
+    .cta-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 24px rgba(31, 87, 255, .22);
+    }
 
-        .cta-primary:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 14px 24px rgba(31, 87, 255, .22);
-        }
+    /* Feature card */
+    .feature {
+        margin-top: -36px;
+        background: var(--card);
+        border-radius: var(--radius);
+        box-shadow: 0 12px 30px rgba(16, 24, 40, 0.10);
+        padding: clamp(20px, 2vw + 12px, 32px);
+    }
 
-        /* Feature card */
+    .badge-feature {
+        display: inline-block;
+        background: #e8f1ff;
+        color: #1140c9;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: .95rem;
+        letter-spacing: .2px;
+        margin-bottom: 10px;
+    }
+
+    .headline {
+        font-size: clamp(1.35rem, 1.1vw + 1.1rem, 2rem);
+        font-weight: 800;
+        line-height: 1.25;
+        margin: 4px 0 10px;
+    }
+
+    .summary {
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.7;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-bottom: 14px;
+    }
+
+    .cta-secondary {
+        display: inline-block;
+        font-weight: 700;
+        color: var(--brand);
+        text-decoration: none;
+        padding: 10px 16px;
+        border-radius: 12px;
+        background: #eef3ff;
+        transition: background .12s ease, transform .12s ease;
+    }
+
+    .cta-secondary:hover {
+        background: #e3ebff;
+        transform: translateY(-1px);
+    }
+
+    .below {
+        text-align: center;
+        margin: 32px 0 14px;
+    }
+
+    .footer {
+        text-align: center;
+        color: #8a97aa;
+        padding: 40px 0 48px;
+        font-size: .95rem;
+    }
+
+    .footer a {
+        color: #39548f;
+        text-decoration: none;
+    }
+
+    .footer a:hover {
+        text-decoration: underline;
+    }
+
+    @media (min-width: 960px) {
         .feature {
-            margin-top: -36px;
-            background: var(--card);
-            border-radius: var(--radius);
-            box-shadow: 0 12px 30px rgba(16, 24, 40, 0.10);
-            padding: clamp(20px, 2vw + 12px, 32px);
+            padding: 36px 40px;
         }
+    }
+</style>
+{% endblock %}
 
-        .badge-feature {
-            display: inline-block;
-            background: #e8f1ff;
-            color: #1140c9;
-            padding: 6px 12px;
-            border-radius: 999px;
-            font-weight: 700;
-            font-size: .95rem;
-            letter-spacing: .2px;
-            margin-bottom: 10px;
-        }
-
-        .headline {
-            font-size: clamp(1.35rem, 1.1vw + 1.1rem, 2rem);
-            font-weight: 800;
-            line-height: 1.25;
-            margin: 4px 0 10px;
-        }
-
-        .summary {
-            color: var(--muted);
-            font-size: 1.05rem;
-            line-height: 1.7;
-            /* line-clamp keeps it tight without ellipses messing layout */
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            margin-bottom: 14px;
-        }
-
-        .cta-secondary {
-            display: inline-block;
-            font-weight: 700;
-            color: var(--brand);
-            text-decoration: none;
-            padding: 10px 16px;
-            border-radius: 12px;
-            background: #eef3ff;
-            transition: background .12s ease, transform .12s ease;
-        }
-
-        .cta-secondary:hover {
-            background: #e3ebff;
-            transform: translateY(-1px);
-        }
-
-        /* Footer & bottom link */
-        .below {
-            text-align: center;
-            margin: 32px 0 14px;
-        }
-
-        .footer {
-            text-align: center;
-            color: #8a97aa;
-            padding: 40px 0 48px;
-            font-size: .95rem;
-        }
-
-        .footer a {
-            color: #39548f;
-            text-decoration: none;
-        }
-
-        .footer a:hover {
-            text-decoration: underline;
-        }
-
-        /* Responsive spacing */
-        @media (min-width: 960px) {
-            .feature {
-                padding: 36px 40px;
-            }
-        }
-    </style>
-
-</head>
-
-<body>
-    <div class="hero-wrap">
-        <section class="hero container">
-            <h1 class="site-title">AI Money Daily</h1>
-            <div class="subtext">
-                Every day: one actionable way to make money with AI.<br>
-                Simple tools, clear steps, realistic earnings.
-            </div>
-            <a href="#feature" class="cta-primary">See Today’s Featured Article</a>
-        </section>
-    </div>
-
-    <main class="container">
-        <section id="feature" class="feature">
-            <div class="badge-feature">Today’s AI Income Idea</div>
-
-            {% if latest %}
-            <div id="headline" class="headline">{{ latest.title }}</div>
-            <div id="summary" class="summary">
-                {{ ((latest.html_content or latest.content)|striptags
-                |replace('Photo by','')
-                |replace('on Unsplash','')
-                |replace('## ','')
-                )[:220] }}…
-            </div>
-            <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}" class="cta-secondary">
-                Read the full guide
-            </a>
-            {% else %}
-            <div class="headline">New guide drops daily. Check back soon.</div>
-            {% endif %}
-        </section>
-
-        <div class="below">
-            <a href="/all-articles/articles" class="cta-secondary">Explore all published articles</a>
+{% block content %}
+<div class="hero-wrap">
+    <section class="hero container">
+        <h1 class="site-title">AI Money Daily</h1>
+        <div class="subtext">
+            Every day: one actionable way to make money with AI.<br>
+            Simple tools, clear steps, realistic earnings.
         </div>
-    </main>
+        <a href="#feature" class="cta-primary">See Today’s Featured Article</a>
+    </section>
+</div>
 
-    <footer class="footer">
-        &copy; {{ year or 2025 }} AI Money Daily — <a href="https://therealroundup.com">Powered by The Roundup</a>
-    </footer>
-</body>
+<main class="container">
+    <section id="feature" class="feature">
+        <div class="badge-feature">Today’s AI Income Idea</div>
 
-</html>
+        {% if latest %}
+        <div id="headline" class="headline">{{ latest.title }}</div>
+        <div id="summary" class="summary">
+            {{ ((latest.html_content or latest.content)|striptags
+            |replace('Photo by','')
+            |replace('on Unsplash','')
+            |replace('## ','')
+            )[:220] }}…
+        </div>
+        <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}" class="cta-secondary">
+            Read the full guide
+        </a>
+        {% else %}
+        <div class="headline">New guide drops daily. Check back soon.</div>
+        {% endif %}
+    </section>
+
+    <div class="below">
+        <a href="/all-articles/articles" class="cta-secondary">Explore all published articles</a>
+    </div>
+</main>
+
+<footer class="footer">
+    &copy; {{ year or 2025 }} AI Money Daily — <a href="https://therealroundup.com">Powered by The Roundup</a>
+</footer>
+{% endblock %}
