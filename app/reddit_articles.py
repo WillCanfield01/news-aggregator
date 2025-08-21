@@ -416,125 +416,68 @@ def pick_top_cyber_items(items: list, n: int = 8) -> list:
 # Generation prompts (Cyber Briefing)
 # ------------------------------
 def rewrite_title_for_cyber_briefing(items: list) -> str:
-    """Create a simple, dated briefing title."""
-    today = datetime.utcnow().strftime("%B %d, %Y")
-    # pull 1–2 strongest keywords for flavor if present
+    """Create a clean briefing title WITHOUT the date (the template shows date below)."""
     top = items[:3]
     hints = []
     for it in top:
         t = (it["title"] or "").lower()
-        if "cve-" in t and "CVE" not in hints:
+        if "cve-" in t and "CVE alerts" not in hints:
             hints.append("CVE alerts")
         if "ransomware" in t and "Ransomware" not in hints:
             hints.append("Ransomware")
-        if "zero-day" in t or "zero day" in t:
-            if "Zero-day" not in hints:
-                hints.append("Zero-day")
+        if ("zero-day" in t or "zero day" in t) and "Zero-day" not in hints:
+            hints.append("Zero-day")
     suffix = f" — {', '.join(hints)}" if hints else ""
-    return f"Daily Cybersecurity Briefing ({today}){suffix}"
+    return f"Daily Cybersecurity Briefing{suffix}"
 
-def generate_outline_for_cyber(items: list) -> str:
-    """Ask the model for a structured outline based on the top items."""
-    # compact context to keep tokens modest
-    bullet_ctx = "\n".join([f"- {it['title']} ({it['source']}) — {it['link']}" for it in items])
+def generate_accessible_brief(items: list, n_items: int = 9) -> str:
+    """
+    Write a skimmable daily brief for a general audience:
+    - 7–10 bullets with 'What happened' + 'What to do'
+    - No links, no citations, no dates in the title text
+    - Plus 'If You Only Do 3 Things Today' and 'For Teams (super quick)'
+    """
+    # compact context for the model
+    ctx_lines = []
+    for it in items[:max(7, min(n_items, 10))]:
+        title = (it.get("title") or "")[:180]
+        summary = (it.get("summary") or "")[:220]
+        ctx_lines.append(f"- {title} — {summary}")
+    ctx = "\n".join(ctx_lines)
+
     prompt = f"""
-You're an editor writing a concise daily cybersecurity briefing for busy professionals.
+You're writing Today's Quick Cyber Brief in plain English for a general audience.
 
-Use ONLY the context links provided below. You may paraphrase, synthesize, and extract key facts,
-but do NOT invent facts that aren't supported by the items. Cite sources inline like [source: domain].
+Use ONLY the context list (titles + short summaries) to understand themes.
+Do NOT include links, sources, domains, or citations. Don't add the date.
 
-Context items (titles + links):
-{bullet_ctx}
+Write valid Markdown with exactly this structure:
 
-Return a tight Markdown outline with these sections and nothing else:
-1) Top Stories (3–5 bullets; each bullet ends with [source: domain])
-2) Critical CVEs & Patches (table: CVE | Severity | Affected | Fix/Workaround | Source)
-3) Ransomware & Threat Activity (2–4 bullets)
-4) What This Means (why it matters in plain language)
-5) Quick Actions for Security Teams (5–7 checklist items)
-6) Sources (bulleted list of the links with domains)
+## Today’s Quick Cyber Brief
+
+- 7–10 bullet items. For EACH item, use this format:
+  **Short headline**  
+  *What happened:* one short sentence.  
+  *What to do:* one short sentence.
+
+## If You Only Do 3 Things Today
+Provide a 2-column Markdown table:
+| Action (1 minute each) | Why it matters |
+
+## For Teams (super quick)
+3–5 bullets with concise actions for IT/SecOps.
+
+Keep it friendly, non-technical, and practical. No hype, no jargon walls.
+Context:
+{ctx}
 """
     resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=[{"role":"user","content":prompt}],
-        max_tokens=700,
-        temperature=0.2
-    )
-    return resp.choices[0].message.content
-
-def generate_cyber_article_body(outline_md: str) -> str:
-    """Expand the outline into a 700–900 word brief with tables kept valid."""
-    prompt = f"""
-Expand the following outline into a 700–900 word daily cybersecurity brief.
-Rules:
-- Keep the exact section order from the outline.
-- Keep the CVE table exactly 5 columns: | CVE | Severity | Affected | Fix/Workaround | Source |
-- Use plain, professional tone. No hype. No filler.
-- Attribute facts to sources inline like [source: domain], and list all links in a final "Sources" section.
-- Do not copy long passages verbatim; paraphrase instead.
-
-Outline:
-{outline_md}
-
-Article:
-"""
-    resp = openai.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role":"user","content":prompt}],
-        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1100,
         temperature=0.35
     )
     return resp.choices[0].message.content
-
-def generate_reel_script_veed(article_text: str, topic: str):
-    """
-    30–40s vertical script variants for a daily cyber brief.
-    """
-    prompt = f"""
-Create 5 short vertical video script VARIANTS for a Daily Cybersecurity Brief.
-Each variant:
-- 30–40 seconds (~90–110 words)
-- First line [HOOK] ≤ 8 words, curiosity-based, no hype
-- Short lines (≤ 8 words) for captions
-- Name 1–2 concrete items (e.g., CVE id, vendor patch) if present
-- Honest tone: “not instant, but here’s the takeaway”
-- End with [CTA] “Full brief at TheRealRoundup.com”
-
-Topic: {topic}
-
-Reference (use only as context; don't quote verbatim):
-{article_text[:1200]}
-
-Return JSON: {{"variants": ["...","...","...","...","..."]}}
-"""
-    try:
-        resp = openai.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role":"user","content":prompt}],
-            temperature=0.5,
-            max_tokens=900,
-            response_format={"type":"json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content or "{}")
-        variants = [v.strip() for v in data.get("variants", []) if v.strip()]
-    except Exception:
-        variants = []
-
-    if not variants:
-        return (
-            "Today’s biggest cyber risks, fast\n"
-            "[B-ROLL: scrolling security dashboard]\n"
-            "Zero-day patched in a major browser\n"
-            "Two ransomware groups hit healthcare\n"
-            "[B-ROLL: news headlines montage]\n"
-            "If you manage endpoints, patch today\n"
-            "Block known C2 IPs and rotate creds\n"
-            "[B-ROLL: terminal / firewall rules]\n"
-            "[CTA] Full brief at TheRealRoundup.com"
-        )
-
-    best = max(variants, key=_score_reel_variant)
-    return best
 
 # ------------------------------
 # Image suggestions (unchanged pattern)
@@ -634,70 +577,55 @@ def generate_article_for_today():
     items = fetch_cyber_feed_entries(max_per_feed=25)
     if not items:
         raise Exception("No cybersecurity feed items available today.")
-    top_items = pick_top_cyber_items(items, n=8)
+    # Aim for 7–10 items
+    top_items = pick_top_cyber_items(items, n=9)
 
-    # 2) Title + outline + article
+    # 2) Title + brief (simple, human)
     headline = rewrite_title_for_cyber_briefing(top_items)
     if is_duplicate(headline):
-        # small suffix to avoid filename collision if multiple runs same day
         headline += " (Update)"
 
-    outline = generate_outline_for_cyber(top_items)
-    article_md = generate_cyber_article_body(outline)
+    article_md = generate_accessible_brief(top_items)
 
-    # 3) Normalize / cleanup (keep your existing FAQ helper)
-    sections = split_markdown_sections(article_md)
-    article_norm = ""
-    faq_section = None
+    # 3) Auto-insert two tasteful images (top + near end)
+    def _image_block(query: str, fallback_terms: str):
+        url, photographer, image_page, alt = get_unsplash_image(query)
+        if url:
+            caption = alt or "Image via Unsplash"
+            credit = f"*Photo by {photographer} on Unsplash*"
+            return f"![{caption}]({url})\n{credit}\n\n"
+        # Fallback if no API key
+        fallback = f"https://source.unsplash.com/1600x900/?{fallback_terms}"
+        return f"![Cyber image]({fallback})\n\n"
 
-    for heading, content in sections:
-        lower = (heading or "").lower()
-        is_faq = lower.startswith("faq")
-        if not is_faq:
-            article_norm += f"## {heading}\n\n"
-        article_norm += (content or "") + "\n\n"
-        if is_faq:
-            faq_section = (heading, content)
+    top_img = _image_block("cybersecurity lock blue", "cybersecurity,lock,blue")
+    mid_img = _image_block("laptop update security", "update,laptop,security")
 
-    # Ensure we have exactly one FAQ (reuse your helper)
-    inline_qa_pat = r'(?mis)(^|\n)\s*(\**Q\d+:\s.*?)(?=(?:\n\s*\**Q\d+:|\n##\s|\Z))'
-    inline_qas = [m.group(2).lstrip('*').strip() for m in re.finditer(inline_qa_pat, article_norm)]
-    article_norm = re.sub(inline_qa_pat, r'\1', article_norm).strip()
+    # Place one at top, one after the first major section
+    article_md = f"{top_img}{article_md}\n{mid_img}"
 
-    already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_norm)
-    if not already_has_faq:
-        if faq_section:
-            article_norm += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
-        elif inline_qas:
-            article_norm += "\n## FAQ\n\n" + "\n\n".join(inline_qas).strip() + "\n\n"
-        else:
-            gen_faq = generate_faq_from_body(article_norm)
-            if gen_faq:
-                article_norm += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
+    # 4) Tidy (keep your helpers)
+    article_md = re.sub(r'(?im)^\s*faq\s*$', '', article_md).strip()
+    article_md = re.sub(r'(?m)([^\n])\n##', r'\1\n\n##', article_md)
+    article_md = strip_unwanted_bold(remove_gpt_dashes(article_md))
 
-    # Final tidy
-    article_norm = re.sub(r'(?im)^\s*faq\s*$', '', article_norm).strip()
-    article_norm = re.sub(r'(?m)([^\n])\n##', r'\1\n\n##', article_norm)
-    article_norm = strip_unwanted_bold(remove_gpt_dashes(article_norm))
+    # 5) Optional: reel script
+    reel_script = generate_reel_script_veed(article_md, headline)
 
-    # 4) Optional: reel script
-    reel_script = generate_reel_script_veed(article_norm, headline)
-
-    # 5) Save
-    html_content = markdown(article_norm, extras=["tables"])
+    # 6) Save
+    html_content = markdown(article_md, extras=["tables"])
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
     if CommunityArticle.query.filter_by(filename=filename).first():
-        # ensure unique filename if identical title/date
         filename += f"_{random.randint(100,999)}"
 
     meta_title = headline
     meta_description = (
         re.sub(r'<.*?>', '', html_content)[:155] or
-        "Daily cybersecurity briefing: top stories, critical CVEs, ransomware activity, and quick actions."
+        "Quick daily cyber brief: 7–10 items with practical actions."
     )
 
     save_article_db(
-        headline, article_norm, filename,
+        headline, article_md, filename,
         html_content=html_content,
         meta_title=meta_title,
         meta_description=meta_description,

@@ -63,6 +63,18 @@
         font-size: 1rem;
         margin-bottom: 18px;
         min-height: 48px;
+        overflow-wrap: anywhere;
+        /* prevent long hashes/URLs from overflowing */
+    }
+
+    .article-card {
+        transition: transform .12s ease, box-shadow .12s ease;
+    }
+
+    .article-card:hover,
+    .article-card:focus-within {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10);
     }
 
     .article-btn {
@@ -107,11 +119,6 @@
         font-size: 0.95rem;
         margin-bottom: 8px;
     }
-
-    .article-excerpt {
-        overflow-wrap: anywhere;
-        /* prevent long hashes/URLs from overflowing */
-    }
 </style>
 {% endblock %}
 
@@ -121,13 +128,17 @@
     <h1>Daily Cybersecurity Briefings</h1>
     <div class="articles-list">
         {% for article in articles %}
-        <div class="article-card">
+        <article class="article-card" role="article" aria-labelledby="t-{{ article.id }}">
+            <h2 class="sr-only" id="t-{{ article.id }}">{{ article.title }}</h2>
+
             <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
                 {{ article.title }}
             </a>
 
             {% if article.date %}
-            <div class="article-date">{{ article.date.strftime('%b %d, %Y') }}</div>
+            <div class="article-date">
+                <time datetime="{{ article.date.isoformat() }}">{{ article.date.strftime('%b %d, %Y') }}</time>
+            </div>
             {% endif %}
 
             <div class="article-excerpt">
@@ -139,7 +150,8 @@
                 aria-label="Read full briefing: {{ article.title }}">
                 Read Full Briefing
             </a>
-        </div>
+        </article>
+
         {% endfor %}
     </div>
 </div>

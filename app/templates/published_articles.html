@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}All Published Articles – The Roundup{% endblock %}
+{% block title %}Daily Cybersecurity Briefings – The Roundup{% endblock %}
 
 {% block head %}
 <style>
@@ -61,37 +61,32 @@
         font-size: 1rem;
         margin-bottom: 18px;
         min-height: 48px;
-    }
-
-    .article-btn {
-        align-self: flex-start;
-        background: #2863fa;
-        color: #fff;
-        border: none;
-        border-radius: 8px;
-        padding: 9px 18px;
-        font-weight: 600;
-        font-size: 1rem;
-        text-decoration: none;
-        transition: background 0.18s;
-        margin-top: auto;
+        overflow-wrap: anywhere;
+        /* prevent long hashes/URLs from overflowing */
     }
 
     .article-btn:hover {
         background: #1845a3;
     }
 
-    .back-btn {
-        display: block;
-        margin: 40px auto 0 auto;
-        background: none;
-        color: #14345b;
-        font-weight: 700;
-        text-decoration: underline;
-        border: none;
-        font-size: 1.08rem;
-        text-align: center;
+    .article-card {
+        transition: transform .12s ease, box-shadow .12s ease;
     }
+
+    .article-card:hover,
+    .article-card:focus-within {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10);
+    }
+
+    .article-date {
+        color: #6e7a8a;
+        font-size: 0.95rem;
+        margin-bottom: 8px;
+    }
+
+    /* Removed .back-btn since we don't render that element here */
+
 
     .back-btn:hover {
         color: #2863fa;
@@ -117,20 +112,30 @@
 {% block content %}
 <div class="container">
     <a href="/" class="back-link">← Back to Home</a>
-    <h1>All Published Articles</h1>
+    <h1>Daily Cybersecurity Briefings</h1>
     <div class="articles-list">
         {% for article in articles %}
         <div class="article-card">
             <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
                 {{ article.title }}
             </a>
-            <div class="article-excerpt">
-                {{ article.excerpt }}
+
+            {% if article.date %}
+            <div class="article-date">
+                <time datetime="{{ article.date.isoformat() }}">{{ article.date.strftime('%b %d, %Y') }}</time>
             </div>
-            <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
-                Read Full Article
+            {% endif %}
+
+            <div class="article-excerpt">
+                {{ article.snippet or article.excerpt }}
+            </div>
+
+            <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}"
+                aria-label="Read full briefing: {{ article.title }}">
+                Read Full Briefing
             </a>
         </div>
+
         {% endfor %}
     </div>
 </div>
