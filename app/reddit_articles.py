@@ -657,6 +657,7 @@ def generate_reel_script_veed(article_text: str, topic: str) -> str:
     prompt = f"""
 Create 5 short vertical video script VARIANTS for a Daily Cybersecurity Brief.
 Each variant:
+- The reel script should intruige viewers to watch all the way through, and also gives them the info they need to be secure
 - 30–40 seconds (~90–110 words)
 - First line [HOOK] ≤ 8 words, curiosity-based, no hype
 - Short lines (≤ 12 words) for captions
