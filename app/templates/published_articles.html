@@ -5,16 +5,16 @@
 {% block head %}
 <style>
     .container {
-        max-width: 900px;
-        margin: 40px auto 0 auto;
-        padding: 32px 24px 64px 24px;
+        max-width: 980px;
+        margin: 40px auto 0;
+        padding: 32px 24px 64px;
         background: #fff;
         border-radius: 18px;
-        box-shadow: 0 6px 30px rgba(60, 60, 60, 0.10);
+        box-shadow: 0 6px 30px rgba(60, 60, 60, .10);
     }
 
     h1 {
-        font-size: 2.4rem;
+        font-size: clamp(2rem, 1.4vw + 1.6rem, 2.8rem);
         font-weight: 800;
         color: #14345b;
         margin-bottom: 24px;
@@ -24,73 +24,87 @@
     .articles-list {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 32px;
+        gap: 28px;
     }
 
-    @media (min-width: 700px) {
+    @media (min-width: 860px) {
         .articles-list {
             grid-template-columns: 1fr 1fr;
         }
     }
 
     .article-card {
-        background: #f4f8fc;
+        background: linear-gradient(180deg, #f7fbff 0%, #f3f6fb 100%);
+        border: 1px solid #e8eef7;
         border-radius: 14px;
-        padding: 28px 22px 22px 22px;
-        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
+        padding: 22px 20px 20px;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, .06);
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
-    }
-
-    .article-title {
-        color: #14345b;
-        font-size: 1.25rem;
-        font-weight: 700;
-        margin: 0 0 10px 0;
-        text-decoration: none;
-    }
-
-    .article-title:hover {
-        text-decoration: underline;
-        color: #2863fa;
-    }
-
-    .article-excerpt {
-        color: #333;
-        font-size: 1rem;
-        margin-bottom: 18px;
-        min-height: 48px;
-        overflow-wrap: anywhere;
-        /* prevent long hashes/URLs from overflowing */
-    }
-
-    .article-btn:hover {
-        background: #1845a3;
-    }
-
-    .article-card {
+        gap: 10px;
         transition: transform .12s ease, box-shadow .12s ease;
     }
 
     .article-card:hover,
     .article-card:focus-within {
         transform: translateY(-2px);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, .10);
+    }
+
+    .article-title,
+    .article-title:visited {
+        color: #14345b;
+        font-size: 1.25rem;
+        font-weight: 800;
+        margin: 0;
+        text-decoration: none;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        /* clamp long titles */
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .article-title:hover {
+        color: #2863fa;
+        text-decoration: underline;
     }
 
     .article-date {
         color: #6e7a8a;
-        font-size: 0.95rem;
-        margin-bottom: 8px;
+        font-size: .95rem;
     }
 
-    /* Removed .back-btn since we don't render that element here */
+    .article-excerpt {
+        color: #273142;
+        font-size: 1rem;
+        line-height: 1.55;
+        min-height: 48px;
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        /* tidy, uniform cards */
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
 
-
-    .back-btn:hover {
-        color: #2863fa;
-        text-decoration: none;
+    .article-btn,
+    .article-btn:visited {
+        display: inline-flex;
+        align-self: flex-start;
+        align-items: center;
+        gap: 8px;
+        background: #1f57ff;
+        color: #fff !important;
+        /* kill purple visited color */
+        border: none;
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-weight: 700;
+        font-size: 1rem;
+        text-decoration: none !important;
+        /* kill underline */
+        transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
     }
 
     .back-link {
@@ -100,11 +114,6 @@
         font-weight: 600;
         text-decoration: none;
         font-size: 1rem;
-    }
-
-    .back-link:hover {
-        color: #2863fa;
-        text-decoration: underline;
     }
 </style>
 {% endblock %}
