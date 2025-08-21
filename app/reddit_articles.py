@@ -33,6 +33,14 @@ ARTICLES_DIR = os.path.join(os.path.dirname(__file__), "generated_articles")
 os.makedirs(ARTICLES_DIR, exist_ok=True)
 
 USED_ITEMS_FILE = os.path.join(ARTICLES_DIR, "_used_items.json")
+# Dedupe thresholds (tunable)
+TOPIC_OVERLAP_BLOCK = 0.58        # block if same-topic overlap >= 0.58
+TITLE_SIMILARITY_BLOCK = 82       # block if title similarity > 82
+VENDOR_DAY_CAP = 2                # max items per vendor per day
+
+# Relaxed pass if we didn't reach n items
+RELAXED_TOPIC_OVERLAP = 0.70
+RELAXED_TITLE_SIMILARITY = 86
 
 def _load_used_items():
     try:
@@ -53,69 +61,54 @@ def _item_key(it: dict) -> str:
     raw = (_normalize(it.get("link") or "") + "|" + _normalize(it.get("title") or "")).encode("utf-8")
     return hashlib.md5(raw).hexdigest()
 
-CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+# Topic/vendor helpers
+VENDOR_HINTS = [
+    "apple","microsoft","google","cisco","vmware","citrix","fortinet","adobe","juniper",
+    "dell","hp","intel","amd","sap","oracle","apache","nginx","okta","github","gitlab",
+    "mozilla","zoom","slack","cloudflare","1password","lastpass"
+]
+GROUP_HINTS = ["lockbit","alphv","blackcat","clop","lazarus","apt29","apt28","sandworm",
+               "fin7","scattered spider","black basta"]
 
-VENDOR_CANON = {
-    "apple": ["apple", "ios", "ipados", "macos", "watchos", "imessage", "safari", "coreaudio"],
-    "microsoft": ["microsoft", "windows", "msrc", "defender"],
-    "google": ["google", "android", "chrome", "project zero", "projectzero"],
-    "cisco": ["cisco", "asa", "ios xe", "ios-xe"],
-    "vmware": ["vmware"],
-    "fortinet": ["fortinet"],
-    "citrix": ["citrix", "netscaler"],
-    "juniper": ["juniper"],
-    "okta": ["okta"],
+STOPWORDS_TOPIC = {
+    "the","a","an","and","or","to","of","in","on","for","with","as","by","from","is","are",
+    "this","that","today","new","update","patch","patched","patches","security","vulnerability",
+    "vulnerabilities","zero-day","exploit","researchers","attackers","ransomware","breach"
 }
 
-THEME_TERMS = {
-    "zero-day": [r"zero[\s-]?day"],
-    "ransomware": ["ransomware"],
-    "data-breach": ["data breach", "breach", "leak"],
-    "registry": ["registry"],
-    "fuzzing": ["fuzz", "fuzzing"],
-    "kernel": ["kernel", "kernel-mode"],
-    "vpn": ["vpn"],
-    "exchange": ["exchange server"],
-}
+def _extract_cves(text: str):
+    return re.findall(r'cve-\d{4}-\d+', text.lower())
 
-def topic_signature(item: dict) -> str:
-    """
-    Stable topic id for cross-source dedupe.
-    Priority:
-      1) CVE -> 'cve:CVE-YYYY-N'
-      2) vendor + theme -> 'apple+zero-day' etc.
-      3) fallback to first 6 alnum words of title/summary
-    """
-    text = _normalize((item.get("title") or "") + " " + (item.get("summary") or "")).lower()
+def _detect_vendor(text: str):
+    low = text.lower()
+    for v in VENDOR_HINTS:
+        if v in low:
+            return v
+    return None
 
-    # 1) CVE
-    m = CVE_RE.search(text)
-    if m:
-        return f"cve:{m.group(0).upper()}"
+def _topic_signature(it: dict) -> str:
+    """Stable per-topic fingerprint for day-wide dedupe."""
+    t = _normalize(f"{it.get('title','')} {it.get('summary','')}")
+    low = t.lower()
+    cves = _extract_cves(low)[:2]
+    vendor = _detect_vendor(low)
+    groups = [g for g in GROUP_HINTS if g in low][:2]
+    # rare tokens = first few non-stopword 4+ char tokens
+    tokens = [w for w in re.findall(r"[a-z0-9\-/\.]+", low)
+              if len(w) >= 4 and w not in STOPWORDS_TOPIC][:6]
+    parts = []
+    if cves:   parts.append(",".join(cves))
+    if vendor: parts.append(vendor)
+    if groups: parts.append(",".join(groups))
+    if tokens: parts.append(",".join(tokens))
+    return "|".join(parts)
 
-    # 2) vendor + theme
-    vendor = None
-    for canon, synonyms in VENDOR_CANON.items():
-        if any(s in text for s in synonyms):
-            vendor = canon
-            break
-
-    themes = []
-    for theme, pats in THEME_TERMS.items():
-        for p in pats:
-            if "[" in p or "\\" in p:  # treat as regex
-                if re.search(p, text): themes.append(theme); break
-            else:
-                if p in text: themes.append(theme); break
-
-    if vendor or themes:
-        parts = [vendor] if vendor else []
-        parts += sorted(set(themes))
-        return "+".join([p for p in parts if p])
-
-    # 3) fallback
-    words = re.findall(r"[a-z0-9]+", text)[:6]
-    return "t:" + "-".join(words)
+def _topic_overlap(sig_a: str, sig_b: str) -> float:
+    """Jaccard overlap of signature parts."""
+    A = set(re.split(r"[|,]", sig_a)) if sig_a else set()
+    B = set(re.split(r"[|,]", sig_b)) if sig_b else set()
+    if not A or not B: return 0.0
+    return len(A & B) / len(A | B)
 
 # --- NEW: vetted cybersecurity RSS/Atom sources ---
 CYBER_FEEDS = [
@@ -485,70 +478,94 @@ def score_cyber_item(item: dict) -> float:
     trust_bonus = 8 if (src.endswith(".gov") or src.endswith(".edu") or "cisa" in src or "msrc" in src) else 0
     return kw_hits * 12 + recency_score + trust_bonus
 
-def select_unique_for_today(ranked_items: list, n: int = 9, max_per_vendor: int = 1) -> list:
+def select_unique_for_today(ranked_items: list, n: int = 9) -> list:
     """
-    Pick up to n items not yet used today (by topic signature), avoid near-duplicate
-    titles within the same edition, and cap per-vendor to keep variety.
-    If we can't reach n, we relax the vendor cap to 2 on a second pass.
+    Pick up to n items NEW vs everything already used today:
+    - blocks same-topic items via fingerprint overlap
+    - avoids titles similar to earlier editions
+    - soft-cap: max VENDOR_DAY_CAP items per vendor across the whole day
+    - relaxed second pass if we didn't reach n
     """
     today = date.today().isoformat()
     used_map = _load_used_items()
-    record = used_map.get(today, {})
-    # backward compat if file previously stored a list
-    if isinstance(record, list):
-        record = {"items": record, "topics": []}
-    used_items = set(record.get("items", []))
-    used_topics = set(record.get("topics", []))
 
-    def _key(it: dict) -> str:
-        return _item_key(it)
+    # ---- back-compat for old _used_items.json schema ----
+    raw_day = used_map.get(today, {})
+    if isinstance(raw_day, dict):
+        used_keys = set(raw_day.get("keys", []))
+        used_titles = list(raw_day.get("titles", []))
+        used_topics = list(raw_day.get("topics", []))
+        vendor_cnt = dict(raw_day.get("vendor_counts", {}))
+    elif isinstance(raw_day, list):  # old schema: just a list of keys
+        used_keys, used_titles, used_topics, vendor_cnt = set(raw_day), [], [], {}
+    else:
+        used_keys, used_titles, used_topics, vendor_cnt = set(), [], [], {}
 
-    def _vendor_from_sig(sig: str) -> str:
-        if sig.startswith("cve:"):
-            return ""  # CVE is vendor-agnostic here
-        return sig.split("+", 1)[0] if "+" in sig else ""
+    chosen = []
 
-    def try_pick(cap: int) -> list:
-        chosen, chosen_topics, vendor_counts = [], set(), {}
+    # ---------- first pass: strict ----------
+    for it in ranked_items:
+        if len(chosen) >= n:
+            break
+        key = _item_key(it)
+        title = (it.get("title") or "").strip()
+        if not title or key in used_keys:
+            continue
+
+        # block similar to any title already used today
+        if any(fuzz.ratio(title.lower(), t.lower()) > TITLE_SIMILARITY_BLOCK for t in used_titles):
+            continue
+
+        sig = _topic_signature(it)
+        # block same-topic overlap
+        if sig and any(_topic_overlap(sig, s) >= TOPIC_OVERLAP_BLOCK for s in used_topics):
+            continue
+
+        vendor = _detect_vendor(f"{it.get('title','')} {it.get('summary','')}")
+        if vendor and vendor_cnt.get(vendor, 0) >= VENDOR_DAY_CAP:
+            continue
+
+        chosen.append(it)
+        used_keys.add(key)
+        used_titles.append(title)
+        if sig:
+            used_topics.append(sig)
+        if vendor:
+            vendor_cnt[vendor] = vendor_cnt.get(vendor, 0) + 1
+
+    # ---------- second pass: relaxed (only if needed) ----------
+    if len(chosen) < n:
         for it in ranked_items:
-            k = _key(it)
-            sig = topic_signature(it)
-
-            if k in used_items or sig in used_topics:
-                continue
-
-            vendor = _vendor_from_sig(sig)
-            if vendor in VENDOR_CANON and vendor_counts.get(vendor, 0) >= cap:
-                continue
-
-            # avoid near-duplicate titles inside this edition
-            if any(fuzz.ratio(it["title"].lower(), c["title"].lower()) > 82 for c in chosen):
-                continue
-
-            chosen.append(it)
-            chosen_topics.add(sig)
-            if vendor in VENDOR_CANON:
-                vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-
             if len(chosen) >= n:
                 break
-        return chosen, chosen_topics
+            key = _item_key(it)
+            title = (it.get("title") or "").strip()
+            if not title or key in used_keys:
+                continue
 
-    # pass 1: strict cap
-    chosen, chosen_topics = try_pick(max_per_vendor)
-    # pass 2: relax cap to 2 if still short
-    if len(chosen) < n:
-        extra, extra_topics = try_pick(2)
-        seen = {id(x) for x in chosen}
-        for x in extra:
-            if id(x) not in seen and len(chosen) < n:
-                chosen.append(x)
-        chosen_topics |= extra_topics
+            # relaxed title threshold
+            if any(fuzz.ratio(title.lower(), t.lower()) > RELAXED_TITLE_SIMILARITY for t in used_titles):
+                continue
 
-    # persist today's usage
-    used_items.update(_item_key(x) for x in chosen)
-    used_topics.update(chosen_topics)
-    used_map[today] = {"items": list(used_items), "topics": list(used_topics)}
+            sig = _topic_signature(it)
+            # relaxed topic overlap (allow a bit closer but not same)
+            if sig and any(_topic_overlap(sig, s) >= RELAXED_TOPIC_OVERLAP for s in used_topics):
+                continue
+
+            # ignore vendor cap on relaxed pass
+            chosen.append(it)
+            used_keys.add(key)
+            used_titles.append(title)
+            if sig:
+                used_topics.append(sig)
+
+    # persist day state
+    used_map[today] = {
+        "keys": list(used_keys),
+        "titles": used_titles,
+        "topics": used_topics,
+        "vendor_counts": vendor_cnt,
+    }
     _save_used_items(used_map)
     return chosen
 
@@ -779,13 +796,13 @@ def generate_faq_from_body(body_text: str) -> str:
 # ------------------------------
 def generate_article_for_today():
     # 1) Gather & rank daily cybersecurity items
-    items = fetch_cyber_feed_entries(max_per_feed=25)
+    items = fetch_cyber_feed_entries(max_per_feed=50)
     if not items:
         raise Exception("No cybersecurity feed items available today.")
 
-    # Rank a larger pool, then select items not used yet today
-    ranked = pick_top_cyber_items(items, n=60)
-    top_items = select_unique_for_today(ranked, n=9, max_per_vendor=1)
+    # Rank a larger pool, then select items not used yet today 
+    ranked = pick_top_cyber_items(items, n=200)         # was 30
+    top_items = select_unique_for_today(ranked, n=9)
 
     # 2) Title + brief (simple, human) — add clean edition suffix when >1 per day
     base_title = rewrite_title_for_cyber_briefing(top_items)
