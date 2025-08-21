@@ -659,8 +659,8 @@ Create 5 short vertical video script VARIANTS for a Daily Cybersecurity Brief.
 Each variant:
 - 30–40 seconds (~90–110 words)
 - First line [HOOK] ≤ 8 words, curiosity-based, no hype
-- Short lines (≤ 8 words) for captions
-- Name 1–2 concrete items if present (e.g., CVE id, vendor patch)
+- Short lines (≤ 12 words) for captions
+- Name 3 concrete items if present (e.g., CVE id, vendor patch)
 - Honest tone (no sensationalism)
 - End with [CTA] “Full brief at TheRealRoundup.com”
 
