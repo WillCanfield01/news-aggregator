@@ -479,6 +479,58 @@ Context:
     )
     return resp.choices[0].message.content
 
+def generate_reel_script_veed(article_text: str, topic: str) -> str:
+    """
+    Create 30–40s vertical script variants for the Daily Cyber Brief.
+    Returns the best-scoring variant (fallback provided if API fails).
+    """
+    prompt = f"""
+Create 5 short vertical video script VARIANTS for a Daily Cybersecurity Brief.
+Each variant:
+- 30–40 seconds (~90–110 words)
+- First line [HOOK] ≤ 8 words, curiosity-based, no hype
+- Short lines (≤ 8 words) for captions
+- Name 1–2 concrete items if present (e.g., CVE id, vendor patch)
+- Honest tone (no sensationalism)
+- End with [CTA] “Full brief at TheRealRoundup.com”
+
+Topic: {topic}
+
+Reference (use only as context; don't quote verbatim):
+{article_text[:1200]}
+
+Return JSON exactly as: {{"variants": ["...","...","...","...","..."]}}
+""".strip()
+
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        variants = [v.strip() for v in data.get("variants", []) if v.strip()]
+        if not variants:
+            raise ValueError("no variants")
+        # pick the strongest using your scoring heuristic
+        return max(variants, key=_score_reel_variant)
+    except Exception:
+        # safe fallback
+        return (
+            "Today’s biggest cyber risks, fast\n"
+            "[B-ROLL: security dashboard]\n"
+            "Zero-day patched in a major app\n"
+            "Ransomware hits a regional hospital\n"
+            "[B-ROLL: headlines montage]\n"
+            "If you manage endpoints, patch today\n"
+            "Rotate creds and block known C2 IPs\n"
+            "[B-ROLL: terminal / firewall rules]\n"
+            "[CTA] Full brief at TheRealRoundup.com"
+        )
+
+
 # ------------------------------
 # Image suggestions (unchanged pattern)
 # ------------------------------
@@ -610,7 +662,10 @@ def generate_article_for_today():
     article_md = strip_unwanted_bold(remove_gpt_dashes(article_md))
 
     # 5) Optional: reel script
-    reel_script = generate_reel_script_veed(article_md, headline)
+    try:
+        reel_script = generate_reel_script_veed(article_md, headline)
+    except NameError:
+        reel_script = ""
 
     # 6) Save
     html_content = markdown(article_md, extras=["tables"])
@@ -684,7 +739,10 @@ def published_articles():
         plain = _re.sub(r'Photo by .*? on Unsplash', '', plain, flags=_re.IGNORECASE)
 
         words = plain.split()
-        a.snippet = " ".join(words[:40]) + ("..." if len(words) > 40 else "")
+        excerpt = " ".join(words[:40]) + ("..." if len(words) > 40 else "")
+        a.excerpt = excerpt   # template uses `article.excerpt`
+        a.snippet = excerpt   # keep for backward-compat
+
     return render_template("published_articles.html", articles=articles)
 
 @bp.route("/articles/<filename>")
