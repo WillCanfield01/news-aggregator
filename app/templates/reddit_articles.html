@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}All Published Articles – The Roundup{% endblock %}
+{% block title %}Daily Cybersecurity Briefings – The Roundup{% endblock %}
 
 {% block head %}
 <style>
@@ -96,24 +96,48 @@
         color: #2863fa;
         text-decoration: underline;
     }
+
+    .article-title:hover {
+        text-decoration: underline;
+        color: #2863fa;
+    }
+
+    .article-date {
+        color: #6e7a8a;
+        font-size: 0.95rem;
+        margin-bottom: 8px;
+    }
+
+    .article-excerpt {
+        overflow-wrap: anywhere;
+        /* prevent long hashes/URLs from overflowing */
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container">
     <a href="/" class="back-link">← Back to Home</a>
-    <h1>All Published Articles</h1>
+    <h1>Daily Cybersecurity Briefings</h1>
     <div class="articles-list">
         {% for article in articles %}
         <div class="article-card">
             <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
                 {{ article.title }}
             </a>
+
+            {% if article.date %}
+            <div class="article-date">{{ article.date.strftime('%b %d, %Y') }}</div>
+            {% endif %}
+
             <div class="article-excerpt">
-                {{ article.excerpt }}
+                {{ ((article.html_content or article.content)|striptags)[:160] }}
+                {% if ((article.html_content or article.content)|striptags)|length > 160 %}…{% endif %}
             </div>
-            <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
-                Read Full Article
+
+            <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}"
+                aria-label="Read full briefing: {{ article.title }}">
+                Read Full Briefing
             </a>
         </div>
         {% endfor %}

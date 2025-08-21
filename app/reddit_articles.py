@@ -4,7 +4,6 @@ import json
 import random
 import difflib
 import requests
-import praw
 from datetime import datetime, date, timedelta
 import openai
 from flask import Blueprint, render_template, jsonify
@@ -13,17 +12,17 @@ from unidecode import unidecode
 from app.models import CommunityArticle
 from app import db
 from rapidfuzz import fuzz
+import feedparser
+from urllib.parse import urlparse
 
 # ------------------------------
 # Config & constants
 # ------------------------------
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
-ADD_PERSONAL_NOTES = False  # set True if you want exactly one clean note
-RECENT_WINDOW = 10  # last 10 days
-VARIETY_PENALTY = 40
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")  # unused for cyber; safe to keep
+ADD_PERSONAL_NOTES = False
+RECENT_WINDOW = 10  # uniqueness window for titles
+VARIETY_PENALTY = 40  # kept (not used in cyber scorer but harmless)
 
 openai.api_key = OPENAI_API_KEY
 
@@ -32,9 +31,25 @@ bp = Blueprint("all_articles", __name__, url_prefix="/all-articles")
 ARTICLES_DIR = os.path.join(os.path.dirname(__file__), "generated_articles")
 os.makedirs(ARTICLES_DIR, exist_ok=True)
 
-TARGET_SUBS = ["sidehustle", "Entrepreneur", "AItools"]  # <- NEW
-TIME_FILTER = "day"
-POSTS_PER_SUB = 15  # scan enough to find a solid AI-money angle
+# --- NEW: vetted cybersecurity RSS/Atom sources ---
+CYBER_FEEDS = [
+    "https://feeds.feedburner.com/TheHackersNews",                         # The Hacker News
+    "https://www.bleepingcomputer.com/feed/",                              # BleepingComputer
+    "https://krebsonsecurity.com/feed/",                                   # Krebs
+    "https://www.securityweek.com/feed/",                                  # SecurityWeek
+    "https://www.darkreading.com/rss.xml",                                 # DarkReading
+    "https://www.cisa.gov/news-events/cybersecurity-advisories/alerts.xml",# CISA Alerts
+    "https://msrc.microsoft.com/blog/feed",                                # Microsoft MSRC
+    "https://googleprojectzero.blogspot.com/feeds/posts/default?alt=rss",  # Project Zero
+]
+
+# Keywords to score/cluster daily context
+CYBER_KEYWORDS = [
+    "cve", "zero-day", "zeroday", "ransomware", "data breach", "breach", "exploit",
+    "patch", "vulnerability", "vulnerabilities", "supply chain", "apt", "phishing",
+    "rce", "privilege escalation", "poc", "proof-of-concept", "ioc", "indicators of compromise",
+    "cisa", "nsa", "fbi", "mitre", "atlas", "lockbit", "blackcat", "alphv"
+]
 
 AI_KEYWORDS = [
     "ai", "gpt", "chatgpt", "llm", "automation", "autogen",
@@ -334,265 +349,171 @@ def get_unsplash_image(query):
     return (None, None, None, None)
 
 # ------------------------------
-# Reddit → pick best AI money idea
+# Cybersecurity news ingest (RSS/Atom) → pick daily context
 # ------------------------------
-def fetch_candidates_from_reddit():
-    reddit = praw.Reddit(
-        client_id=REDDIT_CLIENT_ID,
-        client_secret=REDDIT_CLIENT_SECRET,
-        user_agent="RealRoundup/AI-Money-Daily 1.0"
-    )
-    results = []
-    for sub in TARGET_SUBS:
-        try:
-            sr = reddit.subreddit(sub)
-            for post in sr.top(time_filter=TIME_FILTER, limit=POSTS_PER_SUB):
-                if getattr(post, "over_18", False):
-                    continue
-                title = post.title or ""
-                selftext = post.selftext or ""
-                if not (is_safe(title) and is_safe(selftext)):
-                    continue
-                results.append({
-                    "sub": sub,
-                    "id": post.id,
-                    "title": title,
-                    "selftext": selftext,
-                    "score": getattr(post, "score", 0),
-                    "url": f"https://reddit.com{getattr(post, 'permalink', '')}"
-                })
-        except Exception:
-            continue
-    return results
+def _normalize(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip()
 
-def monetization_variety_penalty(candidate_method):
-    recent_methods = [
-        detect_monetization_method(a.title)
-        for a in CommunityArticle.query.order_by(CommunityArticle.date.desc()).limit(RECENT_WINDOW)
-    ]
-    recent_methods = [m for m in recent_methods if m]
-    return VARIETY_PENALTY if candidate_method in recent_methods else 0
-
-def get_reddit_client():
-    return praw.Reddit(
-        client_id=REDDIT_CLIENT_ID,
-        client_secret=REDDIT_CLIENT_SECRET,
-        user_agent="RealRoundup/AI-Money-Daily 1.0"
-    )
-
-def score_candidate(c):
-    t = (c["title"] + " " + c.get("selftext", "")).lower()
-    ai_hits = sum(1 for k in AI_KEYWORDS if k in t)
-    base = c["score"] + ai_hits * 50
-    length_penalty = max(0, len(c["title"]) - 120) // 10
-    method = detect_monetization_method(t)
-    score = base - length_penalty - monetization_variety_penalty(method)
-    return score
-
-def get_best_ai_money_post():
-    reddit = praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        user_agent="daily_ai_money"
-    )
-
-    # fixed spelling + combined subs
-    subreddit = reddit.subreddit("sidehustle+Entrepreneur+ArtificialIntelligence+ChatGPT")
-    posts = subreddit.top(time_filter="day", limit=50)
-
-    candidates = []
-    for post in posts:
-        title = (post.title or "").strip()
-        body = (post.selftext or "").strip()
-
-        if is_generic(title) or is_generic(body):
-            continue
-        if not contains_tool_and_action(f"{title} {body}"):
-            continue
-
-        candidates.append({
-            "title": title,
-            "selftext": body,        # ← include for downstream use
-            "score": getattr(post, "score", 0),
-            "url": f"https://reddit.com{getattr(post, 'permalink', '')}",
-            "id": post.id
-        })
-
-    candidates.sort(key=score_candidate, reverse=True)
-    return candidates[0] if candidates else None
-
-# ------------------------------
-# Generation prompts (new format)
-# ------------------------------
-def rewrite_title_for_ai_money(original_title: str, seed_text: str = "") -> str:
-    """
-    Generate specific, non-generic titles and pick one that maximizes
-    variety across tool/platform/action/audience.
-    """
-    banned_phrases = [
-        "beginner’s guide", "beginners guide", "how to use ai", "start earning",
-        "from scratch", "ways to make money", "how to make money", "side hustle",
-        "friendly guide", "build confidence",
-    ]
-
-    prompt = f"""
-You create article titles for a daily blog that helps everyday people start small,
-realistic AI side gigs THIS WEEK.
-
-Rules for EVERY title:
-- Name a specific AI tool/model/platform (e.g., ChatGPT, Midjourney, ElevenLabs).
-- Name a money activity/deliverable (e.g., Etsy printables, YouTube shorts, Fiverr gigs).
-- Include a target audience or niche when possible (e.g., teachers, local businesses, new Etsy sellers).
-- Keep it concrete (≤ 80 chars; prefer 48–78). Avoid generic phrases: {", ".join(banned_phrases)}.
-- No enterprise IT/security/identity talk. No Reddit mentions.
-
-Input idea: {original_title}
-Seed/context: {seed_text[:500]}
-
-Return JSON like:
-{{"titles": [
-  "Use Midjourney to Sell Nursery Wall Art on Etsy (for New Parents)",
-  "ElevenLabs Voiceovers for Local Gyms’ Promo Reels",
-  "ChatGPT Product Descriptions for Handmade Soap Sellers on Etsy",
-  "Perplexity Research Summaries for Busy Realtors’ Listing Sheets"
-]}}
-"""
-
+def _domain(link: str) -> str:
     try:
-        resp = openai.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=260,
-            temperature=0.7,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content or "{}")
-        candidates = [t.strip() for t in data.get("titles", []) if t.strip()]
+        return urlparse(link).netloc.replace("www.", "")
     except Exception:
-        candidates = []
+        return ""
 
-    if not candidates:
-        candidates = [original_title[:78]]
+def fetch_cyber_feed_entries(max_per_feed: int = 25) -> list:
+    """Fetch recent entries from vetted cyber feeds."""
+    items = []
+    now = datetime.utcnow()
+    for url in CYBER_FEEDS:
+        parsed = feedparser.parse(url)
+        for e in parsed.entries[:max_per_feed]:
+            title = _normalize(getattr(e, "title", ""))
+            summary = _normalize(getattr(e, "summary", "") or getattr(e, "description", ""))
+            link = getattr(e, "link", "")
+            # prefer published_parsed; fallback to now
+            try:
+                published = datetime(*e.published_parsed[:6]) if hasattr(e, "published_parsed") else now
+            except Exception:
+                published = now
+            if not title or not link:
+                continue
+            items.append({
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "source": _domain(link),
+                "published": published,
+                "text": f"{title}\n\n{summary}"
+            })
+    return items
 
-    past = [a.title for a in CommunityArticle.query.all()]
+def score_cyber_item(item: dict) -> float:
+    """Heuristic score combining recency & keyword density."""
+    text = (item.get("title","") + " " + item.get("summary","")).lower()
+    kw_hits = sum(1 for k in CYBER_KEYWORDS if k in text)
+    # fresh = within ~72h is best
+    hours_old = max(0, (datetime.utcnow() - item["published"]).total_seconds() / 3600.0)
+    recency_score = max(0, 72 - hours_old)  # drop after 3 days
+    # favor items from .gov/.edu or trusted brands a bit
+    src = item.get("source", "")
+    trust_bonus = 8 if (src.endswith(".gov") or src.endswith(".edu") or "cisa" in src or "msrc" in src) else 0
+    return kw_hits * 12 + recency_score + trust_bonus
 
-    def looks_generic(t: str) -> bool:
-        low = t.lower()
-        return any(p in low for p in banned_phrases)
+def pick_top_cyber_items(items: list, n: int = 8) -> list:
+    dedup = {}
+    for it in items:
+        key = _normalize(it["title"]).lower()
+        if key not in dedup:
+            dedup[key] = it
+        else:
+            # keep earlier/better-scored one
+            if score_cyber_item(it) > score_cyber_item(dedup[key]):
+                dedup[key] = it
+    ranked = sorted(dedup.values(), key=score_cyber_item, reverse=True)
+    return ranked[:n]
 
-    def has_specific_signal(t: str) -> int:
-        low = t.lower()
-        signals = 0
-        signals += any(k in low for k in AI_TOOL_KEYWORDS)
-        signals += any(k in low for k in MONETIZATION_KEYWORDS)
-        signals += any(k in low for k in ACTION_KEYWORDS)
-        return int(signals)
+# ------------------------------
+# Generation prompts (Cyber Briefing)
+# ------------------------------
+def rewrite_title_for_cyber_briefing(items: list) -> str:
+    """Create a simple, dated briefing title."""
+    today = datetime.utcnow().strftime("%B %d, %Y")
+    # pull 1–2 strongest keywords for flavor if present
+    top = items[:3]
+    hints = []
+    for it in top:
+        t = (it["title"] or "").lower()
+        if "cve-" in t and "CVE" not in hints:
+            hints.append("CVE alerts")
+        if "ransomware" in t and "Ransomware" not in hints:
+            hints.append("Ransomware")
+        if "zero-day" in t or "zero day" in t:
+            if "Zero-day" not in hints:
+                hints.append("Zero-day")
+    suffix = f" — {', '.join(hints)}" if hints else ""
+    return f"Daily Cybersecurity Briefing ({today}){suffix}"
 
-    def base_score(t: str) -> float:
-        length = len(t)
-        length_pen = 0 if 48 <= length <= 78 else abs(63 - min(length, 80)) * 0.6
-        spec = has_specific_signal(t)
-        dup_pen = max((fuzz.ratio(t.lower(), p.lower()) for p in past), default=0)
-        return spec * 10 - length_pen - (dup_pen > 85) * 20 - looks_generic(t) * 15
+def generate_outline_for_cyber(items: list) -> str:
+    """Ask the model for a structured outline based on the top items."""
+    # compact context to keep tokens modest
+    bullet_ctx = "\n".join([f"- {it['title']} ({it['source']}) — {it['link']}" for it in items])
+    prompt = f"""
+You're an editor writing a concise daily cybersecurity briefing for busy professionals.
 
-    # score with uniqueness penalty
-    scored = []
-    for t in (c for c in candidates if not looks_generic(c)):
-        scored.append((base_score(t) - uniqueness_penalty_for_title(t), t))
-    if not scored:
-        scored = [(base_score(candidates[0]) - uniqueness_penalty_for_title(candidates[0]), candidates[0])]
+Use ONLY the context links provided below. You may paraphrase, synthesize, and extract key facts,
+but do NOT invent facts that aren't supported by the items. Cite sources inline like [source: domain].
 
-    best = max(scored, key=lambda x: x[0])[1].strip().strip('"').strip("'")
-    return best[:80]
+Context items (titles + links):
+{bullet_ctx}
 
-def generate_outline_for_ai_money(topic: str, seed_text: str):
-    audience = detect_audience(topic + " " + (seed_text or "")) or "everyday beginners"
-    platform = detect_platform(topic + " " + (seed_text or "")) or "general marketplace"
-    action = detect_action_kw(topic + " " + (seed_text or "")) or "create"
-
-    prompt = (
-        f"You are writing a daily guide called 'One New Way to Make Money With AI: {topic}'.\n"
-        f"Primary audience: {audience}.\n"
-        f"Platform/context: {platform}. Core action: {action}.\n"
-        "Rules:\n"
-        "- Focus on ONE specific AI use case, not general freelancing.\n"
-        "- Include exact tools (by name), where to get them (placeholder URLs ok), and free/paid options.\n"
-        "- Give numbered setup steps a total beginner could follow today (menu clicks, settings, file formats).\n"
-        "- Include at least ONE real-world example with realistic earnings from known marketplaces.\n"
-        "- Include at least ONE unique tip or trick not found in generic blog posts.\n"
-        "- Avoid generic side-hustle language. No Reddit references.\n"
-        "- Sections:\n"
-        "  1) Hook: Why this specific AI use case works now\n"
-        "  2) Tools you need (name + placeholder link + cost) — output as a clean 4-column Markdown table\n"
-        "  3) Exact setup steps (numbered, 7–10 steps)\n"
-        "  4) Example earning scenario (numbers)\n"
-        "  5) Pitfalls & solutions\n"
-        "  6) Scaling & automation tips\n"
-        "  7) Quick checklist\n"
-        "  8) FAQ (3 items)\n"
-        "Return in Markdown headings and bullet points."
-    )
+Return a tight Markdown outline with these sections and nothing else:
+1) Top Stories (3–5 bullets; each bullet ends with [source: domain])
+2) Critical CVEs & Patches (table: CVE | Severity | Affected | Fix/Workaround | Source)
+3) Ransomware & Threat Activity (2–4 bullets)
+4) What This Means (why it matters in plain language)
+5) Quick Actions for Security Teams (5–7 checklist items)
+6) Sources (bulleted list of the links with domains)
+"""
     resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=420, temperature=0.4
+        messages=[{"role":"user","content":prompt}],
+        max_tokens=700,
+        temperature=0.2
     )
     return resp.choices[0].message.content
 
-def generate_article_body(topic: str, outline_md: str, seed_text: str):
-    prompt = (
-        "Write a 700–900 word, beginner-friendly guide based on the outline below.\n"
-        "Tone: clear, calm, encouraging. No fluff or corporate-speak. No Reddit.\n"
-        "Requirements:\n"
-        "- The 'Tools you need' section MUST be a 4-column Markdown table exactly in this order:\n"
-        "  | Tool | Purpose | Where to Get It | Cost |\n"
-        "- Avoid stray pipes or extra columns.\n"
-        f"Topic: {topic}\n\n"
-        f"Seed notes (optional):\n{seed_text[:800]}\n\n"
-        f"Outline:\n{outline_md}\n\n"
-        "Article:"
-    )
+def generate_cyber_article_body(outline_md: str) -> str:
+    """Expand the outline into a 700–900 word brief with tables kept valid."""
+    prompt = f"""
+Expand the following outline into a 700–900 word daily cybersecurity brief.
+Rules:
+- Keep the exact section order from the outline.
+- Keep the CVE table exactly 5 columns: | CVE | Severity | Affected | Fix/Workaround | Source |
+- Use plain, professional tone. No hype. No filler.
+- Attribute facts to sources inline like [source: domain], and list all links in a final "Sources" section.
+- Do not copy long passages verbatim; paraphrase instead.
+
+Outline:
+{outline_md}
+
+Article:
+"""
     resp = openai.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1500, temperature=0.45,
+        messages=[{"role":"user","content":prompt}],
+        max_tokens=1500,
+        temperature=0.35
     )
     return resp.choices[0].message.content
 
 def generate_reel_script_veed(article_text: str, topic: str):
     """
-    Generates a Veed.io-friendly reel script:
-    - Short caption-friendly lines
-    - [BRACKETED] visual cues for stock/B-roll
-    - Honest hook (no hype)
-    - Tool/Niche-specific beats
+    30–40s vertical script variants for a daily cyber brief.
     """
     prompt = f"""
-Create 5 short vertical video script VARIANTS for Veed.io editing.
-Each variant must:
-- Be 30–40 seconds spoken length (~90–110 words)
-- First line: [HOOK] max 8 words, curiosity-based, no hype
-- Break into short lines (≤ 8 words) so captions sync naturally in Veed
-- Include [BRACKETED] visual cues for B-roll at least 3 times
-- Include concrete numbers (prices, minutes, %, steps) and name actual tools or niches
-- Be honest: acknowledge it's not instant, but doable
-- End with [CTA] “Read the full guide at TheRealRoundup.com”
+Create 5 short vertical video script VARIANTS for a Daily Cybersecurity Brief.
+Each variant:
+- 30–40 seconds (~90–110 words)
+- First line [HOOK] ≤ 8 words, curiosity-based, no hype
+- Short lines (≤ 8 words) for captions
+- Name 1–2 concrete items (e.g., CVE id, vendor patch) if present
+- Honest tone: “not instant, but here’s the takeaway”
+- End with [CTA] “Full brief at TheRealRoundup.com”
 
 Topic: {topic}
 
-Reference info from this article:
-{article_text[:1000]}
+Reference (use only as context; don't quote verbatim):
+{article_text[:1200]}
 
-Return JSON with an array 'variants': ["...","...","...","...","..."]
+Return JSON: {{"variants": ["...","...","...","...","..."]}}
 """
-
     try:
         resp = openai.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
+            messages=[{"role":"user","content":prompt}],
+            temperature=0.5,
             max_tokens=900,
-            response_format={"type": "json_object"},
+            response_format={"type":"json_object"},
         )
         data = json.loads(resp.choices[0].message.content or "{}")
         variants = [v.strip() for v in data.get("variants", []) if v.strip()]
@@ -601,18 +522,17 @@ Return JSON with an array 'variants': ["...","...","...","...","..."]
 
     if not variants:
         return (
-            "[HOOK] This won’t make you rich overnight\n"
-            "But it can cover your grocery bill\n"
-            "[B-ROLL: Typing on laptop in coffee shop]\n"
-            "Step 1: Use ChatGPT to draft three Etsy titles\n"
-            "Step 2: Add AI art from Midjourney in Canva\n"
-            "[B-ROLL: Canva screen with printable template]\n"
-            "Step 3: Upload to Etsy for $5–$10 each\n"
-            "[B-ROLL: Etsy shop page with digital listings]\n"
-            "[CTA] Read the full guide at TheRealRoundup.com"
+            "Today’s biggest cyber risks, fast\n"
+            "[B-ROLL: scrolling security dashboard]\n"
+            "Zero-day patched in a major browser\n"
+            "Two ransomware groups hit healthcare\n"
+            "[B-ROLL: news headlines montage]\n"
+            "If you manage endpoints, patch today\n"
+            "Block known C2 IPs and rotate creds\n"
+            "[B-ROLL: terminal / firewall rules]\n"
+            "[CTA] Full brief at TheRealRoundup.com"
         )
 
-    # Optional: use your _score_reel_variant() function to pick the best
     best = max(variants, key=_score_reel_variant)
     return best
 
@@ -710,149 +630,81 @@ def generate_faq_from_body(body_text: str) -> str:
 # Main daily generator
 # ------------------------------
 def generate_article_for_today():
-    # 1) Build a candidate list (primary + fallbacks)
-    primary = get_best_ai_money_post()
-    fallbacks = fetch_candidates_from_reddit()
-    if fallbacks:
-        fallbacks = sorted(fallbacks, key=score_candidate, reverse=True)
-    candidates = []
-    if primary: 
-        candidates.append(primary)
-    candidates.extend(fallbacks)
+    # 1) Gather & rank daily cybersecurity items
+    items = fetch_cyber_feed_entries(max_per_feed=25)
+    if not items:
+        raise Exception("No cybersecurity feed items available today.")
+    top_items = pick_top_cyber_items(items, n=8)
 
-    if not candidates:
-        raise Exception("No suitable Reddit posts found this day.")
+    # 2) Title + outline + article
+    headline = rewrite_title_for_cyber_briefing(top_items)
+    if is_duplicate(headline):
+        # small suffix to avoid filename collision if multiple runs same day
+        headline += " (Update)"
 
-    # 2) Find the first candidate that yields a monetizable headline
-    chosen = None
-    headline = None
-    for c in candidates[:15]:  # don’t loop forever
-        cleaned_topic = clean_title(c["title"])
-        # try a few rewrites for the same idea
-        for _ in range(3):
-            h = rewrite_title_for_ai_money(cleaned_topic, c.get("selftext",""))
-            if is_monetizable_side_gig(h) and not is_duplicate(h):
-                chosen = c
-                headline = h
-                break
-        if headline:
-            break
+    outline = generate_outline_for_cyber(top_items)
+    article_md = generate_cyber_article_body(outline)
 
-    if not headline:
-        print("⚠️ No viable headline after tries; relaxing constraint with the top candidate.")
-        # last-resort: just use cleaned topic trimmed
-        chosen = candidates[0]
-        headline = rewrite_title_for_ai_money(clean_title(chosen["title"]), chosen.get("selftext",""))
-
-    # 3) Proceed with outline/body generation
-    outline = generate_outline_for_ai_money(headline, chosen.get("selftext", ""))
-    article_md = generate_article_body(headline, outline, chosen.get("selftext", ""))
-    article_md = re.sub(r'(?i)\*\*?\s*personal\s*note\s*:\s*.*?(?:\n|$)', '', article_md)
-
-    # 3) Light post-processing
-    #    (Keep your personal-notes quirks and cleanup)
+    # 3) Normalize / cleanup (keep your existing FAQ helper)
     sections = split_markdown_sections(article_md)
-    article_with_human = ""
-    img_count = 0
+    article_norm = ""
     faq_section = None
 
-    for i, (heading, content) in enumerate(sections):
-        lower = heading.lower()
+    for heading, content in sections:
+        lower = (heading or "").lower()
         is_faq = lower.startswith("faq")
-        is_conclusion = lower.startswith("conclusion")  # may exist depending on model
-
-        if not (is_faq or is_conclusion):
-            article_with_human += f"## {heading}\n\n"
-
-        if (
-            img_count < 4 and content and len(content.strip()) > 60
-            and not is_faq and not is_conclusion
-        ):
-            suggestion = generate_section_image_suggestion(
-                headline, [ "make money with ai", "ai side hustle", "automation" ],
-                outline, heading, content
-            )
-            if suggestion:
-                image_url, photographer, image_page, unsplash_alt = get_unsplash_image(suggestion.get("query", ""))
-                caption = unsplash_alt or suggestion.get("caption", "Illustrative image")
-                if image_url:
-                    article_with_human += f"![{caption}]({image_url})\n*Photo by {photographer} on Unsplash*\n\n"
-                    img_count += 1
-
-        # Trim duplicated heading echoes
-        lines = content.splitlines()
-        if lines:
-            first = re.sub(r'\W+', '', (lines[0] or "").lower())
-            hcmp = re.sub(r'\W+', '', heading.lower())
-            if hcmp and hcmp in first:
-                lines = lines[1:]
-        body = "\n".join(lines).strip()
-        article_with_human += body + "\n\n"
-
+        if not is_faq:
+            article_norm += f"## {heading}\n\n"
+        article_norm += (content or "") + "\n\n"
         if is_faq:
             faq_section = (heading, content)
-            continue
 
-    # --- Normalize FAQ: remove stray inline Q/A, then add exactly one FAQ ---
+    # Ensure we have exactly one FAQ (reuse your helper)
     inline_qa_pat = r'(?mis)(^|\n)\s*(\**Q\d+:\s.*?)(?=(?:\n\s*\**Q\d+:|\n##\s|\Z))'
-    inline_qas = [m.group(2).lstrip('*').strip() for m in re.finditer(inline_qa_pat, article_with_human)]
-    article_with_human = re.sub(inline_qa_pat, r'\1', article_with_human).strip()
+    inline_qas = [m.group(2).lstrip('*').strip() for m in re.finditer(inline_qa_pat, article_norm)]
+    article_norm = re.sub(inline_qa_pat, r'\1', article_norm).strip()
 
-    synth_faq = ""
-    if not faq_section and inline_qas:
-        synth_faq = "\n\n".join(inline_qas)
-
-    already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_with_human)
-
+    already_has_faq = re.search(r'(?mi)^\s*##\s*FAQ\b', article_norm)
     if not already_has_faq:
         if faq_section:
-            article_with_human += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
-        elif synth_faq:
-            article_with_human += "\n## FAQ\n\n" + synth_faq.strip() + "\n\n"
+            article_norm += "\n## FAQ\n\n" + faq_section[1].strip() + "\n\n"
+        elif inline_qas:
+            article_norm += "\n## FAQ\n\n" + "\n\n".join(inline_qas).strip() + "\n\n"
         else:
-            gen_faq = generate_faq_from_body(article_with_human)
+            gen_faq = generate_faq_from_body(article_norm)
             if gen_faq:
-                article_with_human += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
+                article_norm += "\n## FAQ\n\n" + gen_faq.strip() + "\n\n"
 
-    if not is_monetizable_side_gig(headline):
-        print(f"⚠️ Rejected headline '{headline}' — not a monetizable everyday side gig.")
-        return None
+    # Final tidy
+    article_norm = re.sub(r'(?im)^\s*faq\s*$', '', article_norm).strip()
+    article_norm = re.sub(r'(?m)([^\n])\n##', r'\1\n\n##', article_norm)
+    article_norm = strip_unwanted_bold(remove_gpt_dashes(article_norm))
 
-    # Layout normalization (spacing + stray 'FAQ' lines)
-    article_with_human = re.sub(r'(?im)^\s*faq\s*$', '', article_with_human).strip()
-    article_with_human = re.sub(r'(?m)([^\n])\n##', r'\1\n\n##', article_with_human)
-    article_with_human = remove_gpt_dashes(article_with_human)
-    article_with_human = strip_unwanted_bold(article_with_human)
-
-    # 4) Reel script
-    reel_script = generate_reel_script_veed(article_with_human, headline)
+    # 4) Optional: reel script
+    reel_script = generate_reel_script_veed(article_norm, headline)
 
     # 5) Save
-    html_content = markdown(article_with_human, extras=["tables"])
+    html_content = markdown(article_norm, extras=["tables"])
     filename = f"{datetime.now().strftime('%Y%m%d')}_{re.sub('[^a-zA-Z0-9]+', '-', headline)[:50]}"
     if CommunityArticle.query.filter_by(filename=filename).first():
-        print(f"⚠️ Article for filename {filename} already exists. Skipping save.")
-        return filename
+        # ensure unique filename if identical title/date
+        filename += f"_{random.randint(100,999)}"
 
-    # Basic meta
     meta_title = headline
-    meta_description = (re.sub(r'<.*?>', '', html_content)[:155] or
-                        "Daily, beginner-friendly ways to make money with AI.")
-
-    if is_duplicate(headline):
-        print("⚠️ Headline is a duplicate after generation. Aborting today’s article.")
-        return None
+    meta_description = (
+        re.sub(r'<.*?>', '', html_content)[:155] or
+        "Daily cybersecurity briefing: top stories, critical CVEs, ransomware activity, and quick actions."
+    )
 
     save_article_db(
-        headline, article_with_human, filename,
+        headline, article_norm, filename,
         html_content=html_content,
         meta_title=meta_title,
         meta_description=meta_description,
         reel_script=reel_script
     )
-    print(f"✅ Saved to DB: {filename}")
+    print(f"✅ Saved Cyber Briefing: {filename}")
     return filename
-
 
 # ------------------------------
 # DB save & routes (kept compatible)
@@ -952,7 +804,7 @@ if __name__ == "__main__":
     app = create_app()
     with app.app_context():
         try:
-            print("Generating today's AI money article...")
+            print("Generating today's Daily Cybersecurity Briefing...")
             fname = generate_article_for_today()
             print(f"✅ Generated and saved: {fname}")
         except Exception as e:

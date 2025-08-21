@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}AI Money Daily – One Actionable Idea, Every Day{% endblock %}
-{% block description %}One beginner-friendly way to make money with AI—tools, steps, pricing, pitfalls—daily.{% endblock
-%}
+{% block title %}Daily Cybersecurity Briefing – Clear, Credible, Actionable{% endblock %}
+{% block description %}Daily, no-fluff cybersecurity briefing for busy pros—top incidents, CVEs, patches, and what to do
+next.{% endblock %}
 {% block canonical %}https://therealroundup.com/{% endblock %}
 
 {% block head %}
@@ -144,18 +144,18 @@
 {% block content %}
 <div class="hero-wrap">
     <section class="hero container">
-        <h1 class="site-title">AI Money Daily</h1>
+        <h1 class="site-title">Daily Cybersecurity Briefing</h1>
         <div class="subtext">
-            Every day: one actionable way to make money with AI.<br>
-            Simple tools, clear steps, realistic earnings.
+            A fast, human summary of today’s biggest security stories.<br>
+            Incidents, vulns, patches—plus what matters for your org.
         </div>
-        <a href="#feature" class="cta-primary">See Today’s Featured Article</a>
+        <a href="#feature" class="cta-primary">See Today’s Briefing</a>
     </section>
 </div>
 
 <main class="container">
     <section id="feature" class="feature">
-        <div class="badge-feature">Today’s AI Income Idea</div>
+        <div class="badge-feature">Today’s Briefing</div>
 
         {% if latest %}
         <div id="headline" class="headline">{{ latest.title }}</div>
@@ -167,15 +167,16 @@
             )[:220] }}…
         </div>
         <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}" class="cta-secondary">
-            Read the full guide
+            Read the full briefing
         </a>
         {% else %}
-        <div class="headline">New guide drops daily. Check back soon.</div>
+        <div class="headline">New briefing drops daily. Check back soon.</div>
         {% endif %}
     </section>
 
     <div class="below">
-        <a href="/all-articles/articles" class="cta-secondary">Explore all published articles</a>
+        <a href="/all-articles/articles" class="cta-secondary">Browse all briefings</a>
     </div>
+
 </main>
 {% endblock %}

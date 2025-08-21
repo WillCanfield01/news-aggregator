@@ -76,17 +76,24 @@
     .article-content table {
         width: 100%;
         border-collapse: collapse;
-        overflow-x: auto;
         display: block;
+        /* allow horizontal scroll */
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
     }
 
-    .article-content table th,
-    .article-content table td {
-        border: 1px solid #ddd;
-        padding: 8px;
+    .article-content th,
+    .article-content td {
+        border: 1px solid #e2e4ea;
+        padding: 8px 10px;
+        white-space: nowrap;
+        /* keep wide cells on one line */
+        vertical-align: top;
+        text-align: left;
     }
 
-    .article-content table th {
+    .article-content thead th {
         background-color: #f8f9fa;
         font-weight: 600;
     }
@@ -117,12 +124,34 @@
         border-radius: 10px;
         background: #eef3ff;
     }
+
+    /* Prevent code/pre from blowing up layout on mobile */
+    .article-content pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 12px 14px;
+        border-radius: 10px;
+        overflow: auto;
+        line-height: 1.5;
+        font-size: 0.92rem;
+    }
+
+    .article-content code {
+        background: #f4f6f9;
+        padding: 2px 6px;
+        border-radius: 6px;
+    }
+
+    .article-content pre code {
+        background: transparent;
+        padding: 0;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container">
-    <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Articles</a>
+    <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Briefings</a>
     <h1 class="article-title">{{ title }}</h1>
     <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
     <div class="article-content">
@@ -143,16 +172,17 @@
 </script>
 
 <section class="cta">
-    <h3>Want a new AI money idea every day?</h3>
-    <p>Get simple tools, steps, pricing, and pitfalls—free.</p>
+    <h3>Get the Daily Cybersecurity Briefing</h3>
+    <p>Top stories, critical CVEs, ransomware activity, and quick actions.</p>
     {% if latest_article %}
     {% if current_filename and latest_article.filename != current_filename %}
-    <a href="{{ url_for('all_articles.read_article', filename=latest_article.filename) }}">See today’s guide</a>
+    <a href="{{ url_for('all_articles.read_article', filename=latest_article.filename) }}">See today’s briefing</a>
     {% else %}
-    <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
+    <a href="{{ url_for('all_articles.published_articles') }}">See all briefings</a>
     {% endif %}
     {% else %}
-    <a href="{{ url_for('all_articles.published_articles') }}">See all guides</a>
+    <a href="{{ url_for('all_articles.published_articles') }}">See all briefings</a>
     {% endif %}
 </section>
+
 {% endblock %}
