@@ -14,6 +14,7 @@ from app import db
 from rapidfuzz import fuzz
 import feedparser
 from urllib.parse import urlparse
+import hashlib
 
 # ------------------------------
 # Config & constants
@@ -30,6 +31,27 @@ bp = Blueprint("all_articles", __name__, url_prefix="/all-articles")
 
 ARTICLES_DIR = os.path.join(os.path.dirname(__file__), "generated_articles")
 os.makedirs(ARTICLES_DIR, exist_ok=True)
+
+USED_ITEMS_FILE = os.path.join(ARTICLES_DIR, "_used_items.json")
+
+def _load_used_items():
+    try:
+        with open(USED_ITEMS_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_used_items(data: dict):
+    try:
+        with open(USED_ITEMS_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+def _item_key(it: dict) -> str:
+    # stable key per article item; prefer link, fall back to title
+    raw = (_normalize(it.get("link") or "") + "|" + _normalize(it.get("title") or "")).encode("utf-8")
+    return hashlib.md5(raw).hexdigest()
 
 # --- NEW: vetted cybersecurity RSS/Atom sources ---
 CYBER_FEEDS = [
@@ -399,6 +421,30 @@ def score_cyber_item(item: dict) -> float:
     trust_bonus = 8 if (src.endswith(".gov") or src.endswith(".edu") or "cisa" in src or "msrc" in src) else 0
     return kw_hits * 12 + recency_score + trust_bonus
 
+def select_unique_for_today(ranked_items: list, n: int = 9) -> list:
+    """Pick up to n items not yet used today. Also dedup near-duplicate titles."""
+    today = date.today().isoformat()
+    used_map = _load_used_items()
+    used_set = set(used_map.get(today, []))
+
+    chosen = []
+    for it in ranked_items:
+        key = _item_key(it)
+        if key in used_set:
+            continue
+        # avoid near-duplicate titles in the same brief
+        if any(fuzz.ratio(it["title"].lower(), c["title"].lower()) > 82 for c in chosen):
+            continue
+        chosen.append(it)
+        used_set.add(key)
+        if len(chosen) >= n:
+            break
+
+    # persist what we used today
+    used_map[today] = list(used_set)
+    _save_used_items(used_map)
+    return chosen
+
 def pick_top_cyber_items(items: list, n: int = 8) -> list:
     dedup = {}
     for it in items:
@@ -629,13 +675,19 @@ def generate_article_for_today():
     items = fetch_cyber_feed_entries(max_per_feed=25)
     if not items:
         raise Exception("No cybersecurity feed items available today.")
-    # Aim for 7–10 items
-    top_items = pick_top_cyber_items(items, n=9)
 
-    # 2) Title + brief (simple, human)
-    headline = rewrite_title_for_cyber_briefing(top_items)
-    if is_duplicate(headline):
-        headline += " (Update)"
+    # Rank a larger pool, then select items not used yet today
+    ranked = pick_top_cyber_items(items, n=30)
+    top_items = select_unique_for_today(ranked, n=9)
+
+    # 2) Title + brief (simple, human) — add clean edition suffix when >1 per day
+    base_title = rewrite_title_for_cyber_briefing(top_items)
+    existing_today_count = (CommunityArticle.query
+                            .filter(CommunityArticle.date == date.today(),
+                                    CommunityArticle.title.like("Daily Cybersecurity Briefing%"))
+                            .count())
+
+    headline = base_title if existing_today_count == 0 else f"{base_title} — Edition {existing_today_count + 1}"
 
     article_md = generate_accessible_brief(top_items)
 
