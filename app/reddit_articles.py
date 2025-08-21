@@ -53,6 +53,70 @@ def _item_key(it: dict) -> str:
     raw = (_normalize(it.get("link") or "") + "|" + _normalize(it.get("title") or "")).encode("utf-8")
     return hashlib.md5(raw).hexdigest()
 
+CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+
+VENDOR_CANON = {
+    "apple": ["apple", "ios", "ipados", "macos", "watchos", "imessage", "safari", "coreaudio"],
+    "microsoft": ["microsoft", "windows", "msrc", "defender"],
+    "google": ["google", "android", "chrome", "project zero", "projectzero"],
+    "cisco": ["cisco", "asa", "ios xe", "ios-xe"],
+    "vmware": ["vmware"],
+    "fortinet": ["fortinet"],
+    "citrix": ["citrix", "netscaler"],
+    "juniper": ["juniper"],
+    "okta": ["okta"],
+}
+
+THEME_TERMS = {
+    "zero-day": [r"zero[\s-]?day"],
+    "ransomware": ["ransomware"],
+    "data-breach": ["data breach", "breach", "leak"],
+    "registry": ["registry"],
+    "fuzzing": ["fuzz", "fuzzing"],
+    "kernel": ["kernel", "kernel-mode"],
+    "vpn": ["vpn"],
+    "exchange": ["exchange server"],
+}
+
+def topic_signature(item: dict) -> str:
+    """
+    Stable topic id for cross-source dedupe.
+    Priority:
+      1) CVE -> 'cve:CVE-YYYY-N'
+      2) vendor + theme -> 'apple+zero-day' etc.
+      3) fallback to first 6 alnum words of title/summary
+    """
+    text = _normalize((item.get("title") or "") + " " + (item.get("summary") or "")).lower()
+
+    # 1) CVE
+    m = CVE_RE.search(text)
+    if m:
+        return f"cve:{m.group(0).upper()}"
+
+    # 2) vendor + theme
+    vendor = None
+    for canon, synonyms in VENDOR_CANON.items():
+        if any(s in text for s in synonyms):
+            vendor = canon
+            break
+
+    themes = []
+    for theme, pats in THEME_TERMS.items():
+        for p in pats:
+            if "[" in p or "\\" in p:  # treat as regex
+                if re.search(p, text): themes.append(theme); break
+            else:
+                if p in text: themes.append(theme); break
+
+    if vendor or themes:
+        parts = [vendor] if vendor else []
+        parts += sorted(set(themes))
+        return "+".join([p for p in parts if p])
+
+    # 3) fallback
+    words = re.findall(r"[a-z0-9]+", text)[:6]
+    return "t:" + "-".join(words)
+
 # --- NEW: vetted cybersecurity RSS/Atom sources ---
 CYBER_FEEDS = [
     "https://feeds.feedburner.com/TheHackersNews",                         # The Hacker News
@@ -421,27 +485,70 @@ def score_cyber_item(item: dict) -> float:
     trust_bonus = 8 if (src.endswith(".gov") or src.endswith(".edu") or "cisa" in src or "msrc" in src) else 0
     return kw_hits * 12 + recency_score + trust_bonus
 
-def select_unique_for_today(ranked_items: list, n: int = 9) -> list:
-    """Pick up to n items not yet used today. Also dedup near-duplicate titles."""
+def select_unique_for_today(ranked_items: list, n: int = 9, max_per_vendor: int = 1) -> list:
+    """
+    Pick up to n items not yet used today (by topic signature), avoid near-duplicate
+    titles within the same edition, and cap per-vendor to keep variety.
+    If we can't reach n, we relax the vendor cap to 2 on a second pass.
+    """
     today = date.today().isoformat()
     used_map = _load_used_items()
-    used_set = set(used_map.get(today, []))
+    record = used_map.get(today, {})
+    # backward compat if file previously stored a list
+    if isinstance(record, list):
+        record = {"items": record, "topics": []}
+    used_items = set(record.get("items", []))
+    used_topics = set(record.get("topics", []))
 
-    chosen = []
-    for it in ranked_items:
-        key = _item_key(it)
-        if key in used_set:
-            continue
-        # avoid near-duplicate titles in the same brief
-        if any(fuzz.ratio(it["title"].lower(), c["title"].lower()) > 82 for c in chosen):
-            continue
-        chosen.append(it)
-        used_set.add(key)
-        if len(chosen) >= n:
-            break
+    def _key(it: dict) -> str:
+        return _item_key(it)
 
-    # persist what we used today
-    used_map[today] = list(used_set)
+    def _vendor_from_sig(sig: str) -> str:
+        if sig.startswith("cve:"):
+            return ""  # CVE is vendor-agnostic here
+        return sig.split("+", 1)[0] if "+" in sig else ""
+
+    def try_pick(cap: int) -> list:
+        chosen, chosen_topics, vendor_counts = [], set(), {}
+        for it in ranked_items:
+            k = _key(it)
+            sig = topic_signature(it)
+
+            if k in used_items or sig in used_topics:
+                continue
+
+            vendor = _vendor_from_sig(sig)
+            if vendor in VENDOR_CANON and vendor_counts.get(vendor, 0) >= cap:
+                continue
+
+            # avoid near-duplicate titles inside this edition
+            if any(fuzz.ratio(it["title"].lower(), c["title"].lower()) > 82 for c in chosen):
+                continue
+
+            chosen.append(it)
+            chosen_topics.add(sig)
+            if vendor in VENDOR_CANON:
+                vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
+
+            if len(chosen) >= n:
+                break
+        return chosen, chosen_topics
+
+    # pass 1: strict cap
+    chosen, chosen_topics = try_pick(max_per_vendor)
+    # pass 2: relax cap to 2 if still short
+    if len(chosen) < n:
+        extra, extra_topics = try_pick(2)
+        seen = {id(x) for x in chosen}
+        for x in extra:
+            if id(x) not in seen and len(chosen) < n:
+                chosen.append(x)
+        chosen_topics |= extra_topics
+
+    # persist today's usage
+    used_items.update(_item_key(x) for x in chosen)
+    used_topics.update(chosen_topics)
+    used_map[today] = {"items": list(used_items), "topics": list(used_topics)}
     _save_used_items(used_map)
     return chosen
 
@@ -677,8 +784,8 @@ def generate_article_for_today():
         raise Exception("No cybersecurity feed items available today.")
 
     # Rank a larger pool, then select items not used yet today
-    ranked = pick_top_cyber_items(items, n=30)
-    top_items = select_unique_for_today(ranked, n=9)
+    ranked = pick_top_cyber_items(items, n=60)
+    top_items = select_unique_for_today(ranked, n=9, max_per_vendor=1)
 
     # 2) Title + brief (simple, human) — add clean edition suffix when >1 per day
     base_title = rewrite_title_for_cyber_briefing(top_items)
