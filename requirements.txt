@@ -51,7 +51,6 @@ pytz==2025.2
 PyYAML==6.0.2
 redis==5.2.1
 regex==2024.11.6
-requests==2.31.0
 rq==2.3.1
 rq-scheduler==0.14.0
 safetensors==0.5.3
@@ -94,12 +93,10 @@ markdown2
 tweepy
 pytrends
 feedparser
-SQLAlchemy
 psycopg2-binary
 pandas
 scikit-learn
 python-dotenv
-flask
 flask_sqlalchemy
 flask_login
 markdown2
@@ -107,4 +104,10 @@ praw
 openai
 unidecode
 rapidfuzz
-requests
+slack-bolt==1.22.0
+slack-sdk==3.27.2
+psycopg2-binary==2.9.9
+python-dateutil==2.9.0.post0
+pytz==2024.1
+requests==2.32.3
+python-dotenv==1.0.1
