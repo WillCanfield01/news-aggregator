@@ -6,7 +6,7 @@ from datetime import datetime
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///patchpal.db")
 
-# Normalize to psycopg v3 driver no matter what the platform gives us
+# Force psycopg v3 driver
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
 elif DATABASE_URL.startswith("postgresql://"):
@@ -14,7 +14,15 @@ elif DATABASE_URL.startswith("postgresql://"):
 elif DATABASE_URL.startswith("postgresql+psycopg2://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
 
-engine = create_engine(DATABASE_URL)
+# Render/Postgres can drop idle conns; use pre_ping + recycle; require SSL just in case
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,         # test and refresh dead conns
+    pool_recycle=180,           # recycle before typical 5–10 min idles
+    pool_size=5,
+    max_overflow=5,
+    connect_args={"sslmode": "require"} if DATABASE_URL.startswith("postgresql+psycopg://") else {},
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
@@ -34,5 +42,3 @@ class PostLog(Base):
     id = Column(Integer, primary_key=True)
     team_id = Column(String, index=True)
     post_date = Column(String, index=True)
-
-Base.metadata.create_all(engine)
