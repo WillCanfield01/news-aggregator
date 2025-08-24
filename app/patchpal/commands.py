@@ -1,7 +1,7 @@
 # app/patchpal/commands.py
 import re
 from slack_bolt import App
-from storage import SessionLocal, Workspace
+from .storage import SessionLocal, Workspace
 
 HELP = (
     "*PatchPal commands:*\n"

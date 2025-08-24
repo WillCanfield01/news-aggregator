@@ -5,9 +5,9 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_sdk import WebClient
 
-from storage import Base, engine
-from commands import register_commands
-from scheduler import run_once
+from .storage import Base, engine
+from .commands import register_commands
+from .scheduler import run_once
 
 # DB init
 Base.metadata.create_all(engine)

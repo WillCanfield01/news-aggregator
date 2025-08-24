@@ -1,7 +1,7 @@
 from datetime import datetime
 import pytz
-from storage import SessionLocal, Workspace, PostLog
-from selector import top3_today, as_slack_blocks
+from .storage import SessionLocal, Workspace, PostLog
+from .selector import top3_today, as_slack_blocks
 from slack_sdk import WebClient
 
 def should_post_now(tz_str, hhmm):
