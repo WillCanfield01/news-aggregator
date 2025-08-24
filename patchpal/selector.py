@@ -327,3 +327,24 @@ def as_slack_blocks(items, tone: str = "simple"):
         "text": {"type": "plain_text", "text": f"Today’s Top {count} Patches / CVEs", "emoji": True}
     }]
     # ... (rest of your block formatting unchanged)
+
+def render_item_text(it: dict, idx: int, tone: str = "simple") -> str:
+    """Return the mrkdwn text for one item; used for threaded posting."""
+    title = it.get("title") or ""
+    summary = it.get("summary") or ""
+    steps = it.get("steps") or []
+    links_line = link_text(it.get("links", []))
+    badges = severity_badge(it)
+
+    lines = [f"*{idx}) {title}*"]
+    if badges:
+        lines.append(badges)
+    if summary:
+        lines.append(f"*What happened:* {summary}")
+    lines.append("\n*Do this now:*")
+    max_steps = 3 if tone == "simple" else len(steps)
+    for s in steps[:max_steps]:
+        lines.append(f"• {s}")
+    if tone != "simple" and links_line:
+        lines.append(f"\n{links_line}")
+    return "\n".join(lines)
