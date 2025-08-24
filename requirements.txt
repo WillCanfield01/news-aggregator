@@ -88,8 +88,6 @@ markdown2
 tweepy
 pytrends
 rapidfuzz
-slack-bolt==1.22.0
-slack-sdk==3.27.2
 psycopg2-binary==2.9.9
 python-dateutil==2.9.0.post0
 requests==2.32.3
