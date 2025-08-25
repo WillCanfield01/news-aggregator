@@ -92,31 +92,63 @@ def is_exploited_or_high_epss(item: Dict[str,Any]) -> bool:
     epss = float(item.get("epss") or 0.0)
     return kev or epss >= 0.5  # conservative default
 
-def pick_top_candidates(pool: List[Dict[str,Any]], n: int, ws) -> List[Dict[str,Any]]:
-    """Universal-first; if mode=='stack', require stack OR KEV/high-EPSS; fill from backup."""
-    primary: List[Dict[str,Any]] = []
-    backup: List[Dict[str,Any]] = []
+def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
+    """
+    STRICT stack-first:
+      - If mode=stack and stack_tokens set:
+          1) all items matching the stack (in pool order)
+          2) then high-signal (KEV or EPSS>=0.5)
+          3) then universal vendors
+          4) then anything left
+      - Else (mode=universal): universal OR high-signal first, then the rest.
+    """
+    mode = (getattr(ws, "stack_mode", "universal") or "universal").lower()
+    tokens = (getattr(ws, "stack_tokens", "") or "").strip()
 
-    for it in pool:
-        ok_universal = is_universal(it)
-        ok_exploit   = is_exploited_or_high_epss(it)
-        ok_stack     = matches_stack(it, getattr(ws, "stack_tokens", None))
-        mode         = (getattr(ws, "stack_mode", None) or "universal").lower()
+    def uniq_add(dst: list, src: list):
+        seen = {id(x) for x in dst}
+        for it in src:
+            # try a semantic key if present, fall back to object id
+            key = it.get("id") or it.get("cve") or it.get("url") or it.get("title") or id(it)
+            if key in seen:
+                continue
+            dst.append(it)
+            seen.add(key)
+            if len(dst) >= n:
+                break
+        return dst
 
-        if mode == "stack":
-            if ok_stack or ok_exploit or ok_universal:
-                primary.append(it)
-            else:
-                backup.append(it)
-        else:
-            if ok_universal or ok_exploit:
-                primary.append(it)
-            else:
-                backup.append(it)
+    # --- universal mode unchanged ---
+    if mode != "stack" or not tokens:
+        primary = [it for it in pool if is_universal(it) or is_exploited_or_high_epss(it)]
+        backup  = [it for it in pool if it not in primary]
+        out: list[Dict[str, Any]] = []
+        uniq_add(out, primary)
+        if len(out) < n:
+            uniq_add(out, backup)
+        return out[:n]
 
-    out = primary[:n]
+    # --- strict stack-first ---
+    stack_items   = [it for it in pool if matches_stack(it, tokens)]
+    high_signal   = [it for it in pool if is_exploited_or_high_epss(it)]
+    universal     = [it for it in pool if is_universal(it)]
+
+    out: list[Dict[str, Any]] = []
+    uniq_add(out, stack_items)
     if len(out) < n:
-        out += backup[: (n - len(out))]
+        uniq_add(out, [it for it in high_signal if it not in out])
+    if len(out) < n:
+        uniq_add(out, [it for it in universal if it not in out])
+    if len(out) < n:
+        uniq_add(out, pool)  # final fill, maintain pool ranking
+
+    # helpful debug (shows in Render logs)
+    try:
+        print(f"[selector] mode=stack tokens='{tokens}' "
+              f"stack={len(stack_items)} high={len(high_signal)} univ={len(universal)} chosen={len(out)}")
+    except Exception:
+        pass
+
     return out[:n]
 
 # -------------------- Fallback pool builders ---------------------------------
