@@ -4,13 +4,14 @@ from slack_bolt import App
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from .storage import SessionLocal, Workspace
-from .billing import ensure_trial  # start a 14-day trial on first touch
+from .billing import ensure_trial  # starts the 14-day trial on first touch
 
 HELP = (
     "*PatchPal commands:*\n"
     "• `/patchpal set-channel here`  (or mention a channel)\n"
     "• `/patchpal set-time 09:00`  (HH:MM 24h)\n"
     "• `/patchpal set-tone simple|detailed`\n"
+    "• `/patchpal upgrade`  (open Stripe Checkout)\n"
     "• `/patchpal status`\n"
     "• `/patchpal post-now`  (test immediately)\n"
 )
@@ -25,22 +26,18 @@ def _resolve_channel_id(text: str, body: dict, client, logger):
     """Return a channel ID from 'here', <#C...|...>, raw ID, or #name (best-effort)."""
     t = (text or "").strip()
 
-    # 1) 'here' → channel the command was invoked in
-    if t.lower().endswith("here"):
+    if t.lower().endswith("here"):  # invoked in channel
         return body.get("channel_id")
 
-    # 2) Encoded mention <#C123|name>
-    m = MENTION_RE.search(t)
+    m = MENTION_RE.search(t)        # <#C123|name>
     if m:
         return m.group(1)
 
-    # 3) Raw channel ID
-    m = RAW_ID_RE.search(t)
+    m = RAW_ID_RE.search(t)         # C123... / G123...
     if m:
         return m.group(0)
 
-    # 4) #channel-name → try conversations.list (needs channels:read,groups:read if private)
-    m = HASH_NAME_RE.search(t)
+    m = HASH_NAME_RE.search(t)      # #channel-name
     if not m:
         return None
     name = m.group(1).lower()
@@ -76,10 +73,18 @@ def register_commands(app: App):
                     db.add(ws); db.commit()
                     ensure_trial(ws, db)  # start 14-day trial on first touch
 
-                # always remember a contact user to DM for billing notices
+                # remember a billing contact to DM later
                 if user_id and ws.contact_user_id != user_id:
                     ws.contact_user_id = user_id
                     db.commit()
+
+                # --- upgrade (Stripe Checkout link) ---
+                if text.startswith("upgrade"):
+                    from .billing import checkout_url
+                    url = checkout_url(team_id)
+                    # ephemeral reply to command invoker
+                    respond(f"Upgrade to *PatchPal Pro* ($9/workspace/mo): <{url}|Open Stripe Checkout>")
+                    return
 
                 # --- set-channel ---
                 if text.startswith("set-channel"):
@@ -138,7 +143,6 @@ def register_commands(app: App):
                         respond("Set a channel first: `*/patchpal set-channel here*` in the target channel.")
                         return
 
-                    # Import here to avoid circulars and keep cold start fast
                     from .selector import topN_today, render_item_text
 
                     items = topN_today(5)  # always 5
@@ -146,7 +150,7 @@ def register_commands(app: App):
                         respond("No items found right now.")
                         return
 
-                    # 1) Post a header in the channel
+                    # 1) Header
                     hdr = client.chat_postMessage(
                         channel=ws.post_channel,
                         text="Today’s Top 5 Patches / CVEs",
@@ -157,17 +161,17 @@ def register_commands(app: App):
                     )
                     parent_ts = hdr["ts"]
 
-                    # 2) Post each item as a thread reply (prevents Slack dropping long blocks)
+                    # 2) Items in thread
                     for i, it in enumerate(items, 1):
                         txt = render_item_text(it, i, ws.tone or "simple")
                         client.chat_postMessage(
                             channel=ws.post_channel,
                             thread_ts=parent_ts,
-                            text=f"{i})",  # fallback
+                            text=f"{i})",
                             blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
                         )
 
-                    # 3) Footer context
+                    # 3) Footer
                     client.chat_postMessage(
                         channel=ws.post_channel,
                         thread_ts=parent_ts,
