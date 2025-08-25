@@ -63,7 +63,7 @@ def run_once(client: WebClient) -> None:
                 continue
 
             # Build today's items
-            items = topN_today(5)  # always 5
+            items = topN_today(5, ws=ws)  # always 5
             if not items:
                 continue
 

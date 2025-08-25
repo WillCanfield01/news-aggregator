@@ -1,26 +1,40 @@
 # patchpal/storage.py
 from __future__ import annotations
+
 import os
 from datetime import datetime
+
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, Text,
-    text, inspect, UniqueConstraint
+    create_engine,
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Text,
+    text,
+    inspect,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# --- DB URL normalization (use psycopg v3) ----------------------------------
+
+# ---------------------------------------------------------------------------
+# DB URL normalization (prefer psycopg v3 driver on Postgres)
+# ---------------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///patchpal.db")
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
 elif DATABASE_URL.startswith("postgresql://"):
-    # add +psycopg if no driver specified
-    if not (DATABASE_URL.startswith("postgresql+psycopg://") or DATABASE_URL.startswith("postgresql+psycopg2://")):
+    if not (
+        DATABASE_URL.startswith("postgresql+psycopg://")
+        or DATABASE_URL.startswith("postgresql+psycopg2://")
+    ):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 elif DATABASE_URL.startswith("postgresql+psycopg2://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
 
-# SQLite needs a special arg, Postgres does not
+# SQLite needs this arg; Postgres does not.
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(
@@ -33,7 +47,10 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 Base = declarative_base()
 
-# --- Models -----------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
 class Workspace(Base):
     __tablename__ = "workspaces"
 
@@ -47,17 +64,17 @@ class Workspace(Base):
     post_time = Column(String, default="09:00")
     tone = Column(String, default="simple")
 
-    # NEW: relevance controls
-    stack_mode = Column(String, default="universal")   # 'universal' | 'stack'
-    stack_tokens = Column(Text, nullable=True)         # e.g. "windows,ms365,chrome"
-    ignore_tokens = Column(Text, nullable=True)        # future use from feedback buttons
+    # relevance controls
+    stack_mode = Column(String, default="universal")  # 'universal' | 'stack'
+    stack_tokens = Column(Text, nullable=True)        # csv e.g. "windows,ms365,chrome"
+    ignore_tokens = Column(Text, nullable=True)       # reserved for feedback buttons
 
     # billing / trial
-    plan = Column(String, default="trial")                  # trial | pro | canceled
+    plan = Column(String, default="trial")            # 'trial' | 'pro' | 'canceled'
     trial_ends_at = Column(DateTime, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     subscription_id = Column(String, nullable=True)
-    customer_id = Column(String, nullable=True)             # for Stripe Portal
+    customer_id = Column(String, nullable=True)       # for Stripe Portal
 
     # contacts / nags
     contact_user_id = Column(String, nullable=True)
@@ -67,6 +84,7 @@ class Workspace(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 class PostLog(Base):
     __tablename__ = "post_logs"
@@ -79,15 +97,22 @@ class PostLog(Base):
     post_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# --- Create tables -----------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Create tables
+# ---------------------------------------------------------------------------
 Base.metadata.create_all(engine)
 
-# --- Tiny migrations for existing DBs ---------------------------------------
+
+# ---------------------------------------------------------------------------
+# Tiny migrations (idempotent)
+# ---------------------------------------------------------------------------
 try:
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("workspaces")}
+
     with engine.begin() as conn:
-        # existing fields (idempotent)
+        # legacy columns (safe if already present)
         if "tone" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN tone VARCHAR"))
         if "plan" not in cols:
@@ -112,21 +137,20 @@ try:
         # NEW relevance fields
         if "stack_mode" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN stack_mode VARCHAR DEFAULT 'universal'"))
+            conn.execute(text("UPDATE workspaces SET stack_mode='universal' WHERE stack_mode IS NULL"))
         if "stack_tokens" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN stack_tokens TEXT NULL"))
         if "ignore_tokens" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN ignore_tokens TEXT NULL"))
 
-        # Ensure uniqueness for (team_id, post_date) at the DB level
-        # Works on Postgres and SQLite
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_postlog_team_date ON post_logs (team_id, post_date)"
-        ))
+        # PostLog uniqueness & helpful indexes
+        conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_postlog_team_date ON post_logs (team_id, post_date)")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_workspaces_team_id ON workspaces (team_id)")
+        )
 
-        # Helpful index for lookups (if not already there)
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_workspaces_team_id ON workspaces (team_id)"
-        ))
 except Exception:
-    # don't block startup if ALTER/INDEX creation fails (e.g., first boot on SQLite)
+    # don't block startup if ALTER/INDEX creation fails (first boot / transient states)
     pass
