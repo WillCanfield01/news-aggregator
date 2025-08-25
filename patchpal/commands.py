@@ -2,7 +2,9 @@
 import re
 from slack_bolt import App
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
+
 from .storage import SessionLocal, Workspace
+from .billing import ensure_trial  # start a 14-day trial on first touch
 
 HELP = (
     "*PatchPal commands:*\n"
@@ -63,6 +65,7 @@ def register_commands(app: App):
         # ACK fast (3s window)
         ack()
         team_id = body.get("team_id")
+        user_id = body.get("user_id")
         text = (body.get("text") or "").strip()
 
         try:
@@ -71,6 +74,12 @@ def register_commands(app: App):
                 if not ws:
                     ws = Workspace(team_id=team_id)
                     db.add(ws); db.commit()
+                    ensure_trial(ws, db)  # start 14-day trial on first touch
+
+                # always remember a contact user to DM for billing notices
+                if user_id and ws.contact_user_id != user_id:
+                    ws.contact_user_id = user_id
+                    db.commit()
 
                 # --- set-channel ---
                 if text.startswith("set-channel"):
@@ -115,7 +124,12 @@ def register_commands(app: App):
                 # --- status ---
                 if text.startswith("status"):
                     ch = f"<#{ws.post_channel}>" if ws.post_channel else "_not set_"
-                    respond(f"Channel: {ch}  |  Time: {ws.post_time}  |  Tone: *{ws.tone or 'simple'}*  |  TZ: {ws.tz}")
+                    trial = f"{(ws.trial_ends_at.isoformat()[:10] if ws.trial_ends_at else 'n/a')}"
+                    plan = ws.plan or "trial"
+                    respond(
+                        f"Channel: {ch}  |  Time: {ws.post_time}  |  Tone: *{ws.tone or 'simple'}*  "
+                        f"|  Plan: *{plan}*  |  Trial ends: *{trial}*  |  TZ: {ws.tz}"
+                    )
                     return
 
                 # --- post-now (threaded) ---

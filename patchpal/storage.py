@@ -6,7 +6,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///patchpal.db")
 
-# Force psycopg v3 driver and require SSL when on Postgres
+# Force psycopg v3
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
 elif DATABASE_URL.startswith("postgresql://"):
@@ -34,23 +34,17 @@ class Workspace(Base):
     post_channel = Column(String, nullable=True)
     post_time = Column(String, default="09:00")
     tone = Column(String, default="simple")
-    count = Column(Integer, default=3)          # NEW: how many items to post
+
+    # 🔒 Billing/trial
+    plan = Column(String, default="trial")             # 'trial' | 'pro' | 'canceled'
+    trial_ends_at = Column(DateTime, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    subscription_id = Column(String, nullable=True)
+    contact_user_id = Column(String, nullable=True)    # Slack user to DM
+    last_billing_nag = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
-
-Base.metadata.create_all(engine)
-
-# tiny migration for existing DBs
-try:
-    insp = inspect(engine)
-    cols = {c["name"] for c in insp.get_columns("workspaces")}
-    with engine.begin() as conn:
-        if "tone" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN tone VARCHAR"))
-        if "count" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN count INTEGER DEFAULT 3"))
-except Exception:
-    pass
 
 class PostLog(Base):
     __tablename__ = "post_logs"
@@ -58,15 +52,26 @@ class PostLog(Base):
     team_id = Column(String, index=True)
     post_date = Column(String, index=True)
 
-# Create tables
 Base.metadata.create_all(engine)
 
-# Best-effort tiny "migration" for tone on existing DBs
+# Tiny migrations for existing DBs
 try:
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("workspaces")}
-    if "tone" not in cols:
-        with engine.begin() as conn:
+    with engine.begin() as conn:
+        if "tone" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN tone VARCHAR"))
+        if "plan" not in cols:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN plan VARCHAR DEFAULT 'trial'"))
+        if "trial_ends_at" not in cols:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN trial_ends_at TIMESTAMP NULL"))
+        if "paid_at" not in cols:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN paid_at TIMESTAMP NULL"))
+        if "subscription_id" not in cols:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN subscription_id VARCHAR NULL"))
+        if "contact_user_id" not in cols:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN contact_user_id VARCHAR NULL"))
+        if "last_billing_nag" not in cols:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_billing_nag TIMESTAMP NULL"))
 except Exception:
     pass
