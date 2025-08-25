@@ -2,15 +2,30 @@
 from __future__ import annotations
 import os
 from datetime import datetime
-from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, text, inspect
-)
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, text, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# --- DB engine / session ----------------------------------------------------
+# --- DB URL normalization (use psycopg v3) ----------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///patchpal.db")
+
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    # add +psycopg if no driver specified
+    if not (DATABASE_URL.startswith("postgresql+psycopg://") or DATABASE_URL.startswith("postgresql+psycopg2://")):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql+psycopg2://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+
+# SQLite needs a special arg, Postgres does not
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True, connect_args=connect_args)
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    future=True,
+    connect_args=connect_args,
+)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 Base = declarative_base()
@@ -34,7 +49,7 @@ class Workspace(Base):
     trial_ends_at = Column(DateTime, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     subscription_id = Column(String, nullable=True)
-    customer_id = Column(String, nullable=True)            # for Stripe Portal
+    customer_id = Column(String, nullable=True)             # for Stripe Portal
 
     # contacts / nags
     contact_user_id = Column(String, nullable=True)
@@ -53,7 +68,7 @@ class PostLog(Base):
     post_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# --- Create tables (no-op if they exist) ------------------------------------
+# --- Create tables -----------------------------------------------------------
 Base.metadata.create_all(engine)
 
 # --- Tiny migrations for existing DBs ---------------------------------------
@@ -82,5 +97,5 @@ try:
         if "last_payment_fail_nag" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_payment_fail_nag TIMESTAMP NULL"))
 except Exception:
-    # Don't block app start if ALTERs fail on first boot; you can run a real migration later.
+    # don't block startup if ALTER fails (first boot on SQLite, etc.)
     pass
