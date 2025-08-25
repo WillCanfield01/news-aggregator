@@ -25,6 +25,8 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
+# patchpal/storage.py  (only the relevant parts shown)
+
 class Workspace(Base):
     __tablename__ = "workspaces"
     id = Column(Integer, primary_key=True)
@@ -35,24 +37,21 @@ class Workspace(Base):
     post_time = Column(String, default="09:00")
     tone = Column(String, default="simple")
 
-    # 🔒 Billing/trial
-    plan = Column(String, default="trial")             # 'trial' | 'pro' | 'canceled'
+    # Billing/trial
+    plan = Column(String, default="trial")
     trial_ends_at = Column(DateTime, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     subscription_id = Column(String, nullable=True)
-    contact_user_id = Column(String, nullable=True)    # Slack user to DM
+    customer_id = Column(String, nullable=True)          # <— NEW (for portal)
+    contact_user_id = Column(String, nullable=True)
     last_billing_nag = Column(DateTime, nullable=True)
+    last_trial_warn = Column(DateTime, nullable=True)     # <— NEW (pre-expiry DM dedupe)
+    last_payment_fail_nag = Column(DateTime, nullable=True) # <— NEW (failed invoice dedupe)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
-class PostLog(Base):
-    __tablename__ = "post_logs"
-    id = Column(Integer, primary_key=True)
-    team_id = Column(String, index=True)
-    post_date = Column(String, index=True)
-
-Base.metadata.create_all(engine)
+# … keep Base.metadata.create_all(engine)
 
 # Tiny migrations for existing DBs
 try:
@@ -69,9 +68,15 @@ try:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN paid_at TIMESTAMP NULL"))
         if "subscription_id" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN subscription_id VARCHAR NULL"))
+        if "customer_id" not in cols:                                   # NEW
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN customer_id VARCHAR NULL"))
         if "contact_user_id" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN contact_user_id VARCHAR NULL"))
         if "last_billing_nag" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_billing_nag TIMESTAMP NULL"))
+        if "last_trial_warn" not in cols:                               # NEW
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_trial_warn TIMESTAMP NULL"))
+        if "last_payment_fail_nag" not in cols:                         # NEW
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_payment_fail_nag TIMESTAMP NULL"))
 except Exception:
     pass
