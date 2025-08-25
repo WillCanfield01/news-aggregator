@@ -49,6 +49,10 @@ BASE_FEEDS = [
 ]
 EXTRA_FEEDS = [u.strip() for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n"," ").split(" ") if u.strip()]
 FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
+# Drop pre-release noise unless explicitly allowed
+SKIP_PRE_RELEASE = os.getenv("PATCHPAL_INCLUDE_PRE_RELEASE", "0").lower() not in ("1","true","yes")
+NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I)
+
 
 # --- Relevance --------------------------------------------------------------
 UNIVERSAL_VENDORS = {
@@ -272,9 +276,14 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             if ts < cutoff:
                 continue
 
-            title   = _strip_html((e.get("title") or "").strip())
+            title = _strip_html((e.get("title") or "").strip())
+
+            # ⬇️ skip pre-release chatter like Dev/Beta/Canary/Nightly/Insider/Preview
+            if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
+                continue
+
             summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
-            cves    = _extract_cves(title, summary)
+            cves = _extract_cves(title, summary)
             kev_flag = any(c in kev_set for c in cves)
 
             out.append({
@@ -454,7 +463,9 @@ def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     title   = str(item.get("title") or f"Item {idx}").strip()
     summary = _short(_strip_html(item.get("summary") or item.get("content") or ""), 220 if tone == "simple" else 420)
     badges  = _badge_line(item)
-    docs    = _docs_links(item)
+    docs_str = _docs_links(item)  # your helper that returns ' <url|Label> · <url|Label> '
+    item = dict(item)             # shallow copy so we can inject
+    item["_docs"] = docs_str
     fix, verify = _actions_and_verify(item, tone)
 
     lines = [
@@ -466,8 +477,10 @@ def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     ]
     if tone == "detailed" and verify:
         lines += [f"*Verify:*", *[f"{_BULLET} {s}" for s in verify]]
-    if docs:
-        lines.append(f"*Docs:* {docs}")
+
+    # add the formatted doc links we built above
+    if docs_str:
+        lines.append(f"*Docs:* {docs_str}")
 
     text = "\n".join(lines).strip()
     if len(text) > 2900:
