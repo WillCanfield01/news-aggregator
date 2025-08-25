@@ -451,41 +451,27 @@ def _actions_and_verify(item: Dict[str, Any], tone: str) -> Tuple[list[str], lis
 
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     """
-    Slack mrkdwn in an ops voice:
-      - Title
-      - Badges (🚨/⚠️, KEV, EPSS if meaningful)
-      - TL;DR (human one-liner)
-      - Fix (bullets; detailed adds ops steps)
-      - Verify (only in detailed)
-      - Docs (1–3 links)
+    Build multi-doc links here, then hand off to utils.render_item_text_core
+    so all wording/voice lives in one place.
     """
-    tone = (tone or "simple").lower()
-    title   = str(item.get("title") or f"Item {idx}").strip()
-    summary = _short(_strip_html(item.get("summary") or item.get("content") or ""), 220 if tone == "simple" else 420)
-    badges  = _badge_line(item)
-    docs_str = _docs_links(item)  # your helper that returns ' <url|Label> · <url|Label> '
-    item = dict(item)             # shallow copy so we can inject
-    item["_docs"] = docs_str
-    fix, verify = _actions_and_verify(item, tone)
+    # make a shallow copy and inject the preformatted docs string
+    docs_str = _docs_links(item)          # e.g. "<url|Label> · <url|Label>"
+    it = dict(item)
+    it["_docs"] = docs_str
 
-    lines = [
-        f"*{idx}) {title}*",
-        badges,
-        f"*TL;DR:* {summary}",
-        f"*Fix{' (step-by-step)' if tone == 'detailed' else ''}:*",
-        *[f"{_BULLET} {s}" for s in fix],
-    ]
-    if tone == "detailed" and verify:
-        lines += [f"*Verify:*", *[f"{_BULLET} {s}" for s in verify]]
-
-    # add the formatted doc links we built above
-    if docs_str:
-        lines.append(f"*Docs:* {docs_str}")
-
-    text = "\n".join(lines).strip()
-    if len(text) > 2900:
-        text = text[:2900] + "…"
-    return text
+    try:
+        from .utils import render_item_text_core
+        return render_item_text_core(it, idx, tone)
+    except Exception:
+        # ultra-simple fallback if utils import ever fails
+        title   = str(it.get("title") or f"Item {idx}").strip()
+        summary = _short(_strip_html(it.get("summary") or it.get("content") or ""), 220 if (tone or "simple")=="simple" else 420)
+        badges  = _badge_line(it)
+        lines = [f"*{idx}) {title}*", badges, f"*TL;DR:* {summary}"]
+        if docs_str:
+            lines.append(f"*Docs:* {docs_str}")
+        txt = "\n".join([l for l in lines if l]).strip()
+        return txt[:2900] + "…" if len(txt) > 2900 else txt
 
 # --- Selection / Ranking -----------------------------------------------------
 def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
