@@ -1,4 +1,8 @@
 <!-- templates/_footer.html -->
 <footer class="footer">
-    &copy; {{ year or 2025 }} AI Money Daily — <a href="https://therealroundup.com">Powered by The Roundup</a>
+    &copy; {{ year or 2025 }} Cybersecurity Daily —
+    <a href="https://therealroundup.com">Powered by The Real Roundup</a>
+    <span>·</span>
+    <a href="{{ config.get('PATCHPAL_LEGAL_URL', 'https://your-patchpal-host/legal') }}" target="_blank"
+        rel="noopener">Legal</a>
 </footer>

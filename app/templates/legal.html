@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>PatchPal — Legal (Terms & Privacy)</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body {
+            max-width: 860px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+            color: #111
+        }
+
+        h1,
+        h2,
+        h3 {
+            line-height: 1.25
+        }
+
+        h1 {
+            font-size: 1.8rem
+        }
+
+        h2 {
+            margin-top: 2rem;
+            font-size: 1.3rem
+        }
+
+        code,
+        pre {
+            background: #f6f8fa;
+            padding: .1rem .3rem;
+            border-radius: 4px
+        }
+
+        .muted {
+            color: #555
+        }
+
+        a {
+            color: #0b65c2
+        }
+
+        ul {
+            margin-left: 1.2rem
+        }
+
+        .box {
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 1rem
+        }
+    </style>
+</head>
+
+<body>
+    <h1>PatchPal — Terms of Service &amp; Privacy Policy</h1>
+    <p class="muted">Last updated: {{ (()) if false else "" }}2025-08-25</p>
+
+    <p><strong>PatchPal</strong> is a Slack app by <strong>THE REAL ROUNDUP LLC</strong> (“<em>we</em>”, “<em>us</em>”,
+        “<em>our</em>”). It posts a daily “Top 5 patches/CVEs” message into a Slack channel you choose. By installing
+        the app or using <code>/patchpal</code> commands, you agree to these Terms and our Privacy Policy.</p>
+
+    <h2>1) What PatchPal does</h2>
+    <ul>
+        <li>At a time you select (Mon–Fri), PatchPal posts up to 5 prioritized patch/CVE items with plain-English
+            context and “do this now” actions.</li>
+        <li>It uses trusted public sources (e.g., CISA KEV, vendor advisories) plus EPSS/KEV signals. No end-user
+            personal content is processed.</li>
+    </ul>
+
+    <h2>2) Slack permissions (scopes)</h2>
+    <p>We request only the scopes needed to operate:</p>
+    <ul>
+        <li><code>commands</code> – receive <code>/patchpal</code> slash commands.</li>
+        <li><code>chat:write</code> &amp; <code>chat:write.public</code> – post messages.</li>
+        <li><code>channels:read</code> &amp; <code>groups:read</code> – resolve channel IDs when you run
+            <code>set-channel</code>.
+        </li>
+        <li><code>users:read</code> – identify the user who configures the app so we can DM billing/trial notices.</li>
+    </ul>
+
+    <h2>3) Free trial, billing &amp; cancellation</h2>
+    <ul>
+        <li>Each workspace gets a <strong>14-day free trial</strong>.</li>
+        <li>Paid plan is <strong>$9/workspace/month</strong> via Stripe subscription. Taxes may apply.</li>
+        <li>You can cancel anytime in the Stripe Customer Portal; access the link via <code>/patchpal billing</code>.
+            Service remains through the paid period; we don’t prorate partial months except where required by law.</li>
+        <li>If payment fails or the trial expires, posts pause until you update payment or re-subscribe.</li>
+    </ul>
+
+    <h2>4) Important disclaimers</h2>
+    <div class="box">
+        <p><strong>Informational use only.</strong> PatchPal summarizes public vulnerability information; it does not
+            replace your patch management, vulnerability scanning, or incident response processes. We do not guarantee
+            completeness, timeliness, or fitness for a particular purpose. You are responsible for validating actions
+            before deployment.</p>
+    </div>
+
+    <h2>5) Acceptable use</h2>
+    <ul>
+        <li>Don’t use PatchPal to break laws, abuse the Slack API, spam, or probe our infrastructure.</li>
+        <li>Don’t post confidential or regulated data to PatchPal commands; we don’t need it.</li>
+    </ul>
+
+    <h2>6) Availability</h2>
+    <p>We aim for reliable weekday posting but provide the service on an “<strong>AS IS</strong>” and “<strong>AS
+            AVAILABLE</strong>” basis. We may pause service for maintenance or to address abuse/security events.</p>
+
+    <h2>7) Privacy Policy</h2>
+    <h3>Data we receive/store</h3>
+    <ul>
+        <li>Workspace identifiers: <code>team_id</code>, workspace name.</li>
+        <li>Posting settings: timezone, channel ID, daily post time, tone.</li>
+        <li>Minimal contact: a Slack user ID (the person who configured PatchPal) to send configuration or billing DMs.
+        </li>
+        <li>Billing data via Stripe: customer ID, subscription ID, payment status (we never see card numbers).</li>
+        <li>Post logs (date only) to avoid double-posting.</li>
+    </ul>
+
+    <h3>Data we do <em>not</em> store</h3>
+    <ul>
+        <li>We don’t store your Slack message history.</li>
+        <li>We don’t sell or share personal data for advertising.</li>
+    </ul>
+
+    <h3>How we use the data</h3>
+    <ul>
+        <li>Operate the app (post the Top 5 at your chosen time).</li>
+        <li>Handle trials, subscriptions, and receipts through Stripe.</li>
+        <li>Security, debugging, and abuse prevention (basic logs and metrics).</li>
+    </ul>
+
+    <h3>Retention &amp; deletion</h3>
+    <ul>
+        <li>Configuration lives while the app is installed.</li>
+        <li>If you uninstall PatchPal, we delete config within 7 days; backups roll off within 30 days.</li>
+        <li>You can also email us to request deletion sooner.</li>
+    </ul>
+
+    <h3>Sub-processors</h3>
+    <ul>
+        <li>Slack (workspace platform)</li>
+        <li>Stripe (payments &amp; customer portal)</li>
+        <li>Render.com or equivalent (hosting/database)</li>
+    </ul>
+
+    <h3>Security</h3>
+    <ul>
+        <li>Transport via TLS; database encryption at rest provided by our cloud provider.</li>
+        <li>Secrets stored as environment variables; least-privilege access.</li>
+    </ul>
+
+    <h3>International, GDPR/CCPA</h3>
+    <p>Depending on your region, you may have rights to access, correct, or delete personal data. Contact us and we’ll
+        help. We are a processor for workspace config data; Stripe is a separate controller/processor for payments.</p>
+
+    <h2>8) IP &amp; feedback</h2>
+    <p>We own the service and content we generate. You own your Slack content. If you give feedback, we may use it
+        without obligation.</p>
+
+    <h2>9) Limitation of liability</h2>
+    <p>To the fullest extent permitted by law, our total liability for any claim related to PatchPal is limited to the
+        <strong>fees you paid in the 3 months</strong> before the event giving rise to liability. We exclude
+        consequential and special damages.
+    </p>
+
+    <h2>10) Changes</h2>
+    <p>We may update these terms; we’ll post the new “Last updated” date and, for material changes, notify admins in
+        Slack.</p>
+
+    <h2>11) Contact</h2>
+    <p>Company: THE REAL ROUNDUP LLC<br />
+        Address: YOUR MAILING ADDRESS HERE<br />
+        Email: <a href="mailto:support@therealroundup.com">support@therealroundup.com</a></p>
+
+</body>
+
+</html>

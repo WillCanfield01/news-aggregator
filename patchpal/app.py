@@ -4,6 +4,7 @@ from slack_bolt import App as BoltApp
 from slack_bolt.adapter.flask import SlackRequestHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_sdk import WebClient
+from flask import render_template
 
 from .billing import billing_bp
 from .storage import Base, engine
@@ -31,6 +32,10 @@ handler = SlackRequestHandler(bolt)
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
     return handler.handle(request)
+
+@flask_app.get("/legal")
+def legal():
+    return render_template("legal.html")
 
 @flask_app.get("/healthz")
 def health():

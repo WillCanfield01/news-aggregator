@@ -1,11 +1,15 @@
 # patchpal/commands.py
+import os
 import re
+from datetime import datetime
 from slack_bolt import App
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from .storage import SessionLocal, Workspace
 from .billing import ensure_trial
-from datetime import datetime
+
+# Where your PatchPal legal page lives
+LEGAL_URL = (os.getenv("APP_BASE_URL", "").rstrip("/") or "https://your-patchpal-host") + "/legal"
 
 HELP = (
     "*PatchPal commands:*\n"
@@ -16,6 +20,7 @@ HELP = (
     "• `/patchpal billing`  (plan, next renewal, manage link)\n"
     "• `/patchpal status`\n"
     "• `/patchpal post-now`  (test immediately)\n"
+    f"• *Legal:* <{LEGAL_URL}|Terms & Privacy>\n"
 )
 
 TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
@@ -72,14 +77,12 @@ def register_commands(app: App):
                     ws.contact_user_id = user_id
                     db.commit()
 
-                # ---- UPGRADE (Checkout) ----
                 if text.startswith("upgrade"):
                     from .billing import checkout_url
                     url = checkout_url(team_id)
                     respond(f"Upgrade to *PatchPal Pro* ($9/workspace/mo): <{url}|Open Stripe Checkout>")
                     return
 
-                # ---- BILLING (status + Portal) ----
                 if text.startswith("billing"):
                     from .billing import portal_url, get_next_renewal, checkout_url
                     plan = ws.plan or "trial"
@@ -89,32 +92,34 @@ def register_commands(app: App):
                         purl = portal_url(ws) or "https://billing.stripe.com/"
                         respond(
                             f"*Plan:* pro  |  *Next renewal:* {nxt_txt}\n"
-                            f"*Manage billing:* <{purl}|Open Stripe Customer Portal>"
+                            f"*Manage billing:* <{purl}|Open Stripe Customer Portal>\n"
+                            f"*Legal:* <{LEGAL_URL}|Terms & Privacy>"
                         )
                     else:
-                        days = "n/a"
                         if ws.trial_ends_at:
-                            days = max((ws.trial_ends_at - datetime.utcnow()).days, 0)
+                            days_left = max((ws.trial_ends_at.date() - datetime.utcnow().date()).days, 0)
+                        else:
+                            days_left = "n/a"
                         url = checkout_url(team_id)
                         respond(
-                            f"*Plan:* trial  |  *Days left:* {days}\n"
-                            f"*Upgrade:* <{url}|Open Stripe Checkout>"
+                            f"*Plan:* trial  |  *Days left:* {days_left}\n"
+                            f"*Upgrade:* <{url}|Open Stripe Checkout>\n"
+                            f"*Legal:* <{LEGAL_URL}|Terms & Privacy>"
                         )
                     return
 
-                # ---- set-channel ----
                 if text.startswith("set-channel"):
                     cid = _resolve_channel_id(text, body, client, logger)
                     if not cid:
                         respond(
                             "Please *mention* the channel or run "
                             "`/patchpal set-channel here` in the target channel.\n"
-                            "_Tip: enable “Escape channels, users, and links sent to your app.” in your Slash Command._"
+                            "_Tip: enable “Escape channels, users, and links sent to your app.” in your Slash Command._\n"
+                            f"*Legal:* <{LEGAL_URL}|Terms & Privacy>"
                         ); return
                     ws.post_channel = cid; db.commit()
                     respond(f"Got it. I’ll post in <#{ws.post_channel}> at {ws.post_time}."); return
 
-                # ---- set-time ----
                 if text.startswith("set-time"):
                     parts = text.split()
                     hhmm = parts[-1] if len(parts) >= 2 else ""
@@ -124,7 +129,6 @@ def register_commands(app: App):
                     ws.post_time = f"{int(h):02d}:{int(m):02d}"; db.commit()
                     respond(f"Time set to {ws.post_time}."); return
 
-                # ---- set-tone ----
                 if text.startswith("set-tone"):
                     parts = text.split()
                     tone = (parts[-1] if len(parts) >= 2 else "").lower()
@@ -133,17 +137,16 @@ def register_commands(app: App):
                     ws.tone = tone; db.commit()
                     respond(f"Tone set to *{ws.tone}*."); return
 
-                # ---- status ----
                 if text.startswith("status"):
                     ch = f"<#{ws.post_channel}>" if ws.post_channel else "_not set_"
                     trial = f"{(ws.trial_ends_at.isoformat()[:10] if ws.trial_ends_at else 'n/a')}"
                     plan = ws.plan or "trial"
                     respond(
                         f"Channel: {ch}  |  Time: {ws.post_time}  |  Tone: *{ws.tone or 'simple'}*  "
-                        f"|  Plan: *{plan}*  |  Trial ends: *{trial}*  |  TZ: {ws.tz}"
+                        f"|  Plan: *{plan}*  |  Trial ends: *{trial}*  |  TZ: {ws.tz}\n"
+                        f"*Legal:* <{LEGAL_URL}|Terms & Privacy>"
                     ); return
 
-                # ---- post-now (threaded) ----
                 if text.startswith("post-now"):
                     if not ws.post_channel:
                         respond("Set a channel first: `*/patchpal set-channel here*`."); return
@@ -154,7 +157,7 @@ def register_commands(app: App):
                     hdr = client.chat_postMessage(
                         channel=ws.post_channel,
                         text="Today’s Top 5 Patches / CVEs",
-                        blocks=[{"type": "header","text":{"type":"plain_text","text":"Today’s Top 5 Patches / CVEs","emoji":True}}],
+                        blocks=[{"type":"header","text":{"type":"plain_text","text":"Today’s Top 5 Patches / CVEs","emoji":True}}],
                     )
                     parent_ts = hdr["ts"]
                     for i, it in enumerate(items, 1):
@@ -169,7 +172,6 @@ def register_commands(app: App):
                     )
                     respond(f"Posted 5 item(s) to <#{ws.post_channel}>."); return
 
-                # default
                 respond(HELP)
 
         except OperationalError as e:

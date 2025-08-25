@@ -37,6 +37,7 @@ def create_app():
     app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
+    app.config["PATCHPAL_LEGAL_URL"] = os.getenv("PATCHPAL_LEGAL_URL", "https://your-patchpal-host/legal")
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-dev-key")
     app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
