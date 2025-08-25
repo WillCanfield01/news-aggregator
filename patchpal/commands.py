@@ -269,7 +269,7 @@ def register_commands(app: App):
                         respond("Set a channel first: `*/patchpal set-channel here*` in the target channel.")
                         return
                     from .selector import topN_today, render_item_text
-                    items = topN_today(5, ws=ws)
+                    items = topN_today(5, ws)
                     if not items:
                         respond("No items found right now.")
                         return

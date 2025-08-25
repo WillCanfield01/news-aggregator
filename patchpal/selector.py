@@ -3,30 +3,54 @@ from __future__ import annotations
 import os, sys, re, time
 from pathlib import Path
 from typing import List, Dict, Any
-import feedparser
 import requests
+import feedparser
 
-# --- Ensure the repo root (which contains the 'app' package) is importable ---
-ROOT = Path(__file__).resolve().parents[1]  # repo root (contains /app and /patchpal)
+# --- import path -------------------------------------------------------------
+ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Controls
-USE_MAIN = os.getenv("PATCHPAL_USE_MAIN_POOL", "1").lower() not in ("0", "false", "no")
-EPSS_THRESHOLD = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
+# --- Tunables ---------------------------------------------------------------
+EPSS_THRESHOLD   = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
+FALLBACK_DAYS    = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "7"))
+REQUEST_TIMEOUT  = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
+CISA_KEV_URL     = os.getenv(
+    "PATCHPAL_KEV_URL",
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+)
 
-# Try to import your site's pool + same-day uniqueness
-pick_top_cyber_items = None
-select_unique_for_today = None
-if USE_MAIN:
-    try:
-        from app.aggregator import pick_top_cyber_items, select_unique_for_today
-        print("[selector] Using main site aggregator pool.")
-    except Exception as e:
-        print(f"[selector] Could not import main aggregator; will use fallback if needed: {e}")
-        USE_MAIN = False
+BASE_FEEDS = [
+    # Browsers & OS vendors
+    "https://chromereleases.googleblog.com/atom.xml",
+    "https://www.mozilla.org/en-US/security/advisories/feed/",
+    "https://helpx.adobe.com/security/atom.xml",
+    "https://www.openssl.org/news/news.rss",
 
-# ---------- Relevance helpers (Universal-first + optional Stack mode) ----------
+    # Microsoft
+    "https://msrc.microsoft.com/update-guide/rss",
+    "https://msrc.microsoft.com/blog/feed/",
+
+    # Infra / appliances
+    "https://www.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml",
+    "https://www.vmware.com/security/advisories.xml",
+    "https://advisories.fortinet.com/rss.xml",
+
+    # Cloud
+    "https://cloud.google.com/feeds/gcp-security-bulletins.xml",
+    "https://aws.amazon.com/security/feed/",
+
+    # Platforms / ecosystems
+    "https://about.gitlab.com/security/advisories.xml",
+    "https://groups.google.com/forum/feed/kubernetes-announce/msgs/rss_v2_0.xml",
+
+    # Gov alerts
+    "https://www.cisa.gov/uscert/ncas/alerts.xml",
+]
+EXTRA_FEEDS = [u.strip() for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n", " ").split(" ") if u.strip()]
+FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
+
+# --- Relevance --------------------------------------------------------------
 UNIVERSAL_VENDORS = {
     "microsoft","windows","office","exchange","teams","edge",
     "apple","ios","macos","safari",
@@ -34,40 +58,38 @@ UNIVERSAL_VENDORS = {
     "adobe","acrobat","reader",
     "zoom","openssl",
 }
-
 STACK_MAP = {
-    "windows":  {"microsoft","windows"},
-    "macos":    {"apple","macos","mac os x"},
-    "linux":    {"linux","ubuntu","debian","rhel","centos","almalinux","suse"},
-    "ios":      {"apple","ios"},
-    "android":  {"android","google"},
-    "chrome":   {"chrome","google chrome"},
-    "edge":     {"edge","microsoft edge"},
-    "firefox":  {"firefox","mozilla"},
-    "ms365":    {"microsoft 365","office","exchange","sharepoint","teams","o365"},
-    "adobe":    {"adobe","acrobat","reader"},
-    "zoom":     {"zoom"},
-    "openssl":  {"openssl"},
-    "nginx":    {"nginx"},
-    "apache":   {"apache http server","apache httpd","httpd"},
-    "postgres": {"postgres","postgresql"},
-    "mysql":    {"mysql","mariadb"},
+    "windows":{"microsoft","windows"},
+    "macos":{"apple","macos","mac os x"},
+    "linux":{"linux","ubuntu","debian","rhel","centos","almalinux","suse"},
+    "ios":{"apple","ios"},
+    "android":{"android","google"},
+    "chrome":{"chrome","google chrome"},
+    "edge":{"edge","microsoft edge"},
+    "firefox":{"firefox","mozilla"},
+    "ms365":{"microsoft 365","office","exchange","sharepoint","teams","o365"},
+    "adobe":{"adobe","acrobat","reader"},
+    "zoom":{"zoom"},
+    "openssl":{"openssl"},
+    "nginx":{"nginx"},
+    "apache":{"apache http server","apache httpd","httpd"},
+    "postgres":{"postgres","postgresql"},
+    "mysql":{"mysql","mariadb"},
     "sqlserver":{"sql server","mssql"},
-    "aws":      {"aws","amazon web services"},
-    "azure":    {"azure","microsoft azure"},
-    "gcp":      {"gcp","google cloud","google compute"},
-    "cisco":    {"cisco"},
-    "fortinet": {"fortinet","fortigate"},
-    "vmware":   {"vmware"},
+    "aws":{"aws","amazon web services"},
+    "azure":{"azure","microsoft azure"},
+    "gcp":{"gcp","google cloud","google compute"},
+    "cisco":{"cisco"},
+    "fortinet":{"fortinet","fortigate"},
+    "vmware":{"vmware"},
 }
 
-_WORDS = re.compile(r"[a-z0-9+.#/-]+")
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WORDS   = re.compile(r"[a-z0-9+.#/-]+", re.I)
+_CVE_RE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+_HTML_RE = re.compile(r"<[^>]+>")
 
 def _strip_html(s: str | None) -> str:
-    if not s:
-        return ""
-    return _HTML_TAG_RE.sub("", s)
+    return "" if not s else _HTML_RE.sub("", s)
 
 def _text(item: Dict[str, Any]) -> str:
     return " ".join([
@@ -77,7 +99,14 @@ def _text(item: Dict[str, Any]) -> str:
     ]).lower()
 
 def _tokens(s: str) -> set[str]:
-    return set(_WORDS.findall(s))
+    return set(_WORDS.findall(s.lower()))
+
+def _extract_cves(*chunks: str) -> list[str]:
+    found = set()
+    for ch in chunks or []:
+        for c in _CVE_RE.findall(ch or ""):
+            found.add(c.upper())
+    return list(found)
 
 def is_universal(item: Dict[str,Any]) -> bool:
     return bool(UNIVERSAL_VENDORS & _tokens(_text(item)))
@@ -104,11 +133,10 @@ def is_exploited_or_high_epss(item: Dict[str,Any]) -> bool:
     return kev or epss >= EPSS_THRESHOLD
 
 def _key_for(it: Dict[str, Any]):
-    # Prefer stable keys for dedupe; fall back to object id
     return it.get("id") or it.get("cve") or it.get("url") or it.get("link") or it.get("title") or id(it)
 
 def _uniq_add(dst: list, src: list, cap: int):
-    seen = { _key_for(x) for x in dst }
+    seen = {_key_for(x) for x in dst}
     for it in src:
         k = _key_for(it)
         if k in seen:
@@ -119,96 +147,78 @@ def _uniq_add(dst: list, src: list, cap: int):
             break
     return dst
 
-def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
-    """
-    STRICT stack-first:
-      - If mode=stack and stack_tokens set:
-          1) stack-matched (in pool order)
-          2) high-signal (KEV or EPSS >= threshold)
-          3) universal vendors
-          4) everything else
-      - Else (mode=universal): universal OR high-signal first, then the rest.
-    """
-    mode = (getattr(ws, "stack_mode", "universal") or "universal").lower()
-    tokens = (getattr(ws, "stack_tokens", "") or "").strip()
-
-    # --- universal mode ---
-    if mode != "stack" or not tokens:
-        primary = [it for it in pool if is_universal(it) or is_exploited_or_high_epss(it)]
-        out: list[Dict[str, Any]] = []
-        _uniq_add(out, primary, n)
-        if len(out) < n:
-            _uniq_add(out, pool, n)
-        return out[:n]
-
-    # --- strict stack-first ---
-    stack_items = [it for it in pool if matches_stack(it, tokens)]
-    high_signal = [it for it in pool if is_exploited_or_high_epss(it)]
-    universal   = [it for it in pool if is_universal(it)]
-
-    out: list[Dict[str, Any]] = []
-    _uniq_add(out, stack_items, n)
-    if len(out) < n:
-        _uniq_add(out, high_signal, n)
-    if len(out) < n:
-        _uniq_add(out, universal, n)
-    if len(out) < n:
-        _uniq_add(out, pool, n)  # final fill, preserve pool ranking
-
+# --- Sources ----------------------------------------------------------------
+def _get_json(url: str) -> dict | None:
     try:
-        print(f"[selector] mode=stack tokens='{tokens}' "
-              f"stack={len(stack_items)} high={len(high_signal)} univ={len(universal)} chosen={len(out)}")
-    except Exception:
-        pass
-
-    return out[:n]
-
-# -------------------- Fallback pool builders ---------------------------------
-
-FALLBACK_KEV_URL = os.getenv(
-    "PATCHPAL_KEV_URL",
-    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-)
-
-FALLBACK_FEEDS = [
-    "https://chromereleases.googleblog.com/atom.xml",     # Chrome releases
-    "https://msrc.microsoft.com/blog/feed/",              # MSRC blog
-    "https://www.cisa.gov/uscert/ncas/alerts.xml",        # CISA alerts
-]
-
-def _safe_get_json(url: str, timeout: int = 10) -> dict | None:
-    try:
-        r = requests.get(url, timeout=timeout)
+        r = requests.get(url, timeout=REQUEST_TIMEOUT)
         if r.ok:
             return r.json()
     except Exception:
-        return None
+        pass
     return None
 
-def _safe_parse_feed(url: str):
+def _parse_feed(url: str):
     try:
         return feedparser.parse(url)
     except Exception:
         return {"entries": []}
 
-def build_fallback_pool(max_items: int = 200, days: int = 14) -> List[Dict[str,Any]]:
+def _load_kev_set() -> set[str]:
+    kev_set: set[str] = set()
+    kev = _get_json(CISA_KEV_URL)
+    if isinstance(kev, dict):
+        for v in kev.get("vulnerabilities", []):
+            cve = (v.get("cveID") or v.get("cve") or "").upper()
+            if cve:
+                kev_set.add(cve)
+    return kev_set
+
+def _enrich_epss(items: List[Dict[str,Any]]) -> None:
+    # Collect CVEs
+    cves, seen = [], set()
+    for it in items:
+        for c in _extract_cves(it.get("title",""), it.get("summary","")):
+            if c not in seen:
+                seen.add(c); cves.append(c)
+    if not cves:
+        return
+
+    # FIRST API ~200 CVEs per request
+    for i in range(0, len(cves), 150):
+        chunk = cves[i:i+150]
+        try:
+            url = "https://api.first.org/data/v1/epss?cve=" + ",".join(chunk)
+            r = requests.get(url, timeout=REQUEST_TIMEOUT)
+            if not r.ok:
+                continue
+            data = r.json().get("data", [])
+            score_map = {d["cve"].upper(): float(d.get("epss", 0.0)) for d in data}
+            for it in items:
+                for c in _extract_cves(it.get("title",""), it.get("summary","")):
+                    if c in score_map:
+                        it["epss"] = max(float(it.get("epss") or 0.0), score_map[c])
+        except Exception:
+            continue
+
+def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List[Dict[str,Any]]:
     out: List[Dict[str,Any]] = []
     now = time.time()
     cutoff = now - days * 86400
 
-    # 1) CISA KEV
-    kev = _safe_get_json(FALLBACK_KEV_URL)
-    if kev and isinstance(kev, dict):
-        for v in kev.get("vulnerabilities", []):
+    kev_set = _load_kev_set()
+
+    # KEV as explicit items (recent only)
+    kev_json = _get_json(CISA_KEV_URL)
+    if isinstance(kev_json, dict):
+        for v in kev_json.get("vulnerabilities", []):
             try:
-                ts = v.get("dateAdded") or v.get("dateAddedToCatalog") or ""
-                added = time.mktime(time.strptime(ts[:10], "%Y-%m-%d")) if ts else now
+                ts = (v.get("dateAdded") or v.get("dateAddedToCatalog") or "")[:10]
+                added = time.mktime(time.strptime(ts, "%Y-%m-%d")) if ts else now
             except Exception:
                 added = now
             if added < cutoff:
                 continue
-
-            cve = v.get("cveID") or v.get("cve") or ""
+            cve = (v.get("cveID") or v.get("cve") or "").upper()
             vendor = (v.get("vendorProject") or "").strip()
             prod = (v.get("product") or "").strip()
             title = f"{cve} — {vendor} {prod}".strip(" —")
@@ -216,14 +226,15 @@ def build_fallback_pool(max_items: int = 200, days: int = 14) -> List[Dict[str,A
                 "title": title,
                 "summary": _strip_html(v.get("shortDescription") or ""),
                 "kev": True,
-                "vendor_guess": vendor.lower(),
+                "vendor_guess": (vendor or prod or title).lower(),
                 "link": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                 "source": "CISA KEV",
+                "cve": cve,
             })
 
-    # 2) A couple of vendor/news feeds
+    # Vendor / ecosystem feeds
     for url in FALLBACK_FEEDS:
-        feed = _safe_parse_feed(url)
+        feed = _parse_feed(url)
         for e in feed.get("entries", []):
             try:
                 updated = e.get("updated_parsed") or e.get("published_parsed")
@@ -232,90 +243,184 @@ def build_fallback_pool(max_items: int = 200, days: int = 14) -> List[Dict[str,A
                 ts = now
             if ts < cutoff:
                 continue
-            title = _strip_html((e.get("title") or "").strip())
+
+            title   = _strip_html((e.get("title") or "").strip())
             summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
+            cves    = _extract_cves(title, summary)
+            kev_flag = any(c in kev_set for c in cves)
+
             out.append({
                 "title": title,
                 "summary": summary,
-                "kev": False,
+                "kev": kev_flag,
                 "vendor_guess": title.lower(),
                 "link": e.get("link") or "",
                 "source": url,
+                "cve": cves[0] if cves else None,
             })
 
-    # Light dedupe by title
-    seen = set()
-    uniq: List[Dict[str,Any]] = []
+    # De-dupe (prefer by CVE, then title)
+    seen_cve, seen_title, uniq = set(), set(), []
     for it in out:
-        t = it.get("title","").strip().lower()
-        if t and t not in seen:
-            seen.add(t)
-            uniq.append(it)
+        cve = (it.get("cve") or "").upper()
+        ttl = (it.get("title") or "").strip().lower()
+        if cve:
+            if cve in seen_cve:
+                continue
+            seen_cve.add(cve)
+        else:
+            if ttl in seen_title:
+                continue
+            seen_title.add(ttl)
+        uniq.append(it)
         if len(uniq) >= max_items:
             break
+
+    _enrich_epss(uniq)  # best-effort
     return uniq
 
-# -------------------- Main function PatchPal calls ---------------------------
+# --- Compact Slack rendering -------------------------------------------------
+_BULLET = "•"
 
-def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
-    """
-    1) Try your main site's ranked pool (200).
-    2) If empty, use fallback (CISA KEV + a couple feeds).
-    3) Apply same-day uniqueness (if main selector exists).
-    4) Relevance filter (universal or stack).
-    """
-    # 1) Ranked pool from main site
-    pool: List[Dict[str,Any]] = []
-    used_main = False
-    if pick_top_cyber_items:
-        try:
-            pool = pick_top_cyber_items(n=200) or []
-            used_main = bool(pool)
-        except Exception as e:
-            print(f"[selector] main pool error; will fallback: {e}")
+def _short(s: str, limit: int) -> str:
+    s = re.sub(r"\s+", " ", s or "").strip()
+    return (s[: limit - 1] + "…") if len(s) > limit else s
 
-    # 2) Fallback if needed
-    if not pool:
-        pool = build_fallback_pool(max_items=200, days=14)
-        print(f"[selector] Using fallback pool: {len(pool)} items")
+def _badge_line(item: Dict[str, Any]) -> str:
+    epss = 0.0
+    try:
+        epss = float(item.get("epss") or 0.0)
+    except Exception:
+        pass
+    is_kev = bool(item.get("kev") or item.get("known_exploited"))
+    sev = "HIGH" if is_kev or epss >= EPSS_THRESHOLD else "MEDIUM"
+    emoji = ":rotating_light:" if sev == "HIGH" else ":warning:"
+    bits = [f"{emoji} *{sev}*"]
+    if is_kev:
+        bits.append("KEV")
+    if epss > 0:
+        bits.append(f"EPSS {epss:.2f}")
+    return " • ".join(bits)
 
-    if not pool:
-        return []
+def _docs_links(item: Dict[str, Any]) -> str:
+    links: list[tuple[str, str]] = []
+    t = _text(item)
+    cve = (item.get("cve") or "").upper()
+    src = item.get("link")
 
-    # 3) Same-day uniqueness (only if main function exists and we used main pool)
-    if used_main and select_unique_for_today:
-        try:
-            pool = select_unique_for_today(pool, n=200)
-        except Exception as e:
-            print(f"[selector] uniqueness filter failed (continuing): {e}")
+    def add(url: str | None, label: str):
+        if url:
+            links.append((url, label))
 
-    # 4) Relevance filter
-    ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
-    return pick_top_candidates(pool, n, ws)
+    # Microsoft / Windows
+    if any(k in t for k in ("microsoft","windows","edge","msrc","office","exchange","teams")):
+        if cve:
+            add(f"https://msrc.microsoft.com/update-guide/vulnerability/{cve}", "MSRC advisory")
+        add("https://support.microsoft.com/help/4027667/windows-update", "Windows Update")
+        add("https://learn.microsoft.com/windows-server/administration/windows-server-update-services/manage/approve-and-deploy-updates", "WSUS: approve & deploy")
+        add("https://learn.microsoft.com/mem/intune/protect/windows-update-for-business-configure", "Intune deadlines")
+    if "chrome" in t:
+        add("https://support.google.com/chrome/answer/95414", "Chrome: update")
+        add("https://support.google.com/chrome/a/answer/9027636", "Admin: force update")
+    if any(k in t for k in ("apple","ios","ipad","macos","safari")):
+        add("https://support.apple.com/HT201222", "Update iPhone/iPad")
+        add("https://support.apple.com/HT201541", "Update macOS")
+    if "cisco" in t:
+        add("https://www.cisco.com/c/en/us/support/docs/psirt.html", "Cisco PSIRT")
+    if "vmware" in t:
+        add("https://www.vmware.com/security/advisories.html", "VMware advisories")
+    if "fortinet" in t or "fortigate" in t:
+        add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
 
-# -------------------- Slack text wrapper -------------------------------------
+    add(src, "Vendor notice")  # always last
+
+    # Dedup + cap to 3
+    out, seen = [], set()
+    for u, label in links:
+        if not u or u in seen:
+            continue
+        seen.add(u); out.append(f"<{u}|{label}>")
+        if len(out) >= 3:
+            break
+    return " · ".join(out)
+
+def _action_lines(item: Dict[str, Any], tone: str) -> list[str]:
+    t = _text(item); actions: list[str] = []
+    if any(k in t for k in ("microsoft","windows","edge","office","exchange","teams")):
+        actions.append("Run Windows Update / deploy latest security updates.")
+        if tone == "detailed":
+            actions += ["WSUS/Intune: approve & force install; reboot if required.",
+                        "Re-scan and validate patch level."]
+    elif "chrome" in t:
+        actions.append("Update Chrome to the latest stable.")
+        if tone == "detailed":
+            actions += ["Admin: force update via policy.", "Restart browser/devices if needed."]
+    elif any(k in t for k in ("apple","ios","ipad","macos","safari")):
+        actions.append("Update iOS/iPadOS/macOS to the latest version.")
+        if tone == "detailed":
+            actions += ["MDM: push update and enforce restart.", "Verify vulnerable builds removed."]
+    else:
+        actions.append("Apply the vendor security update/hotfix.")
+        if tone == "detailed":
+            actions += ["Schedule maintenance; restart if needed.", "Validate service and re-scan."]
+    return actions
 
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
-    """
-    Produce Slack-safe mrkdwn. Guarantees a non-empty string and trims to Slack's limits.
-    """
+    tone = (tone or "simple").lower()
+    title   = str(item.get("title") or f"Item {idx}").strip()
+    summary = _short(_strip_html(item.get("summary") or item.get("content") or ""), 280 if tone == "simple" else 520)
+    badges  = _badge_line(item)
+    actions = _action_lines(item, tone)
+    docs    = _docs_links(item)
+
+    lines = [
+        f"*{idx}) {title}*",
+        badges,
+        f"*What happened:* {summary}",
+        f"*Do this now{' (step-by-step)' if tone == 'detailed' else ''}:*",
+        *[f"• {a}" for a in actions],
+    ]
+    if docs:
+        lines.append(f"*Docs:* {docs}")
+
+    text = "\n".join(lines).strip()
+    if len(text) > 2900:
+        text = text[:2900] + "…"
+    return text
+
+# --- Selection / Ranking -----------------------------------------------------
+def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
+    mode   = (getattr(ws, "stack_mode", "universal") or "universal").lower()
+    tokens = (getattr(ws, "stack_tokens", "") or "").strip()
+
+    if mode != "stack" or not tokens:
+        primary = [it for it in pool if is_universal(it) or is_exploited_or_high_epss(it)]
+        out: list[Dict[str, Any]] = []
+        _uniq_add(out, primary, n)
+        if len(out) < n:
+            _uniq_add(out, pool, n)
+        return out[:n]
+
+    stack_items = [it for it in pool if matches_stack(it, tokens)]
+    high_signal = [it for it in pool if is_exploited_or_high_epss(it)]
+    universal   = [it for it in pool if is_universal(it)]
+
+    out: list[Dict[str, Any]] = []
+    _uniq_add(out, stack_items, n)
+    if len(out) < n: _uniq_add(out, high_signal, n)
+    if len(out) < n: _uniq_add(out, universal, n)
+    if len(out) < n: _uniq_add(out, pool, n)
+
     try:
-        from .utils import render_item_text_core
-        base = render_item_text_core(item, idx, tone)
+        print(f"[selector] mode=stack tokens='{tokens}' stack={len(stack_items)} high={len(high_signal)} univ={len(universal)} chosen={len(out)}")
     except Exception:
-        base = None
+        pass
+    return out[:n]
 
-    if not isinstance(base, str) or not base.strip():
-        title = str(item.get("title") or f"Item {idx}")
-        summary = _strip_html(str(item.get("summary") or item.get("content") or ""))
-        base = f"*{idx}) {title}*\n{summary}".strip()
-
-    # Slack section text hard limit ~3000 chars; stay safe
-    if len(base) > 2900:
-        base = base[:2900] + "…"
-
-    # Add a subtle heads-up if it may be less broadly applicable
-    if not (is_universal(item) or is_exploited_or_high_epss(item)):
-        base += "\n_*FYI:* may not apply broadly; review relevance._"
-
-    return base
+# --- Public API --------------------------------------------------------------
+def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
+    pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS)
+    if not pool:
+        return []
+    ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
+    return pick_top_candidates(pool, n, ws)
