@@ -80,7 +80,7 @@ def _resolve_channel_id(text: str, body: dict, client, logger):
         logger.info(f"conversations.list missing scopes or failed: {e}")
     return None
 
-def _normalize_stack(text: str) -> tuple[list[str], list[str]]:
+def _normalize_stack(text: str):
     """Parse comma-separated tokens; return (accepted, rejected)."""
     toks = [t.strip().lower() for t in (text or "").split(",") if t.strip()]
     accepted, rejected = [], []
@@ -250,7 +250,7 @@ def register_commands(app: App):
                     )
                     parent_ts = hdr["ts"]
 
-                    # 2) Post each item as a thread reply (prevents Slack dropping long blocks)
+                    # 2) Post each item as a thread reply
                     for i, it in enumerate(items, 1):
                         txt = render_item_text(it, i, ws.tone or "simple")
                         client.chat_postMessage(
@@ -272,3 +272,17 @@ def register_commands(app: App):
                     )
 
                     respond(f"Posted 5 item(s) to <#{ws.post_channel}>.")
+                    return
+
+                # default help
+                respond(HELP)
+
+        except OperationalError as e:
+            logger.warning(f"DB OperationalError: {e}")
+            respond("Database connection hiccup — please try again in a few seconds.")
+        except SQLAlchemyError as e:
+            logger.exception("DB error")
+            respond("Database error. Try again shortly.")
+        except Exception as e:
+            logger.exception("Slash command failed")
+            respond(f"Sorry, something went wrong: `{e.__class__.__name__}`. Try again or use `status`.")
