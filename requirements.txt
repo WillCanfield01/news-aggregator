@@ -88,6 +88,6 @@ markdown2
 tweepy
 pytrends
 rapidfuzz
-psycopg2-binary==2.9.9
+psycopg[binary]==3.2.9
 python-dateutil==2.9.0.post0
 requests==2.32.3
