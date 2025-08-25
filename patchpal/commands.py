@@ -5,6 +5,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from .storage import SessionLocal, Workspace
 from .billing import ensure_trial
+from datetime import datetime
 
 HELP = (
     "*PatchPal commands:*\n"
