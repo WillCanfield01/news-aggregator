@@ -87,6 +87,34 @@ STACK_MAP = {
 _WORDS   = re.compile(r"[a-z0-9+.#/-]+", re.I)
 _CVE_RE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _HTML_RE = re.compile(r"<[^>]+>")
+_STOP = {"cve", "update", "security", "advisory", "release", "dev", "desktop", "channel"}
+
+def _normalize_title_for_key(title: str) -> str:
+    """Strip CVE prefix, punctuation, collapse spaces, take first 5 significant tokens."""
+    s = title or ""
+    s = s.lower()
+    s = re.sub(r"^cve-\d{4}-\d{4,7}\s*[—\-:]\s*", "", s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    toks = [t for t in s.split() if t not in _STOP]
+    return " ".join(toks[:5]) or s.strip()
+
+def _product_key(item: Dict[str, Any]) -> str:
+    """Best-effort product grouping so we can collapse dup advisories for the same thing."""
+    t = _text(item)
+    title = (item.get("title") or "").lower()
+
+    # Explicit products we see a lot
+    if "citrix" in t and "session recording" in t:
+        return "citrix-session-recording"
+    if "google" in t and "chrome" in t:
+        return "google-chrome"
+    if "apple" in t and any(x in t for x in ("ios","ipados","macos","safari")):
+        return "apple-ecosystem"
+    if "git " in (" " + t) or title.startswith("git "):
+        return "git-core"
+
+    # Generic fallback from title
+    return _normalize_title_for_key(item.get("title") or "")
 
 def _strip_html(s: str | None) -> str:
     return "" if not s else _HTML_RE.sub("", s)
@@ -277,7 +305,29 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             break
 
     _enrich_epss(uniq)  # best-effort
-    return uniq
+
+    # --- Collapse by product (1 per product per day). Prefer KEV, then higher EPSS.
+    by_product: Dict[str, Dict[str,Any]] = {}
+    def _score(it: Dict[str,Any]) -> tuple:
+        kev = 1 if it.get("kev") or it.get("known_exploited") else 0
+        try:
+            epss = float(it.get("epss") or 0.0)
+        except Exception:
+            epss = 0.0
+        return (kev, epss)
+
+    for it in uniq:
+        key = _product_key(it)
+        cur = by_product.get(key)
+        if cur is None or _score(it) > _score(cur):
+            by_product[key] = it
+
+    collapsed = list(by_product.values())
+    # keep original-ish ranking by sorting with score, then stable title
+    collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
+
+    return collapsed[:max_items]
+
 
 # --- Rendering (OPS VOICE) ---------------------------------------------------
 _BULLET = "•"
@@ -334,6 +384,13 @@ def _docs_links(item: Dict[str, Any]) -> str:
         add("https://www.vmware.com/security/advisories.html", "VMware advisories")
     if "fortinet" in t or "fortigate" in t:
         add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
+        # Git
+    if "git " in (" " + t) or (item.get("title","").lower().startswith("git ")):
+        add("https://git-scm.com/downloads", "Git downloads")
+        add("https://github.com/git/git/tree/master/Documentation/RelNotes", "Git release notes")
+    # Citrix
+    if "citrix" in t:
+        add("https://support.citrix.com/security-bulletins", "Citrix security bulletins")
 
     add(src, "Vendor notice")  # always include if present
 
@@ -348,35 +405,39 @@ def _docs_links(item: Dict[str, Any]) -> str:
     return " · ".join(out)
 
 def _actions_and_verify(item: Dict[str, Any], tone: str) -> Tuple[list[str], list[str]]:
-    """Returns (fix bullets, verify bullets)."""
     t = _text(item)
     fix: list[str] = []
     verify: list[str] = []
 
+    # CHROME FIRST (so the presence of the word 'Windows' in the blog text doesn't hijack it)
+    if "chrome" in t:
+        fix.append("Update Chrome to the latest stable.")
+        if tone == "detailed":
+            fix += ["Admin: force update via policy.", "Restart browser/devices if needed."]
+            verify += ["chrome://version on sample endpoints shows latest build."]
+        return fix, verify
+
+    # APPLE next
+    if any(k in t for k in ("apple","ios","ipad","macos","safari")):
+        fix.append("Update iOS/iPadOS/macOS to the latest version.")
+        if tone == "detailed":
+            fix += ["MDM: push update and enforce restart."]
+            verify += ["MDM inventory shows minimum OS version across devices."]
+        return fix, verify
+
+    # MICROSOFT after vendor-specific cases
     if any(k in t for k in ("microsoft","windows","edge","office","exchange","teams")):
         fix.append("Run Windows Update / deploy latest security updates.")
         if tone == "detailed":
             fix += ["WSUS/Intune: approve & force install; reboot if required."]
             verify += ["MDM/VA shows target KBs installed on all scoped devices."]
+        return fix, verify
 
-    elif "chrome" in t:
-        fix.append("Update Chrome to the latest stable.")
-        if tone == "detailed":
-            fix += ["Admin: force update via policy.", "Restart browser/devices if needed."]
-            verify += ["chrome://version on sample endpoints shows latest build."]
-
-    elif any(k in t for k in ("apple","ios","ipad","macos","safari")):
-        fix.append("Update iOS/iPadOS/macOS to the latest version.")
-        if tone == "detailed":
-            fix += ["MDM: push update and enforce restart."]
-            verify += ["MDM inventory shows minimum OS version across devices."]
-
-    else:
-        fix.append("Apply the vendor security update/hotfix.")
-        if tone == "detailed":
-            fix += ["Schedule maintenance; restart if needed."]
-            verify += ["Service/app version matches vendor advisory; VA re-scan is clean."]
-
+    # DEFAULT
+    fix.append("Apply the vendor security update/hotfix.")
+    if tone == "detailed":
+        fix += ["Schedule maintenance; restart if needed."]
+        verify += ["Service/app version matches vendor advisory; VA re-scan is clean."]
     return fix, verify
 
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
