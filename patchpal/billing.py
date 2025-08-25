@@ -6,7 +6,6 @@ from typing import Optional
 
 import stripe
 from flask import Blueprint, request, jsonify
-from Slack_SDK_Errors import SlackApiError  # not a real import; just to hint types
 
 from .storage import SessionLocal, Workspace
 
@@ -36,7 +35,6 @@ def is_active(team_id: Optional[str] = None, ws: Optional[Workspace] = None) -> 
         return False
     if ws.plan == "pro" and ws.paid_at:
         return True
-    # trial window
     if ws.trial_ends_at and datetime.utcnow() <= ws.trial_ends_at:
         return True
     return False
@@ -44,7 +42,6 @@ def is_active(team_id: Optional[str] = None, ws: Optional[Workspace] = None) -> 
 def checkout_url(team_id: str) -> str:
     """Create a Stripe Checkout session and return its URL."""
     if not stripe.api_key or not PRICE_ID:
-        # Fallback: a placeholder link so the app doesn't crash in dev
         return f"{APP_BASE_URL}/billing/upgrade-not-configured"
 
     session = stripe.checkout.Session.create(
@@ -62,7 +59,7 @@ def dm_trial_or_checkout(slack_client, ws: Workspace) -> None:
     """DM an admin/contact with an upgrade link. Rate-limited to once/day via last_billing_nag."""
     now = datetime.utcnow()
     if ws.last_billing_nag and (now - ws.last_billing_nag).days < 1:
-        return  # already nagged today
+        return
 
     url = checkout_url(ws.team_id)
     text = (
@@ -72,13 +69,11 @@ def dm_trial_or_checkout(slack_client, ws: Workspace) -> None:
     )
 
     try:
-        # prefer DM to the last command invoker
         if ws.contact_user_id:
             im = slack_client.conversations_open(users=ws.contact_user_id)
             channel_id = im["channel"]["id"]
             slack_client.chat_postMessage(channel=channel_id, text=text)
-        else:
-            # fallback: post in the configured channel (no @here to be polite)
+        elif ws.post_channel:
             slack_client.chat_postMessage(channel=ws.post_channel, text=text)
     except Exception:
         pass
@@ -129,7 +124,6 @@ def stripe_webhook():
 
     return jsonify(received=True)
 
-# Optional tiny pages (handy for redirects)
 @billing_bp.route("/success")
 def success_page():
     return "Thanks! Your subscription is active. You can close this tab."
