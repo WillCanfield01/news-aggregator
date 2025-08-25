@@ -2,20 +2,20 @@
 from __future__ import annotations
 import os, sys, re, time
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import requests
 import feedparser
 
-# --- import path -------------------------------------------------------------
+# --- import path (repo root) -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # --- Tunables ---------------------------------------------------------------
-EPSS_THRESHOLD   = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
-FALLBACK_DAYS    = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "7"))
-REQUEST_TIMEOUT  = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
-CISA_KEV_URL     = os.getenv(
+EPSS_THRESHOLD  = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
+FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "7"))
+REQUEST_TIMEOUT = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
+CISA_KEV_URL    = os.getenv(
     "PATCHPAL_KEV_URL",
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
 )
@@ -47,11 +47,7 @@ BASE_FEEDS = [
     # Gov alerts
     "https://www.cisa.gov/uscert/ncas/alerts.xml",
 ]
-EXTRA_FEEDS = [
-    u.strip()
-    for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n", " ").split(" ")
-    if u.strip()
-]
+EXTRA_FEEDS = [u.strip() for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n"," ").split(" ") if u.strip()]
 FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
 
 # --- Relevance --------------------------------------------------------------
@@ -283,24 +279,26 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     _enrich_epss(uniq)  # best-effort
     return uniq
 
-# --- Compact Slack rendering -------------------------------------------------
+# --- Rendering (OPS VOICE) ---------------------------------------------------
+_BULLET = "•"
 
 def _short(s: str, limit: int) -> str:
     s = re.sub(r"\s+", " ", s or "").strip()
     return (s[: limit - 1] + "…") if len(s) > limit else s
 
 def _badge_line(item: Dict[str, Any]) -> str:
+    epss = 0.0
     try:
         epss = float(item.get("epss") or 0.0)
     except Exception:
-        epss = 0.0
+        pass
     is_kev = bool(item.get("kev") or item.get("known_exploited"))
     sev = "HIGH" if is_kev or epss >= EPSS_THRESHOLD else "MEDIUM"
     emoji = ":rotating_light:" if sev == "HIGH" else ":warning:"
     bits = [f"{emoji} *{sev}*"]
     if is_kev:
         bits.append("KEV")
-    if epss >= 0.05:
+    if epss >= 0.01:  # hide meaningless zero
         bits.append(f"EPSS {epss:.2f}")
     return " • ".join(bits)
 
@@ -311,7 +309,7 @@ def _docs_links(item: Dict[str, Any]) -> str:
     src = item.get("link")
 
     def add(url: str | None, label: str):
-        if url and (url, label) not in links:
+        if url:
             links.append((url, label))
 
     # Microsoft / Windows
@@ -321,102 +319,92 @@ def _docs_links(item: Dict[str, Any]) -> str:
         add("https://support.microsoft.com/help/4027667/windows-update", "Windows Update")
         add("https://learn.microsoft.com/windows-server/administration/windows-server-update-services/manage/approve-and-deploy-updates", "WSUS deploy")
         add("https://learn.microsoft.com/mem/intune/protect/windows-update-for-business-configure", "Intune deadlines")
-
     # Chrome
     if "chrome" in t:
         add("https://support.google.com/chrome/answer/95414", "Chrome: update")
         add("https://support.google.com/chrome/a/answer/9027636", "Admin: force update")
-
     # Apple
     if any(k in t for k in ("apple","ios","ipad","macos","safari")):
         add("https://support.apple.com/HT201222", "Update iPhone/iPad")
         add("https://support.apple.com/HT201541", "Update macOS")
+    # Common vendors
+    if "cisco" in t:
+        add("https://www.cisco.com/c/en/us/support/docs/psirt.html", "Cisco PSIRT")
+    if "vmware" in t:
+        add("https://www.vmware.com/security/advisories.html", "VMware advisories")
+    if "fortinet" in t or "fortigate" in t:
+        add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
 
-    # Common vendor PSIRTs
-    if "cisco" in t:     add("https://www.cisco.com/c/en/us/support/docs/psirt.html", "Cisco PSIRT")
-    if "vmware" in t:    add("https://www.vmware.com/security/advisories.html", "VMware advisories")
-    if "fortinet" in t or "fortigate" in t: add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
+    add(src, "Vendor notice")  # always include if present
 
-    # Always include vendor/source when present
-    add(src, "Vendor notice")
-
-    # cap to 3 unique links
+    # Dedup + cap to 3
     out, seen = [], set()
     for u, label in links:
-        if u in seen:
+        if not u or u in seen:
             continue
-        seen.add(u)
-        out.append(f"<{u}|{label}>")
+        seen.add(u); out.append(f"<{u}|{label}>")
         if len(out) >= 3:
             break
     return " · ".join(out)
 
-def _action_lines(item: Dict[str, Any], tone: str) -> tuple[list[str], list[str]]:
-    """Returns (fix_steps, verify_steps)."""
+def _actions_and_verify(item: Dict[str, Any], tone: str) -> Tuple[list[str], list[str]]:
+    """Returns (fix bullets, verify bullets)."""
     t = _text(item)
-    fix, verify = [], []
+    fix: list[str] = []
+    verify: list[str] = []
 
     if any(k in t for k in ("microsoft","windows","edge","office","exchange","teams")):
         fix.append("Run Windows Update / deploy latest security updates.")
         if tone == "detailed":
-            fix += [
-                "WSUS/Intune: approve & force install; reboot if required.",
-                "Prioritize internet-facing & critical systems (24–48h).",
-            ]
-        verify.append("Check installed KBs/patch level; re-scan with your VA tool.")
+            fix += ["WSUS/Intune: approve & force install; reboot if required."]
+            verify += ["MDM/VA shows target KBs installed on all scoped devices."]
+
     elif "chrome" in t:
         fix.append("Update Chrome to the latest stable.")
         if tone == "detailed":
-            fix += ["Admin: enforce update via policy.", "Restart browser/devices if prompted."]
-        verify.append("chrome://version shows current build; confirm fleet policy compliance.")
+            fix += ["Admin: force update via policy.", "Restart browser/devices if needed."]
+            verify += ["chrome://version on sample endpoints shows latest build."]
+
     elif any(k in t for k in ("apple","ios","ipad","macos","safari")):
         fix.append("Update iOS/iPadOS/macOS to the latest version.")
         if tone == "detailed":
-            fix += ["MDM: push update & enforce restart.", "Block outdated builds via compliance."]
-        verify.append("MDM inventory shows minimum OS version across devices.")
+            fix += ["MDM: push update and enforce restart."]
+            verify += ["MDM inventory shows minimum OS version across devices."]
+
     else:
         fix.append("Apply the vendor security update/hotfix.")
         if tone == "detailed":
-            fix += ["Schedule maintenance; stop service if needed, apply, restart, validate."]
-        verify.append("Service/app reports patched version; VA scan is clear.")
+            fix += ["Schedule maintenance; restart if needed."]
+            verify += ["Service/app version matches vendor advisory; VA re-scan is clean."]
 
     return fix, verify
 
-_BULLET = "•"
-
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     """
-    Slack mrkdwn in an 'ops voice':
+    Slack mrkdwn in an ops voice:
       - Title
       - Badges (🚨/⚠️, KEV, EPSS if meaningful)
-      - TL;DR (one-liner)
+      - TL;DR (human one-liner)
       - Fix (bullets; detailed adds ops steps)
       - Verify (only in detailed)
       - Docs (1–3 links)
     """
     tone = (tone or "simple").lower()
     title   = str(item.get("title") or f"Item {idx}").strip()
-    summary = _short(_strip_html(item.get("summary") or item.get("content") or ""),
-                     220 if tone == "simple" else 420)
+    summary = _short(_strip_html(item.get("summary") or item.get("content") or ""), 220 if tone == "simple" else 420)
     badges  = _badge_line(item)
     docs    = _docs_links(item)
-
-    # Build actions and optional verify steps
-    actions = _action_lines(item, tone)
-    verify_steps = []
-    if tone == "detailed":
-        # light, generic verification step that reads naturally
-        verify_steps = ["Re-scan/validate patch level and check service health."]
+    fix, verify = _actions_and_verify(item, tone)
 
     lines = [
         f"*{idx}) {title}*",
         badges,
         f"*TL;DR:* {summary}",
         f"*Fix{' (step-by-step)' if tone == 'detailed' else ''}:*",
-        *[f"{_BULLET} {s}" for s in actions],
+        *[f"{_BULLET} {s}" for s in fix],
     ]
-    if tone == "detailed" and verify_steps:
-        lines += [f"*Verify:*", *[f"{_BULLET} {s}" for s in verify_steps]]
+    if tone == "detailed" and verify:
+        lines += [f"*Verify:*", *[f"{_BULLET} {s}" for s in verify]]
     if docs:
         lines.append(f"*Docs:* {docs}")
 
