@@ -1,6 +1,6 @@
 # patchpal/selector.py
 from __future__ import annotations
-import os, sys, re, json, time
+import os, sys, re, time
 from pathlib import Path
 from typing import List, Dict, Any
 import feedparser
@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]  # repo root (contains /app and /patc
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Controls
 USE_MAIN = os.getenv("PATCHPAL_USE_MAIN_POOL", "1").lower() not in ("0", "false", "no")
+EPSS_THRESHOLD = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
 
 # Try to import your site's pool + same-day uniqueness
 pick_top_cyber_items = None
@@ -60,6 +62,12 @@ STACK_MAP = {
 }
 
 _WORDS = re.compile(r"[a-z0-9+.#/-]+")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+def _strip_html(s: str | None) -> str:
+    if not s:
+        return ""
+    return _HTML_TAG_RE.sub("", s)
 
 def _text(item: Dict[str, Any]) -> str:
     return " ".join([
@@ -89,60 +97,64 @@ def matches_stack(item: Dict[str,Any], tokens_csv: str | None) -> bool:
 
 def is_exploited_or_high_epss(item: Dict[str,Any]) -> bool:
     kev = bool(item.get("kev") or item.get("known_exploited"))
-    epss = float(item.get("epss") or 0.0)
-    return kev or epss >= 0.5  # conservative default
+    try:
+        epss = float(item.get("epss") or 0.0)
+    except Exception:
+        epss = 0.0
+    return kev or epss >= EPSS_THRESHOLD
+
+def _key_for(it: Dict[str, Any]):
+    # Prefer stable keys for dedupe; fall back to object id
+    return it.get("id") or it.get("cve") or it.get("url") or it.get("link") or it.get("title") or id(it)
+
+def _uniq_add(dst: list, src: list, cap: int):
+    seen = { _key_for(x) for x in dst }
+    for it in src:
+        k = _key_for(it)
+        if k in seen:
+            continue
+        dst.append(it)
+        seen.add(k)
+        if len(dst) >= cap:
+            break
+    return dst
 
 def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
     """
     STRICT stack-first:
       - If mode=stack and stack_tokens set:
-          1) all items matching the stack (in pool order)
-          2) then high-signal (KEV or EPSS>=0.5)
-          3) then universal vendors
-          4) then anything left
+          1) stack-matched (in pool order)
+          2) high-signal (KEV or EPSS >= threshold)
+          3) universal vendors
+          4) everything else
       - Else (mode=universal): universal OR high-signal first, then the rest.
     """
     mode = (getattr(ws, "stack_mode", "universal") or "universal").lower()
     tokens = (getattr(ws, "stack_tokens", "") or "").strip()
 
-    def uniq_add(dst: list, src: list):
-        seen = {id(x) for x in dst}
-        for it in src:
-            # try a semantic key if present, fall back to object id
-            key = it.get("id") or it.get("cve") or it.get("url") or it.get("title") or id(it)
-            if key in seen:
-                continue
-            dst.append(it)
-            seen.add(key)
-            if len(dst) >= n:
-                break
-        return dst
-
-    # --- universal mode unchanged ---
+    # --- universal mode ---
     if mode != "stack" or not tokens:
         primary = [it for it in pool if is_universal(it) or is_exploited_or_high_epss(it)]
-        backup  = [it for it in pool if it not in primary]
         out: list[Dict[str, Any]] = []
-        uniq_add(out, primary)
+        _uniq_add(out, primary, n)
         if len(out) < n:
-            uniq_add(out, backup)
+            _uniq_add(out, pool, n)
         return out[:n]
 
     # --- strict stack-first ---
-    stack_items   = [it for it in pool if matches_stack(it, tokens)]
-    high_signal   = [it for it in pool if is_exploited_or_high_epss(it)]
-    universal     = [it for it in pool if is_universal(it)]
+    stack_items = [it for it in pool if matches_stack(it, tokens)]
+    high_signal = [it for it in pool if is_exploited_or_high_epss(it)]
+    universal   = [it for it in pool if is_universal(it)]
 
     out: list[Dict[str, Any]] = []
-    uniq_add(out, stack_items)
+    _uniq_add(out, stack_items, n)
     if len(out) < n:
-        uniq_add(out, [it for it in high_signal if it not in out])
+        _uniq_add(out, high_signal, n)
     if len(out) < n:
-        uniq_add(out, [it for it in universal if it not in out])
+        _uniq_add(out, universal, n)
     if len(out) < n:
-        uniq_add(out, pool)  # final fill, maintain pool ranking
+        _uniq_add(out, pool, n)  # final fill, preserve pool ranking
 
-    # helpful debug (shows in Render logs)
     try:
         print(f"[selector] mode=stack tokens='{tokens}' "
               f"stack={len(stack_items)} high={len(high_signal)} univ={len(universal)} chosen={len(out)}")
@@ -155,17 +167,13 @@ def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str
 
 FALLBACK_KEV_URL = os.getenv(
     "PATCHPAL_KEV_URL",
-    # CISA KEV JSON (URL sometimes changes; we handle failures gracefully)
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
 )
 
 FALLBACK_FEEDS = [
-    # Chrome releases (security updates are universal)
-    "https://chromereleases.googleblog.com/atom.xml",
-    # MSRC blog (general, sometimes security)
-    "https://msrc.microsoft.com/blog/feed/",
-    # CISA alerts
-    "https://www.cisa.gov/uscert/ncas/alerts.xml",
+    "https://chromereleases.googleblog.com/atom.xml",     # Chrome releases
+    "https://msrc.microsoft.com/blog/feed/",              # MSRC blog
+    "https://www.cisa.gov/uscert/ncas/alerts.xml",        # CISA alerts
 ]
 
 def _safe_get_json(url: str, timeout: int = 10) -> dict | None:
@@ -177,13 +185,13 @@ def _safe_get_json(url: str, timeout: int = 10) -> dict | None:
         return None
     return None
 
-def _safe_parse_feed(url: str, timeout: int = 10):
+def _safe_parse_feed(url: str):
     try:
         return feedparser.parse(url)
     except Exception:
         return {"entries": []}
 
-def build_fallback_pool(max_items: int = 120, days: int = 14) -> List[Dict[str,Any]]:
+def build_fallback_pool(max_items: int = 200, days: int = 14) -> List[Dict[str,Any]]:
     out: List[Dict[str,Any]] = []
     now = time.time()
     cutoff = now - days * 86400
@@ -193,7 +201,6 @@ def build_fallback_pool(max_items: int = 120, days: int = 14) -> List[Dict[str,A
     if kev and isinstance(kev, dict):
         for v in kev.get("vulnerabilities", []):
             try:
-                # Try both keys, the schema has varied
                 ts = v.get("dateAdded") or v.get("dateAddedToCatalog") or ""
                 added = time.mktime(time.strptime(ts[:10], "%Y-%m-%d")) if ts else now
             except Exception:
@@ -207,18 +214,17 @@ def build_fallback_pool(max_items: int = 120, days: int = 14) -> List[Dict[str,A
             title = f"{cve} — {vendor} {prod}".strip(" —")
             out.append({
                 "title": title,
-                "summary": (v.get("shortDescription") or "").strip(),
+                "summary": _strip_html(v.get("shortDescription") or ""),
                 "kev": True,
                 "vendor_guess": vendor.lower(),
                 "link": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                 "source": "CISA KEV",
             })
 
-    # 2) A couple of vendor/news feeds (kept small on purpose)
+    # 2) A couple of vendor/news feeds
     for url in FALLBACK_FEEDS:
         feed = _safe_parse_feed(url)
         for e in feed.get("entries", []):
-            # accept recent-ish entries only
             try:
                 updated = e.get("updated_parsed") or e.get("published_parsed")
                 ts = time.mktime(updated) if updated else now
@@ -226,8 +232,8 @@ def build_fallback_pool(max_items: int = 120, days: int = 14) -> List[Dict[str,A
                 ts = now
             if ts < cutoff:
                 continue
-            title = (e.get("title") or "").strip()
-            summary = (e.get("summary") or e.get("description") or "").strip()
+            title = _strip_html((e.get("title") or "").strip())
+            summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
             out.append({
                 "title": title,
                 "summary": summary,
@@ -287,28 +293,22 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
     return pick_top_candidates(pool, n, ws)
 
-# Optional: tiny wrapper to annotate “FYI” when an item isn’t universal/high-signal
-# patchpal/selector.py
+# -------------------- Slack text wrapper -------------------------------------
+
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     """
     Produce Slack-safe mrkdwn. Guarantees a non-empty string and trims to Slack's limits.
     """
     try:
-        from .utils import render_item_text_core  # your existing formatter (may be a no-op fallback)
+        from .utils import render_item_text_core
         base = render_item_text_core(item, idx, tone)
     except Exception:
         base = None
 
-    # Guarantee string
-    if not isinstance(base, str):
-        # If some formatter returned a dict or None, coerce to something readable
+    if not isinstance(base, str) or not base.strip():
         title = str(item.get("title") or f"Item {idx}")
-        summary = str(item.get("summary") or item.get("content") or "")
+        summary = _strip_html(str(item.get("summary") or item.get("content") or ""))
         base = f"*{idx}) {title}*\n{summary}".strip()
-
-    base = base.strip()
-    if not base:
-        base = f"*{idx})* (no details)"
 
     # Slack section text hard limit ~3000 chars; stay safe
     if len(base) > 2900:
