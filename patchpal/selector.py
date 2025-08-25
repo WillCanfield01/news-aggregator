@@ -256,9 +256,34 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     return pick_top_candidates(pool, n, ws)
 
 # Optional: tiny wrapper to annotate “FYI” when an item isn’t universal/high-signal
-def render_item_text(item: Dict[str,Any], idx: int, tone: str) -> str:
-    from .utils import render_item_text_core
-    base = render_item_text_core(item, idx, tone)
+# patchpal/selector.py
+def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
+    """
+    Produce Slack-safe mrkdwn. Guarantees a non-empty string and trims to Slack's limits.
+    """
+    try:
+        from .utils import render_item_text_core  # your existing formatter (may be a no-op fallback)
+        base = render_item_text_core(item, idx, tone)
+    except Exception:
+        base = None
+
+    # Guarantee string
+    if not isinstance(base, str):
+        # If some formatter returned a dict or None, coerce to something readable
+        title = str(item.get("title") or f"Item {idx}")
+        summary = str(item.get("summary") or item.get("content") or "")
+        base = f"*{idx}) {title}*\n{summary}".strip()
+
+    base = base.strip()
+    if not base:
+        base = f"*{idx})* (no details)"
+
+    # Slack section text hard limit ~3000 chars; stay safe
+    if len(base) > 2900:
+        base = base[:2900] + "…"
+
+    # Add a subtle heads-up if it may be less broadly applicable
     if not (is_universal(item) or is_exploited_or_high_epss(item)):
         base += "\n_*FYI:* may not apply broadly; review relevance._"
+
     return base

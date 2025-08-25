@@ -281,14 +281,21 @@ def register_commands(app: App):
                     parent_ts = hdr["ts"]
                     for i, it in enumerate(items, 1):
                         txt = render_item_text(it, i, ws.tone or "simple")
+                        # Belt & suspenders: ensure string & within Slack limits
+                        if not isinstance(txt, str):
+                            txt = str(txt or "")
+                        txt = txt.strip()
+                        if not txt:
+                            txt = f"{i}) (no details)"
+                        if len(txt) > 2900:
+                            txt = txt[:2900] + "…"
+
                         client.chat_postMessage(
-                            channel=ws.post_channel, thread_ts=parent_ts, text=f"{i})",
-                            blocks=[{"type":"section","text":{"type":"mrkdwn","text":txt}}],
+                            channel=ws.post_channel,
+                            thread_ts=parent_ts,
+                            text=f"{i})",  # fallback text
+                            blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
                         )
-                    client.chat_postMessage(
-                        channel=ws.post_channel, thread_ts=parent_ts, text="",
-                        blocks=[{"type":"context","elements":[{"type":"mrkdwn","text":"Auto-posted by PatchPal · by The Real Roundup"}]}],
-                    )
                     respond(f"Posted {len(items)} item(s) to <#{ws.post_channel}>.")
                     return
 
