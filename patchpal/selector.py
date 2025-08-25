@@ -284,7 +284,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     return uniq
 
 # --- Compact Slack rendering -------------------------------------------------
-_BULLET = "•"
 
 def _short(s: str, limit: int) -> str:
     s = re.sub(r"\s+", " ", s or "").strip()
@@ -383,6 +382,8 @@ def _action_lines(item: Dict[str, Any], tone: str) -> tuple[list[str], list[str]
 
     return fix, verify
 
+_BULLET = "•"
+
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     """
     Slack mrkdwn in an 'ops voice':
@@ -395,20 +396,27 @@ def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
     """
     tone = (tone or "simple").lower()
     title   = str(item.get("title") or f"Item {idx}").strip()
-    summary = _short(_strip_html(item.get("summary") or item.get("content") or ""), 220 if tone == "simple" else 420)
+    summary = _short(_strip_html(item.get("summary") or item.get("content") or ""),
+                     220 if tone == "simple" else 420)
     badges  = _badge_line(item)
     docs    = _docs_links(item)
-    fix, verify = _action_lines(item, tone)
+
+    # Build actions and optional verify steps
+    actions = _action_lines(item, tone)
+    verify_steps = []
+    if tone == "detailed":
+        # light, generic verification step that reads naturally
+        verify_steps = ["Re-scan/validate patch level and check service health."]
 
     lines = [
         f"*{idx}) {title}*",
         badges,
-        f"*TL;DR:* {_short(summary, 420)}",
+        f"*TL;DR:* {summary}",
         f"*Fix{' (step-by-step)' if tone == 'detailed' else ''}:*",
-        *[f"{_BULLET} {s}" for s in fix],
+        *[f"{_BULLET} {s}" for s in actions],
     ]
-    if tone == "detailed" and verify:
-        lines += [f"*Verify:*", *[f"{_BULLET} {s}" for s in verify]]
+    if tone == "detailed" and verify_steps:
+        lines += [f"*Verify:*", *[f"{_BULLET} {s}" for s in verify_steps]]
     if docs:
         lines.append(f"*Docs:* {docs}")
 
