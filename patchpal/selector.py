@@ -1,13 +1,13 @@
 # patchpal/selector.py
 from __future__ import annotations
-import os, sys, re
+import os, sys, re, json, time
 from pathlib import Path
 from typing import List, Dict, Any
-
-Item = Dict[str, Any]
+import feedparser
+import requests
 
 # --- Ensure the repo root (which contains the 'app' package) is importable ---
-ROOT = Path(__file__).resolve().parents[1]  # .../news-aggregator
+ROOT = Path(__file__).resolve().parents[1]  # repo root (contains /app and /patchpal)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -21,13 +21,13 @@ if USE_MAIN:
         from app.aggregator import pick_top_cyber_items, select_unique_for_today
         print("[selector] Using main site aggregator pool.")
     except Exception as e:
-        print(f"[selector] Could not import main aggregator; falling back: {e}")
+        print(f"[selector] Could not import main aggregator; will use fallback if needed: {e}")
         USE_MAIN = False
 
 # ---------- Relevance helpers (Universal-first + optional Stack mode) ----------
 UNIVERSAL_VENDORS = {
     "microsoft","windows","office","exchange","teams","edge",
-    "apple","ios","macos",
+    "apple","ios","macos","safari",
     "google","chrome","android",
     "adobe","acrobat","reader",
     "zoom","openssl",
@@ -59,10 +59,9 @@ STACK_MAP = {
     "vmware":   {"vmware"},
 }
 
-# include underscore so tokens like "ms365" or "mac_os" don't split oddly
-_WORDS = re.compile(r"[a-z0-9+._#/-]+")
+_WORDS = re.compile(r"[a-z0-9+.#/-]+")
 
-def _text(item: Item) -> str:
+def _text(item: Dict[str, Any]) -> str:
     return " ".join([
         str(item.get("title","")),
         str(item.get("summary","") or item.get("content","") or ""),
@@ -72,10 +71,10 @@ def _text(item: Item) -> str:
 def _tokens(s: str) -> set[str]:
     return set(_WORDS.findall(s))
 
-def is_universal(item: Item) -> bool:
+def is_universal(item: Dict[str,Any]) -> bool:
     return bool(UNIVERSAL_VENDORS & _tokens(_text(item)))
 
-def matches_stack(item: Item, tokens_csv: str | None) -> bool:
+def matches_stack(item: Dict[str,Any], tokens_csv: str | None) -> bool:
     if not tokens_csv:
         return False
     chosen = [t.strip().lower() for t in tokens_csv.split(",") if t.strip()]
@@ -88,31 +87,23 @@ def matches_stack(item: Item, tokens_csv: str | None) -> bool:
                 return True
     return False
 
-def _as_float(x) -> float:
-    """Robust float parse for EPSS-like values; accepts '0.73', 0.73, or '73%'."""
-    try:
-        if isinstance(x, str) and x.endswith("%"):
-            return float(x[:-1]) / 100.0
-        return float(x)
-    except Exception:
-        return 0.0
-
-def is_exploited_or_high_epss(item: Item) -> bool:
+def is_exploited_or_high_epss(item: Dict[str,Any]) -> bool:
     kev = bool(item.get("kev") or item.get("known_exploited"))
-    epss = _as_float(item.get("epss"))
+    epss = float(item.get("epss") or 0.0)
     return kev or epss >= 0.5  # conservative default
 
-def pick_top_candidates(pool: List[Item], n: int, ws) -> List[Item]:
+def pick_top_candidates(pool: List[Dict[str,Any]], n: int, ws) -> List[Dict[str,Any]]:
     """Universal-first; if mode=='stack', require stack OR KEV/high-EPSS; fill from backup."""
-    primary: List[Item] = []
-    backup: List[Item] = []
+    primary: List[Dict[str,Any]] = []
+    backup: List[Dict[str,Any]] = []
 
     for it in pool:
         ok_universal = is_universal(it)
         ok_exploit   = is_exploited_or_high_epss(it)
         ok_stack     = matches_stack(it, getattr(ws, "stack_tokens", None))
+        mode         = (getattr(ws, "stack_mode", None) or "universal").lower()
 
-        if (getattr(ws, "stack_mode", None) or "universal") == "stack":
+        if mode == "stack":
             if ok_stack or ok_exploit or ok_universal:
                 primary.append(it)
             else:
@@ -128,35 +119,145 @@ def pick_top_candidates(pool: List[Item], n: int, ws) -> List[Item]:
         out += backup[: (n - len(out))]
     return out[:n]
 
+# -------------------- Fallback pool builders ---------------------------------
+
+FALLBACK_KEV_URL = os.getenv(
+    "PATCHPAL_KEV_URL",
+    # CISA KEV JSON (URL sometimes changes; we handle failures gracefully)
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+)
+
+FALLBACK_FEEDS = [
+    # Chrome releases (security updates are universal)
+    "https://chromereleases.googleblog.com/atom.xml",
+    # MSRC blog (general, sometimes security)
+    "https://msrc.microsoft.com/blog/feed/",
+    # CISA alerts
+    "https://www.cisa.gov/uscert/ncas/alerts.xml",
+]
+
+def _safe_get_json(url: str, timeout: int = 10) -> dict | None:
+    try:
+        r = requests.get(url, timeout=timeout)
+        if r.ok:
+            return r.json()
+    except Exception:
+        return None
+    return None
+
+def _safe_parse_feed(url: str, timeout: int = 10):
+    try:
+        return feedparser.parse(url)
+    except Exception:
+        return {"entries": []}
+
+def build_fallback_pool(max_items: int = 120, days: int = 14) -> List[Dict[str,Any]]:
+    out: List[Dict[str,Any]] = []
+    now = time.time()
+    cutoff = now - days * 86400
+
+    # 1) CISA KEV
+    kev = _safe_get_json(FALLBACK_KEV_URL)
+    if kev and isinstance(kev, dict):
+        for v in kev.get("vulnerabilities", []):
+            try:
+                # Try both keys, the schema has varied
+                ts = v.get("dateAdded") or v.get("dateAddedToCatalog") or ""
+                added = time.mktime(time.strptime(ts[:10], "%Y-%m-%d")) if ts else now
+            except Exception:
+                added = now
+            if added < cutoff:
+                continue
+
+            cve = v.get("cveID") or v.get("cve") or ""
+            vendor = (v.get("vendorProject") or "").strip()
+            prod = (v.get("product") or "").strip()
+            title = f"{cve} — {vendor} {prod}".strip(" —")
+            out.append({
+                "title": title,
+                "summary": (v.get("shortDescription") or "").strip(),
+                "kev": True,
+                "vendor_guess": vendor.lower(),
+                "link": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                "source": "CISA KEV",
+            })
+
+    # 2) A couple of vendor/news feeds (kept small on purpose)
+    for url in FALLBACK_FEEDS:
+        feed = _safe_parse_feed(url)
+        for e in feed.get("entries", []):
+            # accept recent-ish entries only
+            try:
+                updated = e.get("updated_parsed") or e.get("published_parsed")
+                ts = time.mktime(updated) if updated else now
+            except Exception:
+                ts = now
+            if ts < cutoff:
+                continue
+            title = (e.get("title") or "").strip()
+            summary = (e.get("summary") or e.get("description") or "").strip()
+            out.append({
+                "title": title,
+                "summary": summary,
+                "kev": False,
+                "vendor_guess": title.lower(),
+                "link": e.get("link") or "",
+                "source": url,
+            })
+
+    # Light dedupe by title
+    seen = set()
+    uniq: List[Dict[str,Any]] = []
+    for it in out:
+        t = it.get("title","").strip().lower()
+        if t and t not in seen:
+            seen.add(t)
+            uniq.append(it)
+        if len(uniq) >= max_items:
+            break
+    return uniq
+
 # -------------------- Main function PatchPal calls ---------------------------
 
-def topN_today(n: int = 5, ws=None) -> List[Item]:
+def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     """
-    Build large ranked pool from therealroundup (if available),
-    enforce same-day uniqueness, then apply relevance filter for this workspace.
+    1) Try your main site's ranked pool (200).
+    2) If empty, use fallback (CISA KEV + a couple feeds).
+    3) Apply same-day uniqueness (if main selector exists).
+    4) Relevance filter (universal or stack).
     """
-    # 1) Ranked pool
-    pool: List[Item] = []
-    if USE_MAIN and callable(pick_top_cyber_items):
-        pool = pick_top_cyber_items(n=200)  # your main pipeline
-    else:
-        # Fallback: empty pool (so we don't post junk). Plug a local pool here if desired.
-        pool = []
+    # 1) Ranked pool from main site
+    pool: List[Dict[str,Any]] = []
+    used_main = False
+    if pick_top_cyber_items:
+        try:
+            pool = pick_top_cyber_items(n=200) or []
+            used_main = bool(pool)
+        except Exception as e:
+            print(f"[selector] main pool error; will fallback: {e}")
+
+    # 2) Fallback if needed
+    if not pool:
+        pool = build_fallback_pool(max_items=200, days=14)
+        print(f"[selector] Using fallback pool: {len(pool)} items")
 
     if not pool:
         return []
 
-    # 2) Same-day uniqueness (your main rule set)
-    if USE_MAIN and callable(select_unique_for_today):
-        pool = select_unique_for_today(pool, n=200)
+    # 3) Same-day uniqueness (only if main function exists and we used main pool)
+    if used_main and select_unique_for_today:
+        try:
+            pool = select_unique_for_today(pool, n=200)
+        except Exception as e:
+            print(f"[selector] uniqueness filter failed (continuing): {e}")
 
-    # 3) Relevance filter
+    # 4) Relevance filter
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
     return pick_top_candidates(pool, n, ws)
 
 # Optional: tiny wrapper to annotate “FYI” when an item isn’t universal/high-signal
-def render_item_text(item: Item, idx: int, tone: str) -> str:
-    from .utils import render_item_text_core  # reuse your existing text logic
+def render_item_text(item: Dict[str,Any], idx: int, tone: str) -> str:
+    from .utils import render_item_text_core
     base = render_item_text_core(item, idx, tone)
     if not (is_universal(item) or is_exploited_or_high_epss(item)):
         base += "\n_*FYI:* may not apply broadly; review relevance._"
