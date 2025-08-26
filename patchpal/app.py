@@ -1,72 +1,76 @@
 # patchpal/app.py
 import os
-import logging
 from pathlib import Path
 from flask import Flask, request, render_template
 from jinja2 import ChoiceLoader, FileSystemLoader
-from apscheduler.schedulers.background import BackgroundScheduler
-from slack_bolt import App as BoltApp
-from slack_bolt.adapter.flask import SlackRequestHandler
-from slack_sdk import WebClient
 
-# ---------- paths / templates ----------
+# ---- Paths ---------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 PP_TEMPLATES = HERE / "templates"
 MAIN_TEMPLATES = ROOT / "app" / "templates"
 
-# ---------- flask app (create FIRST) ----------
+# ---- Flask app (create first!) -------------------------------------------
 flask_app = Flask(__name__, template_folder=str(PP_TEMPLATES))
-flask_app.secret_key = os.getenv("FLASK_SECRET", "dev")
 flask_app.jinja_loader = ChoiceLoader([
     FileSystemLoader(str(PP_TEMPLATES)),
     FileSystemLoader(str(MAIN_TEMPLATES)),
 ])
+flask_app.secret_key = os.getenv("FLASK_SECRET", "dev")
 
-# ---------- database (storage) ----------
-# Uses your existing SQLAlchemy engine/Base from storage.py
-from .storage import Base, engine  # noqa: E402
-Base.metadata.create_all(engine)
+# ---- DB / models ----------------------------------------------------------
+from .storage import Base, engine  # uses your existing engine
+Base.metadata.create_all(engine)   # ensures tables (including installations) exist
 
-# ---------- optional: billing ----------
-try:
-    from .billing import billing_bp  # noqa: E402
-    flask_app.register_blueprint(billing_bp, url_prefix="/billing")
-except Exception as e:
-    logging.warning("Billing blueprint not loaded: %s", e)
+# ---- Blueprints -----------------------------------------------------------
+# Your OAuth blueprint should define: bp = Blueprint("slack_oauth", __name__)
+# and routes for /slack/install and /slack/oauth/callback
+from .oauth import bp as slack_oauth_bp
+flask_app.register_blueprint(slack_oauth_bp, url_prefix="/slack")
 
-# ---------- Slack OAuth blueprint ----------
-# We try app_oauth first; fall back to oauth.py if that’s what you named it.
-slack_oauth_bp = None
-try:
-    from .app_oauth import bp as slack_oauth_bp  # noqa: E402
-except Exception:
-    try:
-        from .oauth import bp as slack_oauth_bp  # noqa: E402
-    except Exception as e:
-        logging.warning("Slack OAuth blueprint not loaded: %s", e)
+# ---- Slack (Bolt) ---------------------------------------------------------
+# We support per-workspace tokens via authorize(), so no global SLACK_BOT_TOKEN is required.
+from slack_bolt import App as BoltApp
+from slack_bolt.adapter.flask import SlackRequestHandler
+from slack_bolt.authorization import AuthorizeResult
+from .models import get_bot_token  # looks up tokens saved by OAuth
 
-if slack_oauth_bp:
-    flask_app.register_blueprint(slack_oauth_bp)
-
-# ---------- Slack Bolt (events & commands) ----------
 signing_secret = os.getenv("SLACK_SIGNING_SECRET")
-default_bot_token = os.getenv("SLACK_BOT_TOKEN")  # used for single-tenant/dev
 
-# For public distribution you should resolve tokens per-workspace (see iter_bot_tokens below).
-bolt = BoltApp(signing_secret=signing_secret, token=default_bot_token)
+def authorize(enterprise_id, team_id, user_id, client, logger):
+    """
+    Provide a token dynamically per workspace (team_id).
+    Bolt will call this for each request that needs a token.
+    """
+    token = get_bot_token(team_id) if team_id else None
+    if token:
+        return AuthorizeResult(
+            enterprise_id=enterprise_id,
+            team_id=team_id,
+            bot_token=token,
+        )
+    # No token yet (e.g., app not installed) — allow handlers to ack but not post
+    return AuthorizeResult(enterprise_id=enterprise_id, team_id=team_id)
 
-from .commands import register_commands  # noqa: E402
-register_commands(bolt)
+# If the signing secret is missing, disable the events route but keep the app booting.
+bolt = None
+handler = None
+if signing_secret:
+    bolt = BoltApp(signing_secret=signing_secret, authorize=authorize)
+    # Register your commands/listeners *after* Bolt is created
+    from .commands import register_commands
+    register_commands(bolt)
+    handler = SlackRequestHandler(bolt)
+else:
+    print("⚠️  SLACK_SIGNING_SECRET not set — /slack/events disabled")
 
-handler = SlackRequestHandler(bolt)
-
-@flask_app.post("/slack/events")
+@flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
-    # Slack sends events here; Bolt verifies the signature automatically
+    if handler is None:
+        return ("Slack events not configured", 503)
     return handler.handle(request)
 
-# ---------- basic routes ----------
+# ---- Simple site routes ----------------------------------------------------
 @flask_app.get("/legal")
 def legal():
     return render_template("legal.html")
@@ -75,59 +79,43 @@ def legal():
 def health():
     return {"ok": True}
 
-# ---------- per-workspace tokens ----------
-def iter_bot_tokens():
-    """
-    Yield (team_id, bot_token) for all installations.
-    Falls back to SLACK_BOT_TOKEN for single-tenant/dev if models aren’t present.
-    """
+# ---- Scheduler (optional) --------------------------------------------------
+# Running schedulers inside web dynos can cause dupes if >1 worker.
+# Only enable when RUN_SCHEDULER=1, and keep WEB_CONCURRENCY=1 on Render.
+if os.getenv("RUN_SCHEDULER", "0").lower() in ("1", "true", "yes"):
     try:
-        from .models import Installation, db  # expects a table with team_id, bot_token
-        rows = db.session.query(Installation).all()
-        yielded = False
-        for row in rows:
-            if getattr(row, "bot_token", None):
-                yielded = True
-                yield row.team_id, row.bot_token
-        if not yielded and default_bot_token:
-            # no installs yet, but we can still run with a single token in dev
-            yield "default", default_bot_token
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from slack_sdk import WebClient
+        from .scheduler import run_once
+
+        def _get_client_for_default_team():
+            """
+            Optional: pick a default team for scheduled posts if your scheduler
+            isn’t tied to a specific team. Otherwise, refactor run_once to loop over
+            all installations and post with each token.
+            """
+            default_team = os.getenv("DEFAULT_TEAM_ID")
+            token = get_bot_token(default_team) if default_team else None
+            return WebClient(token=token) if token else None
+
+        scheduler = BackgroundScheduler()
+        def _tick():
+            client = _get_client_for_default_team()
+            if client:
+                run_once(client)
+            else:
+                # No token available yet — skip silently
+                pass
+
+        scheduler.add_job(
+            _tick, "interval", minutes=int(os.getenv("SCHED_INTERVAL_MIN", "5")),
+            id="pp_tick", replace_existing=True, coalesce=True
+        )
+        scheduler.start()
+        print("⏰ Scheduler started")
     except Exception as e:
-        logging.warning("iter_bot_tokens(): falling back to env token (%s)", e)
-        if default_bot_token:
-            yield "default", default_bot_token
+        # Never crash the web process because the scheduler failed to init
+        print(f"⚠️  Scheduler did not start: {e}")
 
-# ---------- scheduler ----------
-from .scheduler import run_once  # noqa: E402
-
-def tick():
-    """
-    Fan-out one run to each installed workspace.
-    If your run_once(client) accepts a team_id, pass it along.
-    """
-    for team_id, tok in iter_bot_tokens():
-        try:
-            client = WebClient(token=tok)
-            # If you later change run_once signature to run_once(client, team_id)
-            # just add team_id=team_id here.
-            run_once(client)
-        except Exception as e:
-            logging.exception("tick(): error running for team %s: %s", team_id, e)
-
-# Start the scheduler only in the web dyno/process
-if os.getenv("DISABLE_SCHEDULER", "0") not in ("1", "true", "yes"):
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        tick,
-        "interval",
-        minutes=1,
-        id="pp_tick",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-    )
-    scheduler.start()
-
-# ---------- entrypoint ----------
 if __name__ == "__main__":
     flask_app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
