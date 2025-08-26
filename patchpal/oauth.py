@@ -3,6 +3,7 @@ import os, secrets, requests
 from flask import Blueprint, redirect, request, session
 from slack_sdk.oauth import AuthorizeUrlGenerator
 from slack_sdk.web import WebClient
+from .selector import save_installation
 
 bp = Blueprint("slack_oauth", __name__)
 
