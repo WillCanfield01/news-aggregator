@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import requests
 import feedparser
+from openai import OpenAI
+import json
 from .utils import render_item_text_core
 
 # --- import path (repo root) -------------------------------------------------
@@ -71,7 +73,6 @@ BLOGGY_RE = re.compile(
 def _is_signal(title: str, summary: str, link: str, source: str) -> bool:
     blob = " ".join([title or "", summary or "", link or "", source or ""])
     return bool(SIGNAL_RE.search(blob)) and not BLOGGY_RE.search(blob)
-\
 
 # --- Relevance --------------------------------------------------------------
 UNIVERSAL_VENDORS = {
@@ -111,6 +112,51 @@ _WORDS   = re.compile(r"[a-z0-9+.#/-]+", re.I)
 _CVE_RE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _HTML_RE = re.compile(r"<[^>]+>")
 _STOP = {"cve", "update", "security", "advisory", "release", "dev", "desktop", "channel"}
+# pip install openai
+client = OpenAI()  # expects OPENAI_API_KEY in env
+
+CLEAN_NUMS = re.compile(r"\b\d{6,}\b")
+SENT_SPLIT = re.compile(r'(?<=[.!?])\s+')
+
+def _first_sentences(text: str, n: int = 2) -> str:
+    parts = SENT_SPLIT.split(text.strip())
+    return " ".join(p.strip() for p in parts[:n] if p.strip())
+
+STYLE_RULES = """
+You are an ops copy editor. Rewrite into Slack mrkdwn with this shape:
+- Line 1: "*{title}*"
+- Line 2: badges like ":rotating_light: HIGH" or ":warning: MEDIUM", include "KEV" and "EPSS 0.38" only if EPSS >= 0.01
+- Line 3: "TL;DR:" one tight sentence (two max). Remove fluff, marketing, and very long numbers; keep the core risk.
+- "Fix:" 1–2 bullets tailored if Windows/Apple/Chrome are detected; else generic vendor patch bullet.
+- "Docs:" include the provided Slack-formatted links (don’t invent links).
+Constraints: <= 550 characters after the title; no HTML; no &nbsp;.
+"""
+
+def ai_rewrite(item: dict, docs_str: str, severity: str) -> str:
+    client = OpenAI()
+    summary = (item.get("summary") or item.get("content") or "")
+    summary = CLEAN_NUMS.sub("", summary)
+    summary = _first_sentences(summary, 2)
+    payload = {
+        "title": item.get("title", ""),
+        "summary": summary,
+        "badges": {
+            "sev": severity,
+            "kev": bool(item.get("kev") or item.get("known_exploited")),
+            "epss": float(item.get("epss") or 0.0)
+        },
+        "docs": docs_str
+    }
+    messages = [
+        {"role": "system", "content": STYLE_RULES},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
+    ]
+    resp = client.chat.completions.create(
+        model=os.getenv("PATCHPAL_AI_MODEL","gpt-4o-mini"),
+        temperature=0.2,
+        messages=messages,
+    )
+    return resp.choices[0].message.content.strip()
 
 def _normalize_title_for_key(title: str) -> str:
     """Strip CVE prefix, punctuation, collapse spaces, take first 5 significant tokens."""
@@ -307,7 +353,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             if SKIP_LOW_SIGNAL and not _is_signal(title, summary, e.get("link") or "", url):
                 continue
 
-            summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
             cves = _extract_cves(title, summary)
             kev_flag = any(c in kev_set for c in cves)
 
@@ -418,7 +463,8 @@ def _docs_links(item: Dict[str, Any]) -> str:
         add("https://www.vmware.com/security/advisories.html", "VMware advisories")
     if "fortinet" in t or "fortigate" in t:
         add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
-        # Git
+
+    # Git  <-- dedent this and the next 'if'
     if "git " in (" " + t) or (item.get("title","").lower().startswith("git ")):
         add("https://git-scm.com/downloads", "Git downloads")
         add("https://github.com/git/git/tree/master/Documentation/RelNotes", "Git release notes")
@@ -474,23 +520,19 @@ def _actions_and_verify(item: Dict[str, Any], tone: str) -> Tuple[list[str], lis
         verify += ["Service/app version matches vendor advisory; VA re-scan is clean."]
     return fix, verify
 
-def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
-    """Delegate formatting to utils.render_item_text_core."""
-    docs_str = _docs_links(item)      # '<url|Label> · <url|Label> …'
-    it = dict(item)                   # shallow copy to inject docs
-    it["_docs"] = docs_str
-    try:
-        return render_item_text_core(it, idx, tone)
-    except Exception:
-        # ultra-simple fallback if utils ever fails
-        title = str(it.get("title") or f"Item {idx}").strip()
-        tl = re.sub(r"\s+", " ", _strip_html(it.get("summary") or it.get("content") or "")).strip()
-        tl = (tl[:219] + "…") if len(tl) > 220 else tl
-        parts = [f"*{idx}) {title}*", f"*TL;DR:* {tl}"]
-        if docs_str:
-            parts.append(f"*Docs:* {docs_str}")
-        txt = "\n".join(parts)
-        return txt[:2900] + "…" if len(txt) > 2900 else txt
+def render_item_text(item: dict, idx: int, tone: str) -> str:
+    docs_str = _docs_links(item)
+    sev = "HIGH" if (item.get("kev") or (float(item.get("epss") or 0) >= EPSS_THRESHOLD)) else "MEDIUM"
+
+    if os.getenv("PATCHPAL_AI_REWRITE", "0") in ("1","true","yes"):
+        try:
+            return ai_rewrite(item, docs_str, sev)
+        except Exception:
+            pass  # fail open to local formatter
+
+    # fallback to your local formatter
+    it = dict(item); it["_docs"] = docs_str
+    return render_item_text_core(it, idx, tone)
 
 # --- Selection / Ranking -----------------------------------------------------
 def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
