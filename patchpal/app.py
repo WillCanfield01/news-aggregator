@@ -7,7 +7,7 @@ from slack_bolt import App as BoltApp
 from slack_bolt.adapter.flask import SlackRequestHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_sdk import WebClient
-from patchpal.app_oauth import bp as slack_oauth_bp
+from patchpal.oauth import bp as slack_oauth_bp
 flask_app.register_blueprint(slack_oauth_bp)
 
 from .billing import billing_bp
