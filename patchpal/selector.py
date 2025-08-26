@@ -534,15 +534,17 @@ def _meta_lines(item: Dict[str, Any]) -> List[str]:
         epss = float(item.get("epss") or 0.0)
     except Exception:
         epss = 0.0
+
     sev = (item.get("severity") or "").upper()
     if not sev:
         sev = "HIGH" if kev or epss >= EPSS_THRESHOLD else "MEDIUM"
+
     lines = [
-        f"Security alert: {sev.title()}",
-        f"Known Exploited Vulnerability: {'Yes' if kev else 'No'}",
+        f"*Security alert:* {sev.title()}",
+        f"*Known Exploited Vulnerability:* {'Yes' if kev else 'No'}",
     ]
     if epss >= 0.01:
-        lines.append(f"EPSS: {epss:.2f}")
+        lines.append(f"*Exploit Prediction Scoring System:* {epss:.2f}")
     return lines
 
 def _summary_text(title: str, summary: str, *, tone: str) -> str:
@@ -564,15 +566,14 @@ def _summary_text(title: str, summary: str, *, tone: str) -> str:
 
 def render_item_text(item: dict, idx: int, tone: str) -> str:
     """
-    Single renderer used everywhere. Title bold only.
     Lines:
-      Security alert: X
-      Known Exploited Vulnerability: Yes/No
-      EPSS: Y (if >= 0.01)
-      Summary: ...
-      Fix:
+    Security alert: X
+    Known Exploited Vulnerability: Yes/No
+    Exploit Prediction Scoring System: Y (if ≥ 0.01)
+    Summary: ...
+    Fix:
         • bullet
-      Docs: <link> · <link> · <link>
+    Docs: <link> · <link> · <link>
     """
     title = _tidy_title((item.get("title") or "").strip())
     meta  = _meta_lines(item)
@@ -586,15 +587,16 @@ def render_item_text(item: dict, idx: int, tone: str) -> str:
         f"*{idx}) {title}*",
         *meta,
         "",
-        f"Summary: {summary}",
+        f"*Summary:* {summary}",
         "",
-        "Fix:",
+        "*Fix:*",
         *actions_lines,
     ]
     if (tone or "simple") == "detailed" and verify:
-        blocks += ["", "Verify:", *[f"{BULLET} {v}" for v in verify]]
+        blocks += ["", "*Verify:*", *[f"{BULLET} {v}" for v in verify]]
+
     if doc_str:
-        blocks += ["", f"Docs: {doc_str}"]
+        blocks += ["", f"Docs: {doc_str}"]  # keep Docs unbolded unless you want it bold too
 
     text = "\n".join(blocks).strip()
     return text[:2900] + "…" if len(text) > 2900 else text
