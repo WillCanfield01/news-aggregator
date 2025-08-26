@@ -126,8 +126,8 @@ STYLE_RULES = """
 You are an ops copy editor. Rewrite into Slack mrkdwn with this shape:
 - Line 1: "*{title}*"
 - Line 2: badges like ":rotating_light: HIGH" or ":warning: MEDIUM", include "KEV" and "EPSS 0.38" only if EPSS >= 0.01
-- Line 3: "TL;DR:" one tight sentence (two max). Remove fluff, marketing, and very long numbers; keep the core risk.
-- "Fix:" 1–2 bullets tailored if Windows/Apple/Chrome are detected; else generic vendor patch bullet.
+- Line 3: "Summary:" one tight sentence (two max). Remove fluff, marketing, and very long numbers; keep the core risk. Make sure it doesn't sound like a framework document or risk alert sheet, we want easy to understand issues, without over simplification.
+- "Fix:" 1–2 bullets tailored if Windows/Apple/Chrome are detected; else generic vendor patch bullet. Again make sure the bullets are easy for anyone to understand, not just security people.
 - "Docs:" include the provided Slack-formatted links (don’t invent links).
 Constraints: <= 550 characters after the title; no HTML; no &nbsp;.
 """
@@ -402,11 +402,27 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             by_product[key] = it
 
     collapsed = list(by_product.values())
-    # keep original-ish ranking by sorting with score, then stable title
     collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
+
+    # 👇 NEW: back-fill from 'uniq' so the pool always has depth
+    chosen = {_key_for(it) for it in collapsed}
+    for it in uniq:
+        k = _key_for(it)
+        if k in chosen:
+            continue
+        collapsed.append(it)
+        chosen.add(k)
+        if len(collapsed) >= max_items:
+            break
 
     return collapsed[:max_items]
 
+def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
+    pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS)
+    if len(pool) < n:
+        pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)  # widen once
+    ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
+    return pick_top_candidates(pool, n, ws)
 
 # --- Rendering (OPS VOICE) ---------------------------------------------------
 _BULLET = "•"

@@ -16,13 +16,16 @@ NEWLINES_RE     = re.compile(r"\n{3,}")
 CVE_RE          = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 # Versions like 132.0.6834.241 or 10.15.7, but do not eat CVEs
 VERSION_RE      = re.compile(r"(?<!CVE-)\b\d+(?:\.\d+){2,}\b")
-LONG_DIGITS_RE  = re.compile(r"\b\d{6,}\b")  # ids like 427681143
+LONG_DIGITS_RE  = re.compile(r"\b\d{6,}\b")            # ids like 427681143
 PAREN_NUM_RE    = re.compile(r"\((?:[^a-zA-Z]*\d[^)]*)\)")  # (Platform Version: 16093.115.0)
 SENT_SPLIT_RE   = re.compile(r"(?<=[\.\?!])\s+")
 WS_RE           = re.compile(r"\s+")
 
 WORDS_RE        = re.compile(r"[A-Za-z0-9.+#/_-]+")
 URL_FINDER_RE   = re.compile(r"https?://[^\s>]+")
+
+# Visual bullet
+BULLET = "•"
 
 # ------------ html & text cleanup -------------
 def _strip_html(s: str | None) -> str:
@@ -41,7 +44,7 @@ def _strip_html(s: str | None) -> str:
 def _pick_doc_url(item: Dict[str, Any]) -> str | None:
     for c in (item.get("advisory_url"), item.get("vendor_url"), item.get("cisa_url"),
               item.get("kev_url"), item.get("url"), item.get("link")):
-        if not c: 
+        if not c:
             continue
         m = URL_FINDER_RE.findall(html.unescape(str(c)))
         if m:
@@ -61,28 +64,21 @@ def _remove_number_noise(s: str) -> str:
     return s.strip()
 
 def _tldr(title: str, summary: str, max_chars: int = 220, max_sentences: int = 2) -> str:
-    raw = _strip_html(summary or title or "")
+    raw = _strip_html(summary or "") or (title or "")
     raw = _remove_number_noise(raw)
-    # Prefer starting from summary; if empty, fall back to title
-    text = raw if raw else (title or "")
-    # sentence-aware slice
-    parts = [p.strip(" .;:-") for p in SENT_SPLIT_RE.split(text) if p.strip()]
-    out = ""
-    taken = 0
+    parts = [p.strip(" .;:-") for p in SENT_SPLIT_RE.split(raw) if p.strip()]
+    out, used = "", 0
     for p in parts:
-        if not p:
-            continue
-        candidate = (out + " " + p).strip() if out else p
-        if taken + len(p) > max_chars or len(candidate) > max_chars or taken >= max_chars:
+        if used >= max_sentences:
+            break
+        candidate = (f"{out} {p}").strip() if out else p
+        if len(candidate) > max_chars:
+            if not out:
+                # hard cut first sentence if it's too long
+                return (p[: max_chars - 1] + "…")
             break
         out = candidate
-        taken = len(out)
-        if out and out[-1] in ".!?":
-            pass
-        if len(out) >= max_chars or (parts and parts.index(p) + 1 >= max_sentences):
-            break
-    if not out:
-        out = (text[: max_chars - 1] + "…") if len(text) > max_chars else text
+        used += 1
     out = out.rstrip(",;: ")
     if not out.endswith((".", "!", "?")):
         out += "."
@@ -152,37 +148,34 @@ def _build_actions(title: str, summary: str, tone: str) -> Tuple[List[str], List
 
 # ------------ renderer -------------
 def render_item_text_core(item: Dict[str, Any], idx: int, tone: str = "simple") -> str:
-    """
-    Build Slack mrkdwn with:
-      - Title
-      - Badges (🚨/⚠️ + KEV + EPSS when meaningful)
-      - TL;DR (sentence-aware, number-noise removed)
-      - Fix (bullets; detailed adds verify)
-      - Docs (up to 3 links; uses item["_docs"] if present)
-    """
-    title   = (item.get("title") or f"Item {idx}").strip()
-    badges  = _sev_badge(item)
-    src_sum = item.get("summary") or item.get("content") or ""
-    tldr    = _tldr(title, src_sum, max_chars=220 if (tone or "simple") == "simple" else 420,
-                    max_sentences=2 if (tone or "simple") == "simple" else 3)
+    title = (item.get("title") or "").strip()
+    badges = _sev_badge(item)
+    summary_src = item.get("summary") or item.get("content") or ""
 
-    fix, verify = _build_actions(title, src_sum, tone or "simple")
+    # sentence-aware, number-clean TL;DR
+    max_chars = 360 if tone == "simple" else 700
+    summary = _tldr(title, summary_src, max_chars=max_chars, max_sentences=2)
 
-    lines: List[str] = [f"*{idx}) {title}*", badges, f"*TL;DR:* {tldr}", "*Fix:*"]
-    lines += [f"• {a}" for a in fix]
-    if (tone or "simple") == "detailed" and verify:
-        lines += ["*Verify:*"] + [f"• {v}" for v in verify]
+    header = f"*{idx}) {title}*"
+    if badges:
+        header += f"\n{badges}"
 
-    # docs: prefer multi-link string from selector, else fall back to first URL we can find
-    docs_str = (item.get("_docs") or "").strip()
-    if not docs_str:
-        doc = _pick_doc_url(item)
-        if doc:
-            docs_str = f"<{doc}|Vendor notice>"
-    if docs_str:
-        lines.append(f"*Docs:* {docs_str}")
+    fix, verify = _build_actions(title, summary, tone)
 
-    text = "\n".join([ln for ln in lines if ln]).strip()
-    if len(text) > 2900:
-        text = text[:2900] + "…"
-    return text
+    lines: List[str] = [
+        header,
+        f"*TL;DR:* {summary}",
+        "",
+        f"*Fix{' (step-by-step)' if tone == 'detailed' else ''}:*",
+        *[f"{BULLET} {a}" for a in fix],
+    ]
+
+    if tone == "detailed" and verify:
+        lines += ["", "*Verify:*", *[f"{BULLET} {v}" for v in verify]]
+
+    doc_str = (item.get("_docs") or "").strip()
+    if doc_str:
+        lines += ["", f"*Docs:* {doc_str}"]
+
+    text = "\n".join(lines).strip()
+    return text[:2900] + "…" if len(text) > 2900 else text
