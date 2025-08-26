@@ -463,8 +463,7 @@ def _docs_links(item: Dict[str, Any]) -> str:
         add("https://www.vmware.com/security/advisories.html", "VMware advisories")
     if "fortinet" in t or "fortigate" in t:
         add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
-
-    # Git  <-- dedent this and the next 'if'
+    # Git (dedented)
     if "git " in (" " + t) or (item.get("title","").lower().startswith("git ")):
         add("https://git-scm.com/downloads", "Git downloads")
         add("https://github.com/git/git/tree/master/Documentation/RelNotes", "Git release notes")
