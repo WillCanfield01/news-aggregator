@@ -6,6 +6,10 @@ from typing import List, Dict, Any, Tuple
 from slack_sdk.web import WebClient
 from patchpal.selector import topN_today, render_item_text
 from patchpal.models import get_bot_token
+from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()
 import requests
 import feedparser
 
@@ -128,6 +132,37 @@ SENT_SPLIT_RE   = re.compile(r"(?<=[\.\?!])\s+")
 TITLE_DEDUP_RE  = re.compile(r"\b(\w+)\s+\1\b", re.I)
 CVES_FIX_RE     = re.compile(r"\bCVEs-(\d{4}-\d{4,7})\b", re.I)
 URL_FINDER_RE   = re.compile(r"https?://[^\s>]+'|https?://[^\s>]+")
+
+class Installation(db.Model):
+    __tablename__ = "installations"
+    team_id   = db.Column(db.String, primary_key=True)
+    team_name = db.Column(db.String, nullable=False)
+    bot_token = db.Column(db.String, nullable=False)  # xoxb-...
+    bot_user  = db.Column(db.String, nullable=False)
+    scopes    = db.Column(db.String, nullable=True)
+    installed_by_user_id = db.Column(db.String, nullable=True)
+    installed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+class TeamConfig(db.Model):
+    __tablename__ = "team_configs"
+    team_id        = db.Column(db.String, db.ForeignKey("installations.team_id"), primary_key=True)
+    default_channel = db.Column(db.String, nullable=True)  # channel ID (e.g. C0123...)
+    updated_at     = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+def upsert_installation(*, team_id, team_name, bot_token, bot_user, scopes, installed_by_user_id):
+    row = db.session.get(Installation, team_id) or Installation(team_id=team_id)
+    row.team_name = team_name
+    row.bot_token = bot_token
+    row.bot_user  = bot_user
+    row.scopes    = scopes
+    row.installed_by_user_id = installed_by_user_id
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+def get_bot_token(team_id: str) -> str | None:
+    row = db.session.get(Installation, team_id)
+    return row.bot_token if row else None
 
 BULLET = "•"
 
