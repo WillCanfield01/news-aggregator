@@ -3,6 +3,9 @@ from __future__ import annotations
 import os, sys, re, time, html, json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
+from slack_sdk.web import WebClient
+from patchpal.selector import topN_today, render_item_text
+from patchpal.models import get_bot_token
 import requests
 import feedparser
 
@@ -637,3 +640,14 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
         pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
     return pick_top_candidates(pool, n, ws)
+
+def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
+    token = get_bot_token(team_id)
+    if not token:
+        raise RuntimeError(f"No installation found for team {team_id}")
+    client = WebClient(token=token)
+
+    items = topN_today(n=5)  # or pass ws with stack prefs if you use that
+    for idx, it in enumerate(items, 1):
+        msg = render_item_text(it, idx, tone)
+        client.chat_postMessage(channel=channel_id, text=msg)
