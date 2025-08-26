@@ -33,7 +33,6 @@ flask_app.register_blueprint(slack_oauth_bp, url_prefix="/slack")
 from slack_bolt import App as BoltApp
 from slack_bolt.adapter.flask import SlackRequestHandler
 from slack_bolt.authorization import AuthorizeResult
-from .models import get_bot_token  # looks up tokens saved by OAuth
 
 signing_secret = os.getenv("SLACK_SIGNING_SECRET")
 

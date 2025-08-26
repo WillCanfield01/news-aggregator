@@ -1,13 +1,8 @@
 # patchpal/selector.py
 from __future__ import annotations
-import os, sys, re, time, html, json
+import os, sys, re, time, html, json, pathlib
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-from slack_sdk.web import WebClient
-from datetime import datetime
-from flask_sqlalchemy import SQLAlchemy
-
-db = SQLAlchemy()
 import requests
 import feedparser
 
@@ -27,6 +22,7 @@ CISA_KEV_URL    = os.getenv(
 AI_SUMMARY_ON   = os.getenv("PATCHPAL_AI_REWRITE", "0").lower() in ("1","true","yes")
 AI_MODEL        = os.getenv("PATCHPAL_AI_MODEL", "gpt-4o-mini")
 
+# --- Feeds -------------------------------------------------------------------
 BASE_FEEDS = [
     # Browsers & OS vendors
     "https://chromereleases.googleblog.com/atom.xml",
@@ -61,7 +57,7 @@ FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
 SKIP_PRE_RELEASE = os.getenv("PATCHPAL_INCLUDE_PRE_RELEASE", "0").lower() not in ("1","true","yes")
 NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I)
 
-# Drop non-actionable “thought leadership” posts (kept if they have CVE/patch signals)
+# Drop non-actionable think pieces (kept if they have CVE/patch signals)
 SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
 SIGNAL_RE = re.compile(
     r"(CVE-\d{4}-\d{4,7}|vulnerab|advisory|security (update|fix|bulletin|patch)|\bKB\d{6,}\b|update guide|msrc)",
@@ -110,7 +106,7 @@ STACK_MAP = {
     "vmware":{"vmware"},
 }
 
-# --- Shared regex / helpers (merged from utils) -----------------------------
+# --- Shared regex / helpers --------------------------------------------------
 _WORDS   = re.compile(r"[A-Za-z0-9.+#/_-]+")
 _CVE_RE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _HTML_RE = re.compile(r"<[^>]+>")
@@ -131,39 +127,9 @@ TITLE_DEDUP_RE  = re.compile(r"\b(\w+)\s+\1\b", re.I)
 CVES_FIX_RE     = re.compile(r"\bCVEs-(\d{4}-\d{4,7})\b", re.I)
 URL_FINDER_RE   = re.compile(r"https?://[^\s>]+'|https?://[^\s>]+")
 
-class Installation(db.Model):
-    __tablename__ = "installations"
-    team_id   = db.Column(db.String, primary_key=True)
-    team_name = db.Column(db.String, nullable=False)
-    bot_token = db.Column(db.String, nullable=False)  # xoxb-...
-    bot_user  = db.Column(db.String, nullable=False)
-    scopes    = db.Column(db.String, nullable=True)
-    installed_by_user_id = db.Column(db.String, nullable=True)
-    installed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-
-class TeamConfig(db.Model):
-    __tablename__ = "team_configs"
-    team_id        = db.Column(db.String, db.ForeignKey("installations.team_id"), primary_key=True)
-    default_channel = db.Column(db.String, nullable=True)  # channel ID (e.g. C0123...)
-    updated_at     = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-def upsert_installation(*, team_id, team_name, bot_token, bot_user, scopes, installed_by_user_id):
-    row = db.session.get(Installation, team_id) or Installation(team_id=team_id)
-    row.team_name = team_name
-    row.bot_token = bot_token
-    row.bot_user  = bot_user
-    row.scopes    = scopes
-    row.installed_by_user_id = installed_by_user_id
-    db.session.add(row)
-    db.session.commit()
-    return row
-
-def get_bot_token(team_id: str) -> str | None:
-    row = db.session.get(Installation, team_id)
-    return row.bot_token if row else None
-
 BULLET = "•"
 
+# ------------ html & text cleanup -------------
 def _strip_html(s: str | None) -> str:
     s = html.unescape((s or "").replace("\xa0", " "))
     s = BR_RE.sub("\n", s)
@@ -216,6 +182,16 @@ def _normalize_title_for_key(title: str) -> str:
     toks = [t for t in s.split() if t not in _STOP]
     return " ".join(toks[:5]) or s.strip()
 
+def _text(item: Dict[str, Any]) -> str:
+    return " ".join([
+        str(item.get("title","")),
+        str(item.get("summary","") or item.get("content","") or ""),
+        str(item.get("vendor_guess","")),
+    ]).lower()
+
+def _tokens(s: str) -> set[str]:
+    return set(_WORDS.findall(s.lower()))
+
 def _product_key(item: Dict[str, Any]) -> str:
     t = _text(item)
     title = (item.get("title") or "").lower()
@@ -228,16 +204,6 @@ def _product_key(item: Dict[str, Any]) -> str:
     if "git " in (" " + t) or title.startswith("git "):
         return "git-core"
     return _normalize_title_for_key(item.get("title") or "")
-
-def _text(item: Dict[str, Any]) -> str:
-    return " ".join([
-        str(item.get("title","")),
-        str(item.get("summary","") or item.get("content","") or ""),
-        str(item.get("vendor_guess","")),
-    ]).lower()
-
-def _tokens(s: str) -> set[str]:
-    return set(_WORDS.findall(s.lower()))
 
 def _extract_cves(*chunks: str) -> list[str]:
     found = set()
@@ -380,7 +346,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 continue
 
             title = _tidy_title(_strip_html((e.get("title") or "").strip()))
-
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
                 continue
 
@@ -458,8 +423,7 @@ def _ai_plain_summary(raw: str, max_sents: int) -> str | None:
     if not AI_SUMMARY_ON:
         return None
     try:
-        # Import lazily to avoid hard dependency if turned off
-        from openai import OpenAI  # type: ignore
+        from openai import OpenAI  # lazy import
     except Exception:
         return None
     try:
@@ -674,13 +638,60 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
     return pick_top_candidates(pool, n, ws)
 
+# --- OAuth installation storage (file-backed) --------------------------------
+_INSTALL_PATH = os.getenv("PP_INSTALL_PATH", "/tmp/pp_installations.json")
+_install_cache: dict[str, dict] = {}
+
+def _load_install_cache():
+    global _install_cache
+    p = pathlib.Path(_INSTALL_PATH)
+    try:
+        if p.exists():
+            _install_cache = json.loads(p.read_text())
+    except Exception:
+        _install_cache = {}
+
+def _save_install_cache():
+    try:
+        pathlib.Path(_INSTALL_PATH).write_text(json.dumps(_install_cache))
+    except Exception:
+        pass
+
+_load_install_cache()
+
+def save_installation(
+    team_id: str,
+    team_name: str,
+    bot_token: str,
+    bot_user_id: str | None = None,
+    scopes: str | None = None,
+    installed_by: str | None = None,
+):
+    _install_cache[team_id] = {
+        "team_name": team_name,
+        "bot_token": bot_token,
+        "bot_user_id": bot_user_id,
+        "scopes": scopes,
+        "installed_by": installed_by,
+        "installed_at": int(time.time()),
+    }
+    _save_install_cache()
+
+def get_bot_token(team_id: str) -> str | None:
+    if not team_id:
+        return None
+    rec = _install_cache.get(team_id)
+    return (rec or {}).get("bot_token") or os.getenv("SLACK_BOT_TOKEN")  # dev fallback
+
+# --- Posting helper ----------------------------------------------------------
 def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
+    from slack_sdk.web import WebClient  # lazy import
     token = get_bot_token(team_id)
     if not token:
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-    items = topN_today(n=5)  # or pass ws with stack prefs if you use that
+    items = topN_today(n=5)
     for idx, it in enumerate(items, 1):
         msg = render_item_text(it, idx, tone)
         client.chat_postMessage(channel=channel_id, text=msg)
