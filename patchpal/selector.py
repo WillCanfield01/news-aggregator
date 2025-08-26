@@ -1,13 +1,10 @@
 # patchpal/selector.py
 from __future__ import annotations
-import os, sys, re, time
+import os, sys, re, time, html, json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import requests
 import feedparser
-from openai import OpenAI
-import json
-from .utils import render_item_text_core
 
 # --- import path (repo root) -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +19,8 @@ CISA_KEV_URL    = os.getenv(
     "PATCHPAL_KEV_URL",
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
 )
+AI_SUMMARY_ON   = os.getenv("PATCHPAL_AI_REWRITE", "0").lower() in ("1","true","yes")
+AI_MODEL        = os.getenv("PATCHPAL_AI_MODEL", "gpt-4o-mini")
 
 BASE_FEEDS = [
     # Browsers & OS vendors
@@ -52,19 +51,17 @@ BASE_FEEDS = [
 ]
 EXTRA_FEEDS = [u.strip() for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n"," ").split(" ") if u.strip()]
 FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
+
 # Drop pre-release noise unless explicitly allowed
 SKIP_PRE_RELEASE = os.getenv("PATCHPAL_INCLUDE_PRE_RELEASE", "0").lower() not in ("1","true","yes")
 NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I)
+
 # Drop non-actionable “thought leadership” posts (kept if they have CVE/patch signals)
 SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
-
-# looks like an advisory/patch/CVE
 SIGNAL_RE = re.compile(
     r"(CVE-\d{4}-\d{4,7}|vulnerab|advisory|security (update|fix|bulletin|patch)|\bKB\d{6,}\b|update guide|msrc)",
     re.I,
 )
-
-# smells like a think-piece
 BLOGGY_RE = re.compile(
     r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|hunting for variant)",
     re.I,
@@ -108,73 +105,74 @@ STACK_MAP = {
     "vmware":{"vmware"},
 }
 
-_WORDS   = re.compile(r"[a-z0-9+.#/-]+", re.I)
+# --- Shared regex / helpers (merged from utils) -----------------------------
+_WORDS   = re.compile(r"[A-Za-z0-9.+#/_-]+")
 _CVE_RE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _HTML_RE = re.compile(r"<[^>]+>")
-_STOP = {"cve", "update", "security", "advisory", "release", "dev", "desktop", "channel"}
-# pip install openai
-client = OpenAI()  # expects OPENAI_API_KEY in env
+_STOP    = {"cve", "update", "security", "advisory", "release", "dev", "desktop", "channel"}
 
-CLEAN_NUMS = re.compile(r"\b\d{6,}\b")
-SENT_SPLIT = re.compile(r'(?<=[.!?])\s+')
+BR_RE           = re.compile(r"(?i)<\s*br\s*/?>")
+P_CLOSE_RE      = re.compile(r"(?i)</\s*p\s*>")
+P_OPEN_RE       = re.compile(r"(?i)<\s*p(\s[^>]*)?>")
+LI_OPEN_RE      = re.compile(r"(?i)<\s*li(\s[^>]*)?>")
+LI_CLOSE_RE     = re.compile(r"(?i)</\s*li\s*>")
+MULTISPACE_RE   = re.compile(r"[ \t]+")
+NEWLINES_RE     = re.compile(r"\n{3,}")
+VERSION_RE      = re.compile(r"(?<!CVE-)\b\d+(?:\.\d+){2,}\b")
+LONG_DIGITS_RE  = re.compile(r"\b\d{6,}\b")
+PAREN_NUM_RE    = re.compile(r"\((?:[^a-zA-Z]*\d[^)]*)\)")
+SENT_SPLIT_RE   = re.compile(r"(?<=[\.\?!])\s+")
+TITLE_DEDUP_RE  = re.compile(r"\b(\w+)\s+\1\b", re.I)
+CVES_FIX_RE     = re.compile(r"\bCVEs-(\d{4}-\d{4,7})\b", re.I)
+URL_FINDER_RE   = re.compile(r"https?://[^\s>]+'|https?://[^\s>]+")
 
-def _first_sentences(text: str, n: int = 2) -> str:
-    parts = SENT_SPLIT.split(text.strip())
-    return " ".join(p.strip() for p in parts[:n] if p.strip())
+BULLET = "•"
 
-STYLE_RULES = """
-You are an ops copy editor. Rewrite into Slack mrkdwn with this shape:
-- Line 1: "*{title}*"
-- Line 2: badges like ":rotating_light: HIGH" or ":warning: MEDIUM", include "KEV" and "EPSS 0.38" only if EPSS >= 0.01
-- Line 3: "Summary:" one tight sentence (two max). Remove fluff, marketing, and very long numbers; keep the core risk. Make sure it doesn't sound like a framework document or risk alert sheet, we want easy to understand issues, without over simplification.
-- "Fix:" 1–2 bullets tailored if Windows/Apple/Chrome are detected; else generic vendor patch bullet. Again make sure the bullets are easy for anyone to understand, not just security people.
-- "Docs:" include the provided Slack-formatted links (don’t invent links).
-Constraints: <= 550 characters after the title; no HTML; no &nbsp;.
-"""
+def _strip_html(s: str | None) -> str:
+    s = html.unescape((s or "").replace("\xa0", " "))
+    s = BR_RE.sub("\n", s)
+    s = P_CLOSE_RE.sub("\n", s)
+    s = P_OPEN_RE.sub("", s)
+    s = LI_CLOSE_RE.sub("", s)
+    s = LI_OPEN_RE.sub("• ", s)
+    s = _HTML_RE.sub("", s)
+    s = MULTISPACE_RE.sub(" ", s)
+    s = re.sub(r"\n[ \t]+", "\n", s)
+    s = NEWLINES_RE.sub("\n\n", s)
+    return s.strip()
 
-SANITIZE_RULES = [
-    (re.compile(r":\s*kev\s*:", re.I), "KEV"),
-    (re.compile(r":\s*epss\s*:\s*(\d+(?:\.\d+)?)", re.I), r"EPSS \1"),
-    (re.compile(r"(?mi)^\s*summary:\s*"), "*TL;DR:* "),
-    (re.compile(r"(?m)^\s*-\s+"), "• "),           # bullets
-    (re.compile(r"\n{3,}"), "\n\n"),               # collapse blank lines
+def _remove_number_noise(s: str) -> str:
+    s = VERSION_RE.sub("", s)
+    s = LONG_DIGITS_RE.sub("", s)
+    s = PAREN_NUM_RE.sub("", s)
+    s = re.sub(r"\b(is|are)\s+being\s+rolled\s+out\b", "is rolling out", s, flags=re.I)
+    s = re.sub(r"\bincluding:\s*", "Includes ", s, flags=re.I)
+    s = re.sub(r"\s+,", ",", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+PLAIN_MAP = [
+    (re.compile(r"\bdeseriali[sz]ation of untrusted data\b", re.I), "unsafe handling of untrusted data"),
+    (re.compile(r"\buse[- ]after[- ]free\b", re.I), "a memory bug attackers can exploit"),
+    (re.compile(r"\binteger overflow\b", re.I), "a number-handling bug"),
+    (re.compile(r"\bremote code execution\b|\bRCE\b", re.I), "letting attackers run code"),
+    (re.compile(r"\bprivilege escalation\b|\belevation of privilege\b", re.I), "gaining more access than they should"),
+    (re.compile(r"\bNetworkService\b", re.I), "a system service account"),
 ]
+def _plain_english(s: str) -> str:
+    t = s
+    for rx, rep in PLAIN_MAP:
+        t = rx.sub(rep, t)
+    t = re.sub(r"\ba vulnerability\b", "a security bug", t, flags=re.I)
+    t = re.sub(r"\bvulnerabilities\b", "security issues", t, flags=re.I)
+    return t
 
-def _polish_mrkdwn(text: str) -> str:
-    for rx, rep in SANITIZE_RULES:
-        text = rx.sub(rep, text)
-    return text.strip()
-
-
-def ai_rewrite(item: dict, docs_str: str, severity: str) -> str:
-    client = OpenAI()
-    summary = (item.get("summary") or item.get("content") or "")
-    summary = CLEAN_NUMS.sub("", summary)
-    summary = _first_sentences(summary, 2)
-    payload = {
-        "title": item.get("title", ""),
-        "summary": summary,
-        "badges": {
-            "sev": severity,
-            "kev": bool(item.get("kev") or item.get("known_exploited")),
-            "epss": float(item.get("epss") or 0.0)
-        },
-        "docs": docs_str
-    }
-    messages = [
-        {"role": "system", "content": STYLE_RULES},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
-    ]
-    resp = client.chat.completions.create(
-        model=os.getenv("PATCHPAL_AI_MODEL","gpt-4o-mini"),
-        temperature=0.2,
-        messages=messages,
-    )
-    out = resp.choices[0].message.content.strip()
-    return _polish_mrkdwn(out)
+def _tidy_title(s: str) -> str:
+    s = CVES_FIX_RE.sub(r"CVE-\1", s)
+    s = TITLE_DEDUP_RE.sub(r"\1", s)
+    return re.sub(r"\s{2,}", " ", s).strip(" -–—")
 
 def _normalize_title_for_key(title: str) -> str:
-    """Strip CVE prefix, punctuation, collapse spaces, take first 5 significant tokens."""
     s = title or ""
     s = s.lower()
     s = re.sub(r"^cve-\d{4}-\d{4,7}\s*[—\-:]\s*", "", s)
@@ -183,11 +181,8 @@ def _normalize_title_for_key(title: str) -> str:
     return " ".join(toks[:5]) or s.strip()
 
 def _product_key(item: Dict[str, Any]) -> str:
-    """Best-effort product grouping so we can collapse dup advisories for the same thing."""
     t = _text(item)
     title = (item.get("title") or "").lower()
-
-    # Explicit products we see a lot
     if "citrix" in t and "session recording" in t:
         return "citrix-session-recording"
     if "google" in t and "chrome" in t:
@@ -196,12 +191,7 @@ def _product_key(item: Dict[str, Any]) -> str:
         return "apple-ecosystem"
     if "git " in (" " + t) or title.startswith("git "):
         return "git-core"
-
-    # Generic fallback from title
     return _normalize_title_for_key(item.get("title") or "")
-
-def _strip_html(s: str | None) -> str:
-    return "" if not s else _HTML_RE.sub("", s)
 
 def _text(item: Dict[str, Any]) -> str:
     return " ".join([
@@ -286,7 +276,6 @@ def _load_kev_set() -> set[str]:
     return kev_set
 
 def _enrich_epss(items: List[Dict[str,Any]]) -> None:
-    # Collect CVEs
     cves, seen = [], set()
     for it in items:
         for c in _extract_cves(it.get("title",""), it.get("summary","")):
@@ -294,8 +283,6 @@ def _enrich_epss(items: List[Dict[str,Any]]) -> None:
                 seen.add(c); cves.append(c)
     if not cves:
         return
-
-    # FIRST API ~200 CVEs per request
     for i in range(0, len(cves), 150):
         chunk = cves[i:i+150]
         try:
@@ -318,7 +305,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     cutoff = now - days * 86400
 
     kev_set = _load_kev_set()
-    
+
     # KEV as explicit items (recent only)
     kev_json = _get_json(CISA_KEV_URL)
     if isinstance(kev_json, dict):
@@ -356,15 +343,13 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             if ts < cutoff:
                 continue
 
-            title = _strip_html((e.get("title") or "").strip())
+            title = _tidy_title(_strip_html((e.get("title") or "").strip()))
 
-            # skip pre-release chatter
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
                 continue
 
             summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
 
-            # NEW: skip low-signal vendor essays without advisory/CVE signals
             if SKIP_LOW_SIGNAL and not _is_signal(title, summary, e.get("link") or "", url):
                 continue
 
@@ -400,7 +385,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
     _enrich_epss(uniq)  # best-effort
 
-    # --- Collapse by product (1 per product per day). Prefer KEV, then higher EPSS.
+    # Collapse by product (prefer KEV, then higher EPSS)
     by_product: Dict[str, Dict[str,Any]] = {}
     def _score(it: Dict[str,Any]) -> tuple:
         kev = 1 if it.get("kev") or it.get("known_exploited") else 0
@@ -419,7 +404,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     collapsed = list(by_product.values())
     collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
 
-    # 👇 NEW: back-fill from 'uniq' so the pool always has depth
+    # Back-fill so pool always has depth
     chosen = {_key_for(it) for it in collapsed}
     for it in uniq:
         k = _key_for(it)
@@ -432,36 +417,34 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
     return collapsed[:max_items]
 
-def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
-    pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS)
-    if len(pool) < n:
-        pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)  # widen once
-    ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
-    return pick_top_candidates(pool, n, ws)
-
-# --- Rendering (OPS VOICE) ---------------------------------------------------
-_BULLET = "•"
-
-def _short(s: str, limit: int) -> str:
-    s = re.sub(r"\s+", " ", s or "").strip()
-    return (s[: limit - 1] + "…") if len(s) > limit else s
-
-def _badge_line(item: Dict[str, Any]) -> str:
-    epss = 0.0
+# --- AI (summary-only) -------------------------------------------------------
+def _ai_plain_summary(raw: str, max_sents: int) -> str | None:
+    if not AI_SUMMARY_ON:
+        return None
     try:
-        epss = float(item.get("epss") or 0.0)
+        # Import lazily to avoid hard dependency if turned off
+        from openai import OpenAI  # type: ignore
     except Exception:
-        pass
-    is_kev = bool(item.get("kev") or item.get("known_exploited"))
-    sev = "HIGH" if is_kev or epss >= EPSS_THRESHOLD else "MEDIUM"
-    emoji = ":rotating_light:" if sev == "HIGH" else ":warning:"
-    bits = [f"{emoji} *{sev}*"]
-    if is_kev:
-        bits.append("KEV")
-    if epss >= 0.01:  # hide meaningless zero
-        bits.append(f"EPSS {epss:.2f}")
-    return " • ".join(bits)
+        return None
+    try:
+        client = OpenAI()
+        sys_prompt = (
+            f"Rewrite in plain English using up to {max_sents} short sentences. "
+            "Avoid jargon and long numbers; keep it understandable to non-security readers."
+        )
+        resp = client.chat.completions.create(
+            model=AI_MODEL,
+            temperature=0.2,
+            messages=[
+                {"role":"system","content":sys_prompt},
+                {"role":"user","content":raw[:2000]},
+            ],
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return None
 
+# --- Rendering ---------------------------------------------------------------
 def _docs_links(item: Dict[str, Any]) -> str:
     links: list[tuple[str, str]] = []
     t = _text(item)
@@ -494,7 +477,7 @@ def _docs_links(item: Dict[str, Any]) -> str:
         add("https://www.vmware.com/security/advisories.html", "VMware advisories")
     if "fortinet" in t or "fortigate" in t:
         add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
-    # Git (dedented)
+    # Git
     if "git " in (" " + t) or (item.get("title","").lower().startswith("git ")):
         add("https://git-scm.com/downloads", "Git downloads")
         add("https://github.com/git/git/tree/master/Documentation/RelNotes", "Git release notes")
@@ -504,7 +487,6 @@ def _docs_links(item: Dict[str, Any]) -> str:
 
     add(src, "Vendor notice")  # always include if present
 
-    # Dedup + cap to 3
     out, seen = [], set()
     for u, label in links:
         if not u or u in seen:
@@ -514,55 +496,108 @@ def _docs_links(item: Dict[str, Any]) -> str:
             break
     return " · ".join(out)
 
-def _actions_and_verify(item: Dict[str, Any], tone: str) -> Tuple[list[str], list[str]]:
-    t = _text(item)
-    fix: list[str] = []
-    verify: list[str] = []
+def _build_actions(title: str, summary: str, tone: str) -> Tuple[List[str], List[str]]:
+    t = f"{title} {summary}".lower()
+    fix: List[str] = []
+    verify: List[str] = []
 
-    # CHROME FIRST (so the presence of the word 'Windows' in the blog text doesn't hijack it)
-    if "chrome" in t:
-        fix.append("Update Chrome to the latest stable.")
+    if any(k in t for k in ("chrome","chromium","chromeos")):
+        fix.append("Update Chrome/ChromeOS to the latest stable build.")
         if tone == "detailed":
-            fix += ["Admin: force update via policy.", "Restart browser/devices if needed."]
-            verify += ["chrome://version on sample endpoints shows latest build."]
+            fix += ["Admins can force updates via policy.", "Restart browser/devices if needed."]
+            verify += ["chrome://version shows the latest build on sample endpoints."]
         return fix, verify
 
-    # APPLE next
-    if any(k in t for k in ("apple","ios","ipad","macos","safari")):
-        fix.append("Update iOS/iPadOS/macOS to the latest version.")
+    if any(k in t for k in ("apple","ios","ipados","macos","safari")):
+        fix.append("Update iPhone/iPad/Mac to the latest version.")
         if tone == "detailed":
-            fix += ["MDM: push update and enforce restart."]
-            verify += ["MDM inventory shows minimum OS version across devices."]
+            fix += ["If managed, push the OS update via MDM and enforce a restart."]
+            verify += ["MDM inventory shows the minimum OS version across devices."]
         return fix, verify
 
-    # MICROSOFT after vendor-specific cases
     if any(k in t for k in ("microsoft","windows","edge","office","exchange","teams")):
-        fix.append("Run Windows Update / deploy latest security updates.")
+        fix.append("Run Windows Update or deploy the latest security updates.")
         if tone == "detailed":
-            fix += ["WSUS/Intune: approve & force install; reboot if required."]
-            verify += ["MDM/VA shows target KBs installed on all scoped devices."]
+            fix += ["WSUS/Intune: approve and force install; reboot if required."]
+            verify += ["MDM/VA shows the target KBs installed across the fleet."]
         return fix, verify
 
-    # DEFAULT
-    fix.append("Apply the vendor security update/hotfix.")
+    fix.append("Apply the vendor security update or hotfix.")
     if tone == "detailed":
         fix += ["Schedule maintenance; restart if needed."]
-        verify += ["Service/app version matches vendor advisory; VA re-scan is clean."]
+        verify += ["Version matches the advisory and a re-scan is clean."]
     return fix, verify
 
+def _meta_lines(item: Dict[str, Any]) -> List[str]:
+    kev = bool(item.get("kev") or item.get("known_exploited"))
+    try:
+        epss = float(item.get("epss") or 0.0)
+    except Exception:
+        epss = 0.0
+    sev = (item.get("severity") or "").upper()
+    if not sev:
+        sev = "HIGH" if kev or epss >= EPSS_THRESHOLD else "MEDIUM"
+    lines = [
+        f"Security alert: {sev.title()}",
+        f"Known Exploited Vulnerability: {'Yes' if kev else 'No'}",
+    ]
+    if epss >= 0.01:
+        lines.append(f"EPSS: {epss:.2f}")
+    return lines
+
+def _summary_text(title: str, summary: str, *, tone: str) -> str:
+    raw = _strip_html(summary or title or "")
+    raw = _plain_english(_remove_number_noise(raw))
+    # AI rewrite (summary only) if enabled
+    max_sents = 2 if (tone or "simple") == "simple" else 4
+    if AI_SUMMARY_ON:
+        ai = _ai_plain_summary(raw, max_sents)
+        if ai:
+            return ai if ai.endswith((".", "!", "?")) else (ai + ".")
+    # deterministic fallback
+    parts = [p.strip(" .;:-") for p in SENT_SPLIT_RE.split(raw) if p.strip()]
+    if not parts:
+        return title.strip() + "."
+    text = ". ".join(parts[:max_sents]).strip(". ") + "."
+    hard_cap = 420 if (tone or "simple") == "simple" else 800
+    return (text[:hard_cap-1].rstrip()+"…") if len(text) > hard_cap else text
+
 def render_item_text(item: dict, idx: int, tone: str) -> str:
-    docs_str = _docs_links(item)
-    sev = "HIGH" if (item.get("kev") or (float(item.get("epss") or 0) >= EPSS_THRESHOLD)) else "MEDIUM"
+    """
+    Single renderer used everywhere. Title bold only.
+    Lines:
+      Security alert: X
+      Known Exploited Vulnerability: Yes/No
+      EPSS: Y (if >= 0.01)
+      Summary: ...
+      Fix:
+        • bullet
+      Docs: <link> · <link> · <link>
+    """
+    title = _tidy_title((item.get("title") or "").strip())
+    meta  = _meta_lines(item)
+    summary_src = item.get("summary") or item.get("content") or ""
+    summary = _summary_text(title, summary_src, tone=(tone or "simple"))
+    fix, verify = _build_actions(title, summary, tone or "simple")
+    actions_lines = [f"{BULLET} {a}" for a in fix]
+    doc_str = _docs_links(item)
 
-    if os.getenv("PATCHPAL_AI_REWRITE", "0") in ("1","true","yes"):
-        try:
-            return ai_rewrite(item, docs_str, sev)
-        except Exception:
-            pass  # fail open to local formatter
+    blocks: List[str] = [
+        f"*{idx}) {title}*",
+        *meta,
+        "",
+        f"Summary: {summary}",
+        "",
+        "Fix:",
+        *actions_lines,
+    ]
+    if (tone or "simple") == "detailed" and verify:
+        blocks += ["", "Verify:", *[f"{BULLET} {v}" for v in verify]]
+    if doc_str:
+        blocks += ["", f"Docs: {doc_str}"]
 
-    # fallback to your local formatter
-    it = dict(item); it["_docs"] = docs_str
-    return render_item_text_core(it, idx, tone)
+    text = "\n".join(blocks).strip()
+    return text[:2900] + "…" if len(text) > 2900 else text
 
 # --- Selection / Ranking -----------------------------------------------------
 def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str, Any]]:
@@ -596,7 +631,7 @@ def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str
 # --- Public API --------------------------------------------------------------
 def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS)
-    if not pool:
-        return []
+    if len(pool) < n:
+        pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
     return pick_top_candidates(pool, n, ws)
