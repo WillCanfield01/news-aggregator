@@ -4,7 +4,6 @@ import os, sys, re, time, html, json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from slack_sdk.web import WebClient
-from patchpal.selector import topN_today, render_item_text
 from patchpal.models import get_bot_token
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
