@@ -53,7 +53,25 @@ FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
 # Drop pre-release noise unless explicitly allowed
 SKIP_PRE_RELEASE = os.getenv("PATCHPAL_INCLUDE_PRE_RELEASE", "0").lower() not in ("1","true","yes")
 NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I)
+# Drop non-actionable “thought leadership” posts (kept if they have CVE/patch signals)
+SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
 
+# looks like an advisory/patch/CVE
+SIGNAL_RE = re.compile(
+    r"(CVE-\d{4}-\d{4,7}|vulnerab|advisory|security (update|fix|bulletin|patch)|\bKB\d{6,}\b|update guide|msrc)",
+    re.I,
+)
+
+# smells like a think-piece
+BLOGGY_RE = re.compile(
+    r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|hunting for variant)",
+    re.I,
+)
+
+def _is_signal(title: str, summary: str, link: str, source: str) -> bool:
+    blob = " ".join([title or "", summary or "", link or "", source or ""])
+    return bool(SIGNAL_RE.search(blob)) and not BLOGGY_RE.search(blob)
+\
 
 # --- Relevance --------------------------------------------------------------
 UNIVERSAL_VENDORS = {
@@ -239,7 +257,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     cutoff = now - days * 86400
 
     kev_set = _load_kev_set()
-
+    
     # KEV as explicit items (recent only)
     kev_json = _get_json(CISA_KEV_URL)
     if isinstance(kev_json, dict):
@@ -279,8 +297,14 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
             title = _strip_html((e.get("title") or "").strip())
 
-            # ⬇️ skip pre-release chatter like Dev/Beta/Canary/Nightly/Insider/Preview
+            # skip pre-release chatter
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
+                continue
+
+            summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
+
+            # NEW: skip low-signal vendor essays without advisory/CVE signals
+            if SKIP_LOW_SIGNAL and not _is_signal(title, summary, e.get("link") or "", url):
                 continue
 
             summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
