@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import requests
 import feedparser
+from .utils import render_item_text_core
 
 # --- import path (repo root) -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
@@ -450,27 +451,21 @@ def _actions_and_verify(item: Dict[str, Any], tone: str) -> Tuple[list[str], lis
     return fix, verify
 
 def render_item_text(item: Dict[str, Any], idx: int, tone: str) -> str:
-    """
-    Build multi-doc links here, then hand off to utils.render_item_text_core
-    so all wording/voice lives in one place.
-    """
-    # make a shallow copy and inject the preformatted docs string
-    docs_str = _docs_links(item)          # e.g. "<url|Label> · <url|Label>"
-    it = dict(item)
+    """Delegate formatting to utils.render_item_text_core."""
+    docs_str = _docs_links(item)      # '<url|Label> · <url|Label> …'
+    it = dict(item)                   # shallow copy to inject docs
     it["_docs"] = docs_str
-
     try:
-        from .utils import render_item_text_core
         return render_item_text_core(it, idx, tone)
     except Exception:
-        # ultra-simple fallback if utils import ever fails
-        title   = str(it.get("title") or f"Item {idx}").strip()
-        summary = _short(_strip_html(it.get("summary") or it.get("content") or ""), 220 if (tone or "simple")=="simple" else 420)
-        badges  = _badge_line(it)
-        lines = [f"*{idx}) {title}*", badges, f"*TL;DR:* {summary}"]
+        # ultra-simple fallback if utils ever fails
+        title = str(it.get("title") or f"Item {idx}").strip()
+        tl = re.sub(r"\s+", " ", _strip_html(it.get("summary") or it.get("content") or "")).strip()
+        tl = (tl[:219] + "…") if len(tl) > 220 else tl
+        parts = [f"*{idx}) {title}*", f"*TL;DR:* {tl}"]
         if docs_str:
-            lines.append(f"*Docs:* {docs_str}")
-        txt = "\n".join([l for l in lines if l]).strip()
+            parts.append(f"*Docs:* {docs_str}")
+        txt = "\n".join(parts)
         return txt[:2900] + "…" if len(txt) > 2900 else txt
 
 # --- Selection / Ranking -----------------------------------------------------
