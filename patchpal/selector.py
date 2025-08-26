@@ -132,6 +132,20 @@ You are an ops copy editor. Rewrite into Slack mrkdwn with this shape:
 Constraints: <= 550 characters after the title; no HTML; no &nbsp;.
 """
 
+SANITIZE_RULES = [
+    (re.compile(r":\s*kev\s*:", re.I), "KEV"),
+    (re.compile(r":\s*epss\s*:\s*(\d+(?:\.\d+)?)", re.I), r"EPSS \1"),
+    (re.compile(r"(?mi)^\s*summary:\s*"), "*TL;DR:* "),
+    (re.compile(r"(?m)^\s*-\s+"), "• "),           # bullets
+    (re.compile(r"\n{3,}"), "\n\n"),               # collapse blank lines
+]
+
+def _polish_mrkdwn(text: str) -> str:
+    for rx, rep in SANITIZE_RULES:
+        text = rx.sub(rep, text)
+    return text.strip()
+
+
 def ai_rewrite(item: dict, docs_str: str, severity: str) -> str:
     client = OpenAI()
     summary = (item.get("summary") or item.get("content") or "")
@@ -156,7 +170,8 @@ def ai_rewrite(item: dict, docs_str: str, severity: str) -> str:
         temperature=0.2,
         messages=messages,
     )
-    return resp.choices[0].message.content.strip()
+    out = resp.choices[0].message.content.strip()
+    return _polish_mrkdwn(out)
 
 def _normalize_title_for_key(title: str) -> str:
     """Strip CVE prefix, punctuation, collapse spaces, take first 5 significant tokens."""

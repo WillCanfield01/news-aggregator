@@ -23,11 +23,18 @@ WS_RE           = re.compile(r"\s+")
 
 WORDS_RE        = re.compile(r"[A-Za-z0-9.+#/_-]+")
 URL_FINDER_RE   = re.compile(r"https?://[^\s>]+")
+TITLE_DEDUP_RE = re.compile(r"\b(\w+)\s+\1\b", re.I)
+CVES_FIX_RE    = re.compile(r"\bCVEs-(\d{4}-\d{4,7})\b", re.I)
 
 # Visual bullet
-BULLET = "•"
+BULLET = "✔️"
 
 # ------------ html & text cleanup -------------
+def _tidy_title(s: str) -> str:
+    s = CVES_FIX_RE.sub(r"CVE-\1", s)
+    s = TITLE_DEDUP_RE.sub(r"\1", s)
+    return re.sub(r"\s{2,}", " ", s).strip(" -–—")
+
 def _strip_html(s: str | None) -> str:
     s = html.unescape((s or "").replace("\xa0", " "))
     s = BR_RE.sub("\n", s)
@@ -148,7 +155,8 @@ def _build_actions(title: str, summary: str, tone: str) -> Tuple[List[str], List
 
 # ------------ renderer -------------
 def render_item_text_core(item: Dict[str, Any], idx: int, tone: str = "simple") -> str:
-    title = (item.get("title") or "").strip()
+    title_raw = (item.get("title") or "").strip()
+    title = _tidy_title(title_raw)
     badges = _sev_badge(item)
     summary_src = item.get("summary") or item.get("content") or ""
 
