@@ -19,6 +19,7 @@ SCOPES = [
     "chat:write",
     "channels:read",
     "groups:read",
+    "commands",
 ]
 
 authz = AuthorizeUrlGenerator(
