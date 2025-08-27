@@ -8,7 +8,7 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from slack_bolt.authorization import AuthorizeResult
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_sdk import WebClient
-
+from .install_store import get_bot_token, migrate_file_store_if_present
 from .billing import billing_bp
 from .storage import Base, engine
 from .commands import register_commands
@@ -24,7 +24,7 @@ MAIN_TEMPLATES = ROOT / "app" / "templates"
 
 # ---- DB init -------------------------------------------------------------
 Base.metadata.create_all(engine)
-
+migrate_file_store_if_present()
 # ---- Flask app -----------------------------------------------------------
 flask_app = Flask(__name__, template_folder=str(PP_TEMPLATES))
 flask_app.jinja_loader = ChoiceLoader([
@@ -41,11 +41,10 @@ flask_app.register_blueprint(slack_oauth_bp)  # /slack/install + /slack/oauth/ca
 signing_secret = os.getenv("SLACK_SIGNING_SECRET")
 
 def authorize(enterprise_id, team_id, user_id, client, logger):
-    """
-    Provide a token dynamically per workspace (team_id).
-    Bolt calls this for each request that needs a token.
-    """
-    token = get_bot_token(team_id) or os.getenv("SLACK_BOT_TOKEN")  # dev fallback
+    token = get_bot_token(team_id)
+    # (Optional dev fallback: only if you truly want single-team dev)
+    if not token:
+        token = os.getenv("SLACK_BOT_TOKEN")  # remove in production
     return AuthorizeResult(
         enterprise_id=enterprise_id,
         team_id=team_id,

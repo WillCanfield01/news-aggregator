@@ -3,6 +3,7 @@ from __future__ import annotations
 import os, sys, re, time, html, json, pathlib
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
+from .install_store import get_bot_token
 import requests
 import feedparser
 
