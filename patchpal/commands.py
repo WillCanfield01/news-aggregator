@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from slack_bolt import App
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from slack_sdk.errors import SlackApiError
 
 from .storage import SessionLocal, Workspace
 from .billing import ensure_trial
@@ -268,20 +269,51 @@ def register_commands(app: App):
                     if not ws.post_channel:
                         respond("Set a channel first: `*/patchpal set-channel here*` in the target channel.")
                         return
+
+                    # Best-effort: join public channels so we can post without manual invite
+                    try:
+                        client.conversations_join(channel=ws.post_channel)
+                    except Exception:
+                        pass  # ignore (fails for private channels or if already a member)
+
                     from .selector import topN_today, render_item_text
                     items = topN_today(5, ws=ws)
                     if not items:
                         respond("No items found right now.")
                         return
-                    hdr = client.chat_postMessage(
-                        channel=ws.post_channel,
-                        text="Today’s Top 5 Patches / CVEs",
-                        blocks=[{"type":"header","text":{"type":"plain_text","text":"Today’s Top 5 Patches / CVEs","emoji":True}}],
-                    )
-                    parent_ts = hdr["ts"]
+
+                    try:
+                        hdr = client.chat_postMessage(
+                            channel=ws.post_channel,
+                            text="Today’s Top 5 Patches / CVEs",
+                            blocks=[{
+                                "type": "header",
+                                "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True}
+                            }],
+                        )
+                        parent_ts = hdr["ts"]
+                    except SlackApiError as e:
+                        err = (e.response or {}).get("error")
+                        if err in {"not_in_channel", "channel_not_found"}:
+                            respond(
+                                "I need to be in that channel before I can post.\n"
+                                "• For **private** channels: invite me with `/invite @PatchPal` in the channel.\n"
+                                "• For **public** channels: invite me the same way, or an admin can grant me the "
+                                "`chat:write.public` scope so I can post without being a member.\n"
+                                "Then run `/patchpal post-now` again."
+                            )
+                            return
+                        if err == "is_archived":
+                            respond("That channel is archived. Choose another with `/patchpal set-channel here` in a live channel.")
+                            return
+                        # Unknown API error: surface a friendly message
+                        logger.exception("chat.postMessage failed")
+                        respond(f"Couldn’t post: `{err or 'unknown_error'}`. Please try again shortly.")
+                        return
+
+                    # Post each item as a threaded message
                     for i, it in enumerate(items, 1):
                         txt = render_item_text(it, i, ws.tone or "simple")
-                        # Belt & suspenders: ensure string & within Slack limits
                         if not isinstance(txt, str):
                             txt = str(txt or "")
                         txt = txt.strip()
@@ -293,11 +325,13 @@ def register_commands(app: App):
                         client.chat_postMessage(
                             channel=ws.post_channel,
                             thread_ts=parent_ts,
-                            text=f"{i})",  # fallback text
+                            text=f"{i})",  # fallback
                             blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
                         )
+
                     respond(f"Posted {len(items)} item(s) to <#{ws.post_channel}>.")
                     return
+
 
                 # default help
                 respond(HELP)
