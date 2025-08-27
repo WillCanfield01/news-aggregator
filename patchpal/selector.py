@@ -370,18 +370,23 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     for url in FALLBACK_FEEDS:
         feed = _parse_feed(url)
         for e in feed.get("entries", []):
+            # --- timestamp (with guards) ---
             try:
-                updated = e.get("updated_parsed") or e.get("published_parsed")
+                updated = (
+                    e.get("updated_parsed")
+                    or e.get("published_parsed")
+                    or e.get("created_parsed")
+                )
                 ts = time.mktime(updated) if updated else now
             except Exception:
                 ts = now
             if ts < cutoff:
                 continue
 
-            # Title first
-            title = _tidy_title(_strip_html((e.get("title") or "").strip()))
+            # --- title ---
+            title = _tidy_title(_strip_html(str(e.get("title") or "").strip()))
 
-            # Always define summary (feeds vary: summary / description / content[0].value)
+            # --- body: ALWAYS define summary (feeds vary) ---
             summary = ""
             try:
                 content = e.get("content")
@@ -393,20 +398,20 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 summary = (e.get("summary") or e.get("description") or "")
             summary = _strip_html(summary.strip())
 
-            # Filter out noisy pre-release posts
+            # --- filters ---
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
                 continue
-
-            # Skip low-signal “bloggy” posts unless they clearly reference CVEs/patches
             if SKIP_LOW_SIGNAL and not _is_signal(title, summary, str(e.get("link") or ""), url):
                 continue
 
+            # --- CVE/KEV flags ---
             cves = _extract_cves(title, summary)
             kev_flag = any(c in kev_set for c in cves)
 
+            # --- collect ---
             out.append({
                 "title": title,
-                "summary": summary,                  # <- now always defined
+                "summary": summary,                    # <- always defined now
                 "kev": kev_flag,
                 "vendor_guess": (title + " " + summary).lower(),
                 "link": e.get("link") or "",
