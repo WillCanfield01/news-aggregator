@@ -3,9 +3,11 @@ from __future__ import annotations
 import os, sys, re, time, html, json, pathlib
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-from .install_store import get_bot_token
 import requests
 import feedparser
+
+# use DB-backed token store
+from .install_store import get_bot_token
 
 # --- import path (repo root) -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 # --- Tunables ---------------------------------------------------------------
 EPSS_THRESHOLD  = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
-FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))  # tighter default = fresher lists
+FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))   # fresher pool by default
 REQUEST_TIMEOUT = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
 CISA_KEV_URL    = os.getenv(
     "PATCHPAL_KEV_URL",
@@ -23,10 +25,10 @@ CISA_KEV_URL    = os.getenv(
 AI_SUMMARY_ON   = os.getenv("PATCHPAL_AI_REWRITE", "0").lower() in ("1","true","yes")
 AI_MODEL        = os.getenv("PATCHPAL_AI_MODEL", "gpt-4o-mini")
 
-# For diversity: cap per vendor in the final list
+# Variety controls
 MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
 
-# Remember what we posted so we don't repeat for a few days
+# Per-team dedupe memory
 REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
 RECENT_STORE    = os.getenv("PP_RECENT_STORE", "/opt/render/project/data/recent_posts.json")
 
@@ -42,12 +44,15 @@ BASE_FEEDS = [
     "https://msrc.microsoft.com/update-guide/rss",
     "https://msrc.microsoft.com/blog/feed/",
 
-    # Infra / appliances
+    # Network & appliances PSIRTs
     "https://www.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml",
     "https://www.vmware.com/security/advisories.xml",
     "https://advisories.fortinet.com/rss.xml",
-    "https://support.f5.com/csp/article/k9997/feed",            # F5
-    "https://support.citrix.com/security-bulletins/rss.xml",    # Citrix bulletins
+    "https://support.f5.com/csp/article/k9997/feed",                 # F5
+    "https://support.citrix.com/security-bulletins/rss.xml",         # Citrix
+    "https://kb.juniper.net/Feed?channel=SECURITY_ADVISORIES",       # Juniper
+    "https://security.netapp.com/advisory/rss.xml",                  # NetApp
+    "https://security.paloaltonetworks.com/rss.xml",                 # Palo Alto Networks
 
     # Cloud / platforms
     "https://cloud.google.com/feeds/gcp-security-bulletins.xml",
@@ -56,10 +61,16 @@ BASE_FEEDS = [
     "https://groups.google.com/forum/feed/kubernetes-announce/msgs/rss_v2_0.xml",
 
     # Linux & distro security
-    "https://usn.ubuntu.com/rss.xml",                   # Ubuntu USN
-    "https://www.debian.org/security/dsa.rdf",          # Debian DSA
-    "https://www.suse.com/support/update/announcement/rss/",  # SUSE
-    "https://access.redhat.com/hydra/rest/securitydata/cvrf.xml",  # Red Hat (CVRF)
+    "https://usn.ubuntu.com/rss.xml",                                # Ubuntu USN
+    "https://www.debian.org/security/dsa.rdf",                       # Debian DSA
+    "https://www.suse.com/support/update/announcement/rss/",         # SUSE
+    "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/latest.rss",
+    "https://access.redhat.com/hydra/rest/securitydata/cvrf.xml",    # Red Hat (CVRF index)
+
+    # Apps / ecosystems
+    "https://www.jenkins.io/security/advisories/rss.xml",
+    "https://www.drupal.org/security/rss.xml",
+    "https://zerodayinitiative.com/rss/published/",
 
     # Mobile / Oracle CPU
     "https://source.android.com/security/bulletin/atom.xml",
@@ -67,6 +78,7 @@ BASE_FEEDS = [
 
     # Gov alerts
     "https://www.cisa.gov/uscert/ncas/alerts.xml",
+    "https://www.cisa.gov/uscert/ncas/current-activity.xml",
 ]
 EXTRA_FEEDS = [u.strip() for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n"," ").split(" ") if u.strip()]
 FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
@@ -75,19 +87,18 @@ FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
 SKIP_PRE_RELEASE = os.getenv("PATCHPAL_INCLUDE_PRE_RELEASE", "0").lower() not in ("1","true","yes")
 NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I)
 
-# Drop non-actionable think pieces (kept if they have CVE/patch signals)
+# Drop think pieces (kept if clear CVE/patch signals)
 SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
 SIGNAL_RE = re.compile(
-    r"(CVE-\d{4}-\d{4,7}|\badvisory\b|\bsecurity (update|fix|bulletin|patch)\b|\bKB\d{6,}\b|update guide)",
+    r"(CVE-\d{4}-\d{4,7}|\badvisory\b|\bsecurity (update|fix|bulletin|patch)\b|\bKB\d{6,}\b|update guide|msrc)",
     re.I,
 )
 BLOGGY_RE = re.compile(
-    r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|hunting for variant|bluehat)",
+    r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|bluehat)",
     re.I,
 )
 
 def _is_signal(title: str, summary: str, link: str, _source: str) -> bool:
-    # Only title/summary/link content counts; _source (domain) no longer triggers signal
     blob = " ".join([title or "", summary or "", link or ""])
     return bool(SIGNAL_RE.search(blob)) and not BLOGGY_RE.search(blob)
 
@@ -368,7 +379,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             # title
             title = _tidy_title(_strip_html(str(e.get("title") or "").strip())) or "(untitled)"
 
-            # ALWAYS define a body first (feeds differ)
+            # body (always defined)
             entry_summary = ""
             try:
                 content = e.get("content")
@@ -380,17 +391,14 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 entry_summary = e.get("summary") or e.get("description") or ""
             entry_summary = _strip_html(str(entry_summary).strip())
 
-            # filters (use entry_summary, not an undefined name)
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
                 continue
             if SKIP_LOW_SIGNAL and not _is_signal(title, entry_summary, str(e.get("link") or ""), url):
                 continue
 
-            # CVE/KEV
             cves = _extract_cves(title, entry_summary)
             kev_flag = any(c in kev_set for c in cves)
 
-            # collect
             out.append({
                 "title": title,
                 "summary": entry_summary,
@@ -489,37 +497,31 @@ def _docs_links(item: Dict[str, Any]) -> str:
         if url:
             links.append((url, label))
 
-    # Microsoft / Windows
     if any(k in t for k in ("microsoft","windows","edge","msrc","office","exchange","teams")):
         if cve:
             add(f"https://msrc.microsoft.com/update-guide/vulnerability/{cve}", "MSRC advisory")
         add("https://support.microsoft.com/help/4027667/windows-update", "Windows Update")
         add("https://learn.microsoft.com/windows-server/administration/windows-server-update-services/manage/approve-and-deploy-updates", "WSUS deploy")
         add("https://learn.microsoft.com/mem/intune/protect/windows-update-for-business-configure", "Intune deadlines")
-    # Chrome
     if "chrome" in t:
         add("https://support.google.com/chrome/answer/95414", "Chrome: update")
         add("https://support.google.com/chrome/a/answer/9027636", "Admin: force update")
-    # Apple
     if any(k in t for k in ("apple","ios","ipad","macos","safari")):
         add("https://support.apple.com/HT201222", "Update iPhone/iPad")
         add("https://support.apple.com/HT201541", "Update macOS")
-    # Common vendors
     if "cisco" in t:
         add("https://www.cisco.com/c/en/us/support/docs/psirt.html", "Cisco PSIRT")
     if "vmware" in t:
         add("https://www.vmware.com/security/advisories.html", "VMware advisories")
     if "fortinet" in t or "fortigate" in t:
         add("https://www.fortiguard.com/psirt", "Fortinet PSIRT")
-    # Git
     if "git " in (" " + t) or (item.get("title","").lower().startswith("git ")):
         add("https://git-scm.com/downloads", "Git downloads")
         add("https://github.com/git/git/tree/master/Documentation/RelNotes", "Git release notes")
-    # Citrix
     if "citrix" in t:
         add("https://support.citrix.com/security-bulletins", "Citrix security bulletins")
 
-    add(src, "Vendor notice")  # always include if present
+    add(src, "Vendor notice")
 
     out, seen = [], set()
     for u, label in links:
@@ -584,13 +586,11 @@ def _meta_lines(item: Dict[str, Any]) -> List[str]:
 def _summary_text(title: str, summary: str, *, tone: str) -> str:
     raw = _strip_html(summary or title or "")
     raw = _plain_english(_remove_number_noise(raw))
-    # AI rewrite (summary only) if enabled
     max_sents = 2 if (tone or "simple") == "simple" else 4
     if AI_SUMMARY_ON:
         ai = _ai_plain_summary(raw, max_sents)
         if ai:
             return ai if ai.endswith((".", "!", "?")) else (ai + ".")
-    # deterministic fallback
     parts = [p.strip(" .;:-") for p in SENT_SPLIT_RE.split(raw) if p.strip()]
     if not parts:
         return title.strip() + "."
@@ -599,16 +599,6 @@ def _summary_text(title: str, summary: str, *, tone: str) -> str:
     return (text[:hard_cap-1].rstrip()+"…") if len(text) > hard_cap else text
 
 def render_item_text(item: dict, idx: int, tone: str) -> str:
-    """
-    Lines:
-    Security alert: X
-    Known Exploited Vulnerability: Yes/No
-    Exploit Prediction Scoring System: Y (if ≥ 0.01)
-    Summary: ...
-    Fix:
-        • bullet
-    Docs: <link> · <link> · <link>
-    """
     title = _tidy_title((item.get("title") or "").strip())
     meta  = _meta_lines(item)
     summary_src = item.get("summary") or item.get("content") or ""
@@ -630,7 +620,7 @@ def render_item_text(item: dict, idx: int, tone: str) -> str:
         blocks += ["", "*Verify:*", *[f"{BULLET} {v}" for v in verify]]
 
     if doc_str:
-        blocks += ["", f"Docs: {doc_str}"]  # keep Docs unbolded unless you want it bold too
+        blocks += ["", f"Docs: {doc_str}"]
 
     text = "\n".join(blocks).strip()
     return text[:2900] + "…" if len(text) > 2900 else text
@@ -657,11 +647,6 @@ def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str
     if len(out) < n: _uniq_add(out, high_signal, n)
     if len(out) < n: _uniq_add(out, universal, n)
     if len(out) < n: _uniq_add(out, pool, n)
-
-    try:
-        print(f"[selector] mode=stack tokens='{tokens}' stack={len(stack_items)} high={len(high_signal)} univ={len(universal)} chosen={len(out)}")
-    except Exception:
-        pass
     return out[:n]
 
 # --- Recently posted memory (per team) ---------------------------------------
@@ -714,24 +699,26 @@ def mark_posted(team_id: str | None, items: List[Dict[str,Any]]):
 _recent_load()
 
 # --- Public API --------------------------------------------------------------
-def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
+def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str,Any]]:
+    """Return up to N items for today, filtered by team’s recently-posted keys."""
     pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS)
     if len(pool) < n:
         pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)
 
-    team_id = getattr(ws, "team_id", None) if ws else None
-    seen = _recent_keys(team_id) if team_id else set()
-    # prefer unseen; if too few, fall back to full pool
+    # dedupe by team memory
+    tid = team_id or (getattr(ws, "team_id", None) if ws else None)
+    seen = _recent_keys(tid) if tid else set()
     pool2 = [it for it in pool if str(_key_for(it)) not in seen] or pool
 
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
     picks = pick_top_candidates(pool2, n, ws)
 
-    # enforce vendor variety
+    # vendor variety
     def _vendor_of(it: Dict[str,Any]) -> str:
         t = _tokens(_text(it))
-        for v in ["microsoft","apple","google","adobe","citrix","git","cisco","vmware","fortinet","oracle",
-                  "ubuntu","debian","suse","red","mozilla","chrome","f5","juniper","palo","ivy","progress"]:
+        for v in ["microsoft","apple","google","adobe","citrix","git","cisco","vmware",
+                  "fortinet","oracle","ubuntu","debian","suse","red","mozilla","chrome",
+                  "f5","juniper","palo","netapp","jenkins","drupal"]:
             if v in t:
                 return v
         return "other"
@@ -752,61 +739,9 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
 
     return variety[:n]
 
-# --- OAuth installation storage (file-backed) --------------------------------
-import pathlib, json, os, time  # (safe if already imported)
-
-# Use Render's persistent data dir by default
-_INSTALL_PATH = os.getenv("PP_INSTALL_STORE", "/opt/render/project/data/installations.json")
-_install_cache: dict[str, dict] = {}
-
-def _ensure_parent():
-    pathlib.Path(_INSTALL_PATH).parent.mkdir(parents=True, exist_ok=True)
-
-def _load_install_cache():
-    global _install_cache
-    p = pathlib.Path(_INSTALL_PATH)
-    try:
-        _ensure_parent()
-        _install_cache = json.loads(p.read_text()) if p.exists() else {}
-    except Exception:
-        _install_cache = {}
-
-def _save_install_cache():
-    try:
-        _ensure_parent()
-        pathlib.Path(_INSTALL_PATH).write_text(json.dumps(_install_cache))
-    except Exception:
-        pass
-
-_load_install_cache()
-
-def upsert_installation(
-    *,
-    team_id: str,
-    team_name: str,
-    bot_token: str,
-    bot_user: str,
-    scopes: str = "",
-    installed_by_user_id: str | None = None,
-) -> None:
-    _install_cache[team_id] = {
-        "team_name": team_name,
-        "bot_token": bot_token,
-        "bot_user": bot_user,
-        "scopes": scopes,
-        "installed_by_user_id": installed_by_user_id,
-        "installed_at": int(time.time()),
-    }
-    _save_install_cache()
-
-def get_bot_token(team_id: str) -> str | None:
-    rec = _install_cache.get(team_id)
-    # dev fallback lets you test in a single workspace without OAuth
-    return (rec or {}).get("bot_token") or os.getenv("SLACK_BOT_TOKEN")
-
 # --- Posting helper ----------------------------------------------------------
-_LINK_RE = re.compile(r"<([^>|]+)\|([^>]+)>")   # <url|label> -> label
-_TAG_RE  = re.compile(r"<[@#!][^>]+>")          # <@U..>, <#C..|..>, <!date..> -> drop
+_LINK_RE = re.compile(r"<([^>|]+)\|([^>]+)>")
+_TAG_RE  = re.compile(r"<[@#!][^>]+>")
 _FMT_RE  = re.compile(r"[*_`~]")
 
 def _fallback_text(md: str, limit: int = 300) -> str:
@@ -820,15 +755,15 @@ def _fallback_text(md: str, limit: int = 300) -> str:
 
 def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
     from slack_sdk.web import WebClient  # lazy import
-
     token = get_bot_token(team_id)
     if not token:
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-    items = topN_today(n=5)
+    # pass team_id so repeats are avoided here too
+    ws_stub = type("W", (), {"team_id": team_id, "stack_mode":"universal", "stack_tokens":None})()
+    items = topN_today(n=5, ws=ws_stub, team_id=team_id)
 
-    # Header (once)
     hdr = client.chat_postMessage(
         channel=channel_id,
         text="Today’s Top 5 Patches / CVEs",
@@ -839,7 +774,6 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
     )
     parent_ts = hdr["ts"]
 
-    # Items threaded under header
     for idx, it in enumerate(items, 1):
         body = render_item_text(it, idx, tone)
         if not body or not isinstance(body, str):
@@ -847,6 +781,6 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         client.chat_postMessage(
             channel=channel_id,
             thread_ts=parent_ts,
-            text=_fallback_text(body, 300),                # accessibility + notifications
+            text=_fallback_text(body, 300),
             blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": body}}],
         )
