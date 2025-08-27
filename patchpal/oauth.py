@@ -3,23 +3,28 @@ import os, secrets, requests
 from flask import Blueprint, redirect, request, session
 from slack_sdk.oauth import AuthorizeUrlGenerator
 from slack_sdk.web import WebClient
-from .selector import save_installation
+from .selector import upsert_installation  # <- use the helper you added there
 
 bp = Blueprint("slack_oauth", __name__)
 
+APP_BASE_URL = (os.getenv("APP_BASE_URL") or "").rstrip("/")
+if not APP_BASE_URL:
+    raise RuntimeError("APP_BASE_URL is not set")
+
 CLIENT_ID     = os.environ["SLACK_CLIENT_ID"]
 CLIENT_SECRET = os.environ["SLACK_CLIENT_SECRET"]
-REDIRECT_URI  = os.getenv("APP_BASE_URL").rstrip("/") + "/slack/oauth/callback"
+REDIRECT_URI  = f"{APP_BASE_URL}/slack/oauth/callback"
 
 SCOPES = [
-    "chat:write",      # post messages
-    "channels:read",   # optional: browse public channels for a picker
-    "groups:read",     # optional: browse private channels user has access to
-    # add "commands" later if you ship a slash command
+    "chat:write",
+    "channels:read",
+    "groups:read",
 ]
 
 authz = AuthorizeUrlGenerator(
-    client_id=CLIENT_ID, scopes=SCOPES, redirect_uri=REDIRECT_URI
+    client_id=CLIENT_ID,
+    scopes=SCOPES,
+    redirect_uri=REDIRECT_URI,
 )
 
 @bp.get("/slack/install")
@@ -44,6 +49,7 @@ def slack_oauth_callback():
         },
         timeout=10,
     ).json()
+
     if not r.get("ok"):
         return f"OAuth error: {r}", 400
 
@@ -51,37 +57,27 @@ def slack_oauth_callback():
     team_name = r["team"]["name"]
     bot_token = r["access_token"]     # xoxb-...
     bot_user  = r["bot_user_id"]
-    authed_user = r.get("authed_user", {}).get("id")
+    scopes    = r.get("scope") or ""
+    installer = (r.get("authed_user") or {}).get("id")
 
-    # <<< save install >>>
-    save_installation(team_id, team_name, bot_token, bot_user)
+    # persist installation
+    upsert_installation(
+        team_id=team_id,
+        team_name=team_name,
+        bot_token=bot_token,
+        bot_user=bot_user,
+        scopes=scopes,
+        installed_by_user_id=installer,
+    )
 
-    # Nice touch: DM the installer (falls back if we can’t)
+    # optional: DM the installer
     try:
-        if authed_user:
+        if installer:
             WebClient(token=bot_token).chat_postMessage(
-                channel=authed_user,
+                channel=installer,
                 text=f"✅ PatchPal installed in *{team_name}*. Invite me to a channel and I’ll start posting."
             )
     except Exception:
         pass
 
     return "App installed! You can close this window."
-
-# --- storage hook (swap to your DB) ---
-def save_installation(team_id, team_name, bot_token, bot_user):
-    """
-    Replace this with your DB logic. It must upsert by team_id.
-    """
-    # Example using a simple JSON file for first run; replace with SQLAlchemy.
-    import json, pathlib
-    p = pathlib.Path("/mnt/data/installations.json")
-    store = {}
-    if p.exists():
-        store = json.loads(p.read_text())
-    store[team_id] = {
-        "team_name": team_name,
-        "bot_token": bot_token,
-        "bot_user": bot_user,
-    }
-    p.write_text(json.dumps(store))

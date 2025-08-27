@@ -639,49 +639,59 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     return pick_top_candidates(pool, n, ws)
 
 # --- OAuth installation storage (file-backed) --------------------------------
-_INSTALL_PATH = os.getenv("PP_INSTALL_PATH", "/tmp/pp_installations.json")
+import pathlib, json, os, time  # (safe if already imported)
+
+# Use Render's persistent data dir by default
+_INSTALL_PATH = os.getenv(
+    "PP_INSTALL_PATH",
+    "/opt/render/project/data/installations.json"
+)
 _install_cache: dict[str, dict] = {}
+
+def _ensure_parent():
+    pathlib.Path(_INSTALL_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 def _load_install_cache():
     global _install_cache
     p = pathlib.Path(_INSTALL_PATH)
     try:
-        if p.exists():
-            _install_cache = json.loads(p.read_text())
+        _ensure_parent()
+        _install_cache = json.loads(p.read_text()) if p.exists() else {}
     except Exception:
         _install_cache = {}
 
 def _save_install_cache():
     try:
+        _ensure_parent()
         pathlib.Path(_INSTALL_PATH).write_text(json.dumps(_install_cache))
     except Exception:
         pass
 
 _load_install_cache()
 
-def save_installation(
+def upsert_installation(
+    *,
     team_id: str,
     team_name: str,
     bot_token: str,
-    bot_user_id: str | None = None,
-    scopes: str | None = None,
-    installed_by: str | None = None,
-):
+    bot_user: str,
+    scopes: str = "",
+    installed_by_user_id: str | None = None,
+) -> None:
     _install_cache[team_id] = {
         "team_name": team_name,
         "bot_token": bot_token,
-        "bot_user_id": bot_user_id,
+        "bot_user": bot_user,
         "scopes": scopes,
-        "installed_by": installed_by,
+        "installed_by_user_id": installed_by_user_id,
         "installed_at": int(time.time()),
     }
     _save_install_cache()
 
 def get_bot_token(team_id: str) -> str | None:
-    if not team_id:
-        return None
     rec = _install_cache.get(team_id)
-    return (rec or {}).get("bot_token") or os.getenv("SLACK_BOT_TOKEN")  # dev fallback
+    # dev fallback lets you test in a single workspace without OAuth
+    return (rec or {}).get("bot_token") or os.getenv("SLACK_BOT_TOKEN")
 
 # --- Posting helper ----------------------------------------------------------
 def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
