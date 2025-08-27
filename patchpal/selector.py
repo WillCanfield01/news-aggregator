@@ -320,14 +320,14 @@ def _enrich_epss(items: List[Dict[str,Any]]) -> None:
         except Exception:
             continue
 
-def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List[Dict[str,Any]]:
-    out: List[Dict[str,Any]] = []
+def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
     now = time.time()
     cutoff = now - days * 86400
 
     kev_set = _load_kev_set()
 
-    # KEV as explicit items (recent only)
+    # ---- KEV (recent only) ----
     kev_json = _get_json(CISA_KEV_URL)
     if isinstance(kev_json, dict):
         for v in kev_json.get("vulnerabilities", []):
@@ -342,7 +342,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             vendor = (v.get("vendorProject") or "").strip()
             prod = (v.get("product") or "").strip()
             title = f"{cve} — {vendor} {prod}".strip(" —")
-            # when building KEV items (inside build_fallback_pool)
             out.append({
                 "title": title,
                 "summary": _strip_html(v.get("shortDescription") or ""),
@@ -351,75 +350,58 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 "link": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                 "source": "CISA KEV",
                 "cve": cve,
-                "ts": added,  # <- add this
             })
 
-            # when building feed items
-            out.append({
-                "title": title,
-                "summary": summary,
-                "kev": kev_flag,
-                "vendor_guess": title.lower(),
-                "link": e.get("link") or "",
-                "source": url,
-                "cve": cves[0] if cves else None,
-                "ts": ts,  # <- add this
-            })
-
-    # Vendor / ecosystem feeds
+    # ---- Vendor / ecosystem feeds ----
     for url in FALLBACK_FEEDS:
         feed = _parse_feed(url)
         for e in feed.get("entries", []):
-            # --- timestamp (with guards) ---
+            # timestamp
             try:
-                updated = (
-                    e.get("updated_parsed")
-                    or e.get("published_parsed")
-                    or e.get("created_parsed")
-                )
+                updated = e.get("updated_parsed") or e.get("published_parsed") or e.get("created_parsed")
                 ts = time.mktime(updated) if updated else now
             except Exception:
                 ts = now
             if ts < cutoff:
                 continue
 
-            # --- title ---
-            title = _tidy_title(_strip_html(str(e.get("title") or "").strip()))
+            # title
+            title = _tidy_title(_strip_html(str(e.get("title") or "").strip())) or "(untitled)"
 
-            # --- body: ALWAYS define summary (feeds vary) ---
-            summary = ""
+            # ALWAYS define a body first (feeds differ)
+            entry_summary = ""
             try:
                 content = e.get("content")
                 if isinstance(content, list) and content:
-                    summary = content[0].get("value") or ""
+                    entry_summary = content[0].get("value") or content[0].get("content") or ""
             except Exception:
                 pass
-            if not summary:
-                summary = (e.get("summary") or e.get("description") or "")
-            summary = _strip_html(summary.strip())
+            if not entry_summary:
+                entry_summary = e.get("summary") or e.get("description") or ""
+            entry_summary = _strip_html(str(entry_summary).strip())
 
-            # --- filters ---
+            # filters (use entry_summary, not an undefined name)
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
                 continue
-            if SKIP_LOW_SIGNAL and not _is_signal(title, summary, str(e.get("link") or ""), url):
+            if SKIP_LOW_SIGNAL and not _is_signal(title, entry_summary, str(e.get("link") or ""), url):
                 continue
 
-            # --- CVE/KEV flags ---
-            cves = _extract_cves(title, summary)
+            # CVE/KEV
+            cves = _extract_cves(title, entry_summary)
             kev_flag = any(c in kev_set for c in cves)
 
-            # --- collect ---
+            # collect
             out.append({
                 "title": title,
-                "summary": summary,                    # <- always defined now
+                "summary": entry_summary,
                 "kev": kev_flag,
-                "vendor_guess": (title + " " + summary).lower(),
+                "vendor_guess": (title + " " + entry_summary).lower(),
                 "link": e.get("link") or "",
                 "source": url,
                 "cve": cves[0] if cves else None,
             })
 
-    # De-dupe (prefer by CVE, then title)
+    # ---- De-dupe by CVE/title ----
     seen_cve, seen_title, uniq = set(), set(), []
     for it in out:
         cve = (it.get("cve") or "").upper()
@@ -436,43 +418,28 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
         if len(uniq) >= max_items:
             break
 
-    _enrich_epss(uniq)  # best-effort
+    _enrich_epss(uniq)
 
-    # Collapse by product (prefer KEV, then higher EPSS, then newest)
-    by_product: Dict[str, Dict[str,Any]] = {}
-
-    def _score(it: Dict[str,Any]) -> tuple:
+    # ---- Collapse by product, prefer KEV/EPSS ----
+    def _score(it: Dict[str, Any]) -> Tuple[int, float]:
         kev = 1 if it.get("kev") or it.get("known_exploited") else 0
         try:
             epss = float(it.get("epss") or 0.0)
         except Exception:
             epss = 0.0
-        ts = float(it.get("ts") or 0.0)  # newer preferred
-        return (kev, epss, ts)
+        return (kev, epss)
 
-    # deterministic daily jitter so ties rotate each day
-    import random
-    _seed = int(time.strftime("%Y%m%d", time.gmtime()))
-    _rng = random.Random(_seed)
-    for it in uniq:
-        it["_jitter"] = _rng.random()
-
+    by_product: Dict[str, Dict[str, Any]] = {}
     for it in uniq:
         key = _product_key(it)
         cur = by_product.get(key)
-        if cur is None:
+        if cur is None or _score(it) > _score(cur):
             by_product[key] = it
-        else:
-            a, b = _score(it), _score(cur)
-            if a > b or (a == b and it["_jitter"] > cur.get("_jitter", 0.0)):
-                by_product[key] = it
 
     collapsed = list(by_product.values())
-    collapsed.sort(key=lambda it: (_score(it), it.get("_jitter", 0.0)), reverse=True)
-    for it in collapsed:
-        it.pop("_jitter", None)
+    collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
 
-    # Back-fill so pool always has depth
+    # Back-fill to capacity
     chosen = {_key_for(it) for it in collapsed}
     for it in uniq:
         k = _key_for(it)
