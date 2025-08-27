@@ -280,15 +280,70 @@ def register_commands(app: App):
 
                 if text.startswith("post-now"):
                     if not ws.post_channel:
-                        respond("Set a channel first: `*/patchpal set-channel here*` in the target channel.")
+                        respond("Set a channel first: run `/patchpal set-channel here` in the target channel.")
                         return
 
-                    # Best-effort: join public channels so we can post without manual invite
-                    try:
-                        client.conversations_join(channel=ws.post_channel)
-                    except Exception:
-                        pass  # ignore (fails for private channels or if already a member)
+                    # If command is run in a different channel than the configured one, explain it.
+                    current_cid = body.get("channel_id")
+                    if current_cid and current_cid != ws.post_channel:
+                        respond(
+                            f"I’m configured to post in <#{ws.post_channel}>, "
+                            f"but you ran this in <#{current_cid}>.\n"
+                            "Run `/patchpal set-channel here` to change it, or run the command in the configured channel."
+                        )
+                        return
 
+                    # 1) Sanity check: the token belongs to this workspace
+                    try:
+                        auth = client.auth_test()
+                        if auth.get("team_id") != team_id:
+                            respond(
+                                "My authorization looks out of date for this workspace. "
+                                "Please reinstall me using the install link and try again."
+                            )
+                            return
+                    except SlackApiError as e:
+                        respond("Slack auth failed. Please try again, or reinstall the app.")
+                        logger.info(f"auth.test failed: {e.response.get('error')}")
+                        return
+
+                    # 2) Membership check (auto-join public; guide for private)
+                    try:
+                        info = client.conversations_info(channel=ws.post_channel)
+                    except SlackApiError as e:
+                        err = e.response.get("error")
+                        if err in ("channel_not_found", "invalid_channel"):
+                            respond(
+                                "I can’t find that channel. Run `/patchpal set-channel here` "
+                                "in the channel where you want me to post."
+                            )
+                        else:
+                            respond(f"Slack error while checking the channel: `{err}`.")
+                        return
+
+                    ch = info.get("channel") or {}
+                    is_private = ch.get("is_private")
+                    is_member  = ch.get("is_member")
+
+                    if not is_member:
+                        if is_private:
+                            respond(
+                                "I need to be in that channel before I can post.\n"
+                                "• For **private** channels: invite me with `/invite @PatchPal` in the channel.\n"
+                                "Then run `/patchpal post-now` again."
+                            )
+                            return
+                        else:
+                            try:
+                                client.conversations_join(channel=ws.post_channel)
+                            except SlackApiError:
+                                respond(
+                                    "I couldn’t join that public channel automatically. "
+                                    "Please invite me with `/invite @PatchPal` and try again."
+                                )
+                                return
+
+                    # 3) Fetch items and post
                     from .selector import topN_today, render_item_text
                     items = topN_today(5, ws=ws)
                     if not items:
@@ -298,34 +353,30 @@ def register_commands(app: App):
                     try:
                         hdr = client.chat_postMessage(
                             channel=ws.post_channel,
-                            text="Today’s Top 5 Patches / CVEs",   # <-- top-level text
+                            text="Today’s Top 5 Patches / CVEs",  # accessibility fallback
                             blocks=[{
-                                "type":"header",
-                                "text":{"type":"plain_text","text":"Today’s Top 5 Patches / CVEs","emoji":True}
+                                "type": "header",
+                                "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True}
                             }],
                         )
                         parent_ts = hdr["ts"]
-
                     except SlackApiError as e:
-                        err = (e.response or {}).get("error")
-                        if err in {"not_in_channel", "channel_not_found"}:
+                        err = e.response.get("error")
+                        if err == "is_archived":
+                            respond("That channel is archived. Choose another with `/patchpal set-channel here` in a live channel.")
+                        elif err in {"not_in_channel", "channel_not_found"}:
                             respond(
                                 "I need to be in that channel before I can post.\n"
                                 "• For **private** channels: invite me with `/invite @PatchPal` in the channel.\n"
-                                "• For **public** channels: invite me the same way, or an admin can grant me the "
-                                "`chat:write.public` scope so I can post without being a member.\n"
+                                "• For **public** channels: invite me the same way (or I can join automatically if an admin allows it).\n"
                                 "Then run `/patchpal post-now` again."
                             )
-                            return
-                        if err == "is_archived":
-                            respond("That channel is archived. Choose another with `/patchpal set-channel here` in a live channel.")
-                            return
-                        # Unknown API error: surface a friendly message
-                        logger.exception("chat.postMessage failed")
-                        respond(f"Couldn’t post: `{err or 'unknown_error'}`. Please try again shortly.")
+                        else:
+                            logger.exception("chat.postMessage failed")
+                            respond(f"Couldn’t post: `{err or 'unknown_error'}`. Please try again shortly.")
                         return
 
-                    # Post each item as a threaded message
+                    # Post each item as a thread reply
                     for i, it in enumerate(items, 1):
                         txt = render_item_text(it, i, ws.tone or "simple")
                         if not isinstance(txt, str) or not txt.strip():
@@ -335,13 +386,12 @@ def register_commands(app: App):
                         client.chat_postMessage(
                             channel=ws.post_channel,
                             thread_ts=parent_ts,
-                            text=fallback,                                     # <-- add fallback text
+                            text=fallback,
                             blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
                         )
 
                     respond(f"Posted {len(items)} item(s) to <#{ws.post_channel}>.")
                     return
-
 
                 # default help
                 respond(HELP)
