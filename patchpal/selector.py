@@ -642,10 +642,7 @@ def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
 import pathlib, json, os, time  # (safe if already imported)
 
 # Use Render's persistent data dir by default
-_INSTALL_PATH = os.getenv(
-    "PP_INSTALL_PATH",
-    "/opt/render/project/data/installations.json"
-)
+_INSTALL_PATH = os.getenv("PP_INSTALL_STORE", "/opt/render/project/data/installations.json")
 _install_cache: dict[str, dict] = {}
 
 def _ensure_parent():
@@ -694,14 +691,48 @@ def get_bot_token(team_id: str) -> str | None:
     return (rec or {}).get("bot_token") or os.getenv("SLACK_BOT_TOKEN")
 
 # --- Posting helper ----------------------------------------------------------
+_LINK_RE = re.compile(r"<([^>|]+)\|([^>]+)>")   # <url|label> -> label
+_TAG_RE  = re.compile(r"<[@#!][^>]+>")          # <@U..>, <#C..|..>, <!date..> -> drop
+_FMT_RE  = re.compile(r"[*_`~]")
+
+def _fallback_text(md: str, limit: int = 300) -> str:
+    if not isinstance(md, str):
+        md = str(md or "")
+    s = _LINK_RE.sub(r"\2", md)
+    s = _TAG_RE.sub("", s)
+    s = _FMT_RE.sub("", s)
+    s = " ".join(s.split())
+    return (s[:limit].rstrip() + "…") if len(s) > limit else s
+
 def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
     from slack_sdk.web import WebClient  # lazy import
+
     token = get_bot_token(team_id)
     if not token:
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
     items = topN_today(n=5)
+
+    # Header (once)
+    hdr = client.chat_postMessage(
+        channel=channel_id,
+        text="Today’s Top 5 Patches / CVEs",
+        blocks=[{
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True},
+        }],
+    )
+    parent_ts = hdr["ts"]
+
+    # Items threaded under header
     for idx, it in enumerate(items, 1):
-        msg = render_item_text(it, idx, tone)
-        client.chat_postMessage(channel=channel_id, text=msg)
+        body = render_item_text(it, idx, tone)
+        if not body or not isinstance(body, str):
+            body = f"{idx}) (no details)"
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=parent_ts,
+            text=_fallback_text(body, 300),                # accessibility + notifications
+            blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": body}}],
+        )

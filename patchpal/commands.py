@@ -33,6 +33,19 @@ TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
 MENTION_RE = re.compile(r"<#([A-Z0-9]+)\|[^>]+>", re.I)  # <#C123|name>
 RAW_ID_RE  = re.compile(r"\b[CG][A-Z0-9]{8,}\b")        # C123... or G123...
 HASH_NAME_RE = re.compile(r"#([a-z0-9._-]+)", re.I)     # #channel-name
+_LINK_RE = re.compile(r"<([^>|]+)\|([^>]+)>")      # <url|label> -> label
+_TAG_RE  = re.compile(r"<[@#!][^>]+>")             # <@U..>, <#C..|..>, <!date..> -> drop
+_FMT_RE  = re.compile(r"[*_`~]")                   # remove basic formatting
+
+def _fallback_text(md: str, limit: int = 300) -> str:
+    if not isinstance(md, str):
+        md = str(md or "")
+    s = _LINK_RE.sub(r"\2", md)   # keep the human label
+    s = _TAG_RE.sub("", s)
+    s = _FMT_RE.sub("", s)
+    s = " ".join(s.split())
+    return (s[:limit].rstrip() + "…") if len(s) > limit else s
+
 
 def _resolve_channel_id(text: str, body: dict, client, logger):
     t = (text or "").strip()
@@ -285,13 +298,14 @@ def register_commands(app: App):
                     try:
                         hdr = client.chat_postMessage(
                             channel=ws.post_channel,
-                            text="Today’s Top 5 Patches / CVEs",
+                            text="Today’s Top 5 Patches / CVEs",   # <-- top-level text
                             blocks=[{
-                                "type": "header",
-                                "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True}
+                                "type":"header",
+                                "text":{"type":"plain_text","text":"Today’s Top 5 Patches / CVEs","emoji":True}
                             }],
                         )
                         parent_ts = hdr["ts"]
+
                     except SlackApiError as e:
                         err = (e.response or {}).get("error")
                         if err in {"not_in_channel", "channel_not_found"}:
@@ -314,18 +328,14 @@ def register_commands(app: App):
                     # Post each item as a threaded message
                     for i, it in enumerate(items, 1):
                         txt = render_item_text(it, i, ws.tone or "simple")
-                        if not isinstance(txt, str):
-                            txt = str(txt or "")
-                        txt = txt.strip()
-                        if not txt:
+                        if not isinstance(txt, str) or not txt.strip():
                             txt = f"{i}) (no details)"
-                        if len(txt) > 2900:
-                            txt = txt[:2900] + "…"
+                        fallback = _fallback_text(txt, 300)
 
                         client.chat_postMessage(
                             channel=ws.post_channel,
                             thread_ts=parent_ts,
-                            text=f"{i})",  # fallback
+                            text=fallback,                                     # <-- add fallback text
                             blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
                         )
 
