@@ -378,13 +378,27 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             if ts < cutoff:
                 continue
 
+            # Title first
             title = _tidy_title(_strip_html((e.get("title") or "").strip()))
+
+            # Always define summary (feeds vary: summary / description / content[0].value)
+            summary = ""
+            try:
+                content = e.get("content")
+                if isinstance(content, list) and content:
+                    summary = content[0].get("value") or ""
+            except Exception:
+                pass
+            if not summary:
+                summary = (e.get("summary") or e.get("description") or "")
+            summary = _strip_html(summary.strip())
+
+            # Filter out noisy pre-release posts
             if SKIP_PRE_RELEASE and NOISY_TITLES.search(title):
                 continue
 
-            summary = _strip_html((e.get("summary") or e.get("description") or "").strip())
-
-            if SKIP_LOW_SIGNAL and not _is_signal(title, summary, e.get("link") or "", url):
+            # Skip low-signal “bloggy” posts unless they clearly reference CVEs/patches
+            if SKIP_LOW_SIGNAL and not _is_signal(title, summary, str(e.get("link") or ""), url):
                 continue
 
             cves = _extract_cves(title, summary)
@@ -392,13 +406,12 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
             out.append({
                 "title": title,
-                "summary": summary,
+                "summary": summary,                  # <- now always defined
                 "kev": kev_flag,
-                "vendor_guess": title.lower(),
+                "vendor_guess": (title + " " + summary).lower(),
                 "link": e.get("link") or "",
                 "source": url,
                 "cve": cves[0] if cves else None,
-                "ts": ts,                        # <-- NEW
             })
 
     # De-dupe (prefer by CVE, then title)
