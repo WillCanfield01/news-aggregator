@@ -36,7 +36,9 @@ def upsert_installation(
         db.commit()
 
 def get_bot_token(team_id: str) -> Optional[str]:
-    """Return the bot token for a workspace (or None if unknown)."""
+    # Avoid SELECT ... WHERE team_id IS NULL
+    if not team_id:
+        return None
     with SessionLocal() as db:
         inst = db.get(Installation, team_id)
         return inst.bot_token if inst else None
