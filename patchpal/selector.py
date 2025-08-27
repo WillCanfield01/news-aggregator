@@ -13,7 +13,8 @@ if str(ROOT) not in sys.path:
 
 # --- Tunables ---------------------------------------------------------------
 EPSS_THRESHOLD  = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
-FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "7"))
+# Smaller default window so lists feel fresh; override via env if you want.
+FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))
 REQUEST_TIMEOUT = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
 CISA_KEV_URL    = os.getenv(
     "PATCHPAL_KEV_URL",
@@ -39,13 +40,20 @@ BASE_FEEDS = [
     "https://www.vmware.com/security/advisories.xml",
     "https://advisories.fortinet.com/rss.xml",
 
-    # Cloud
+    # Cloud / platforms
     "https://cloud.google.com/feeds/gcp-security-bulletins.xml",
     "https://aws.amazon.com/security/feed/",
-
-    # Platforms / ecosystems
     "https://about.gitlab.com/security/advisories.xml",
     "https://groups.google.com/forum/feed/kubernetes-announce/msgs/rss_v2_0.xml",
+
+    # Linux & distro security
+    "https://usn.ubuntu.com/rss.xml",                   # Ubuntu USN
+    "https://www.debian.org/security/dsa.rdf",          # Debian DSA
+    "https://www.suse.com/support/update/announcement/rss/",  # SUSE
+
+    # Mobile / Oracle CPU
+    "https://source.android.com/security/bulletin/atom.xml",
+    "https://www.oracle.com/security-alerts/rss-notifications.xml",
 
     # Gov alerts
     "https://www.cisa.gov/uscert/ncas/alerts.xml",
@@ -331,6 +339,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 "link": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                 "source": "CISA KEV",
                 "cve": cve,
+                "ts": added,                    # <-- NEW
             })
 
     # Vendor / ecosystem feeds
@@ -365,6 +374,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 "link": e.get("link") or "",
                 "source": url,
                 "cve": cves[0] if cves else None,
+                "ts": ts,                        # <-- NEW
             })
 
     # De-dupe (prefer by CVE, then title)
@@ -386,24 +396,43 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
     _enrich_epss(uniq)  # best-effort
 
-    # Collapse by product (prefer KEV, then higher EPSS)
+    # Collapse by product (prefer KEV, then higher EPSS, then newest)
     by_product: Dict[str, Dict[str,Any]] = {}
+
+    now = time.time()
+
     def _score(it: Dict[str,Any]) -> tuple:
         kev = 1 if it.get("kev") or it.get("known_exploited") else 0
         try:
             epss = float(it.get("epss") or 0.0)
         except Exception:
             epss = 0.0
-        return (kev, epss)
+        ts = float(it.get("ts") or 0.0)  # newer preferred
+        return (kev, epss, ts)
+
+    # small deterministic daily jitter to rotate ties without true randomness
+    import random
+    _seed = int(time.strftime("%Y%m%d", time.gmtime(now)))
+    _rng = random.Random(_seed)
+
+    for it in uniq:
+        it["_jitter"] = _rng.random()
 
     for it in uniq:
         key = _product_key(it)
         cur = by_product.get(key)
-        if cur is None or _score(it) > _score(cur):
+        # prefer higher score; for exact ties, prefer the one with higher jitter (rotates daily)
+        if cur is None:
             by_product[key] = it
+        else:
+            a, b = _score(it), _score(cur)
+            if a > b or (a == b and it["_jitter"] > cur.get("_jitter", 0.0)):
+                by_product[key] = it
 
     collapsed = list(by_product.values())
-    collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
+    collapsed.sort(key=lambda it: (_score(it), it.get("_jitter", 0.0)), reverse=True)
+    for it in collapsed:
+        it.pop("_jitter", None)
 
     # Back-fill so pool always has depth
     chosen = {_key_for(it) for it in collapsed}
