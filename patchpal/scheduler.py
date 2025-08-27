@@ -2,7 +2,7 @@
 from datetime import datetime
 import pytz
 from slack_sdk import WebClient
-
+from .install_store import get_bot_token
 from .storage import SessionLocal, Workspace, PostLog
 from .selector import topN_today, render_item_text
 from .billing import (

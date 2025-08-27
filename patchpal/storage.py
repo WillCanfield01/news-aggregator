@@ -86,19 +86,15 @@ class Workspace(Base):
 
 class Installation(Base):
     __tablename__ = "installations"
-
-    team_id = Column(String(32), primary_key=True)            # T0… (workspace)
-    enterprise_id = Column(String(32), nullable=True)         # E0… (optional)
-    team_name = Column(String(255), nullable=True)
-
-    bot_token = Column(String(512), nullable=False)           # xoxb-…
-    bot_user  = Column(String(32), nullable=True)             # U0… (bot user id)
-    scopes    = Column(String(1024), nullable=True)           # comma-separated
-    installed_by_user_id = Column(String(32), nullable=True)  # U0… installer
-
-    installed_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at   = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"),
-                          onupdate=text("CURRENT_TIMESTAMP"))
+    team_id = Column(String(64), primary_key=True)
+    team_name = Column(String(255))
+    bot_token = Column(Text, nullable=False)
+    bot_user  = Column(String(64))
+    scopes    = Column(Text)
+    installed_by_user_id = Column(String(64))
+    enterprise_id = Column(String(64))
+    installed_at = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class PostLog(Base):
     __tablename__ = "post_logs"

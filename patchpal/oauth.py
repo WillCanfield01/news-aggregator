@@ -63,6 +63,7 @@ def slack_oauth_callback():
     installer = (r.get("authed_user") or {}).get("id")
 
     # persist installation
+    enterprise_id = (r.get("enterprise") or {}).get("id")
     upsert_installation(
         team_id=team_id,
         team_name=team_name,
@@ -70,6 +71,7 @@ def slack_oauth_callback():
         bot_user=bot_user,
         scopes=scopes,
         installed_by_user_id=installer,
+        enterprise_id=enterprise_id,
     )
 
     # optional: DM the installer

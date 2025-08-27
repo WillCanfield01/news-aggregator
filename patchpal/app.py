@@ -14,7 +14,7 @@ from .storage import Base, engine
 from .commands import register_commands
 from .scheduler import run_once  # uses selector, no circular import
 from .oauth import bp as slack_oauth_bp          # your OAuth blueprint
-from .selector import get_bot_token              # <-- import from selector
+from .install_store import get_bot_token, migrate_file_store_if_present
 
 # ---- Paths ---------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
