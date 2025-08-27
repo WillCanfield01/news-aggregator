@@ -13,8 +13,7 @@ if str(ROOT) not in sys.path:
 
 # --- Tunables ---------------------------------------------------------------
 EPSS_THRESHOLD  = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
-# Smaller default window so lists feel fresh; override via env if you want.
-FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))
+FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))  # tighter default = fresher lists
 REQUEST_TIMEOUT = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
 CISA_KEV_URL    = os.getenv(
     "PATCHPAL_KEV_URL",
@@ -22,6 +21,13 @@ CISA_KEV_URL    = os.getenv(
 )
 AI_SUMMARY_ON   = os.getenv("PATCHPAL_AI_REWRITE", "0").lower() in ("1","true","yes")
 AI_MODEL        = os.getenv("PATCHPAL_AI_MODEL", "gpt-4o-mini")
+
+# For diversity: cap per vendor in the final list
+MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
+
+# Remember what we posted so we don't repeat for a few days
+REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
+RECENT_STORE    = os.getenv("PP_RECENT_STORE", "/opt/render/project/data/recent_posts.json")
 
 # --- Feeds -------------------------------------------------------------------
 BASE_FEEDS = [
@@ -39,6 +45,8 @@ BASE_FEEDS = [
     "https://www.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml",
     "https://www.vmware.com/security/advisories.xml",
     "https://advisories.fortinet.com/rss.xml",
+    "https://support.f5.com/csp/article/k9997/feed",            # F5
+    "https://support.citrix.com/security-bulletins/rss.xml",    # Citrix bulletins
 
     # Cloud / platforms
     "https://cloud.google.com/feeds/gcp-security-bulletins.xml",
@@ -50,6 +58,7 @@ BASE_FEEDS = [
     "https://usn.ubuntu.com/rss.xml",                   # Ubuntu USN
     "https://www.debian.org/security/dsa.rdf",          # Debian DSA
     "https://www.suse.com/support/update/announcement/rss/",  # SUSE
+    "https://access.redhat.com/hydra/rest/securitydata/cvrf.xml",  # Red Hat (CVRF)
 
     # Mobile / Oracle CPU
     "https://source.android.com/security/bulletin/atom.xml",
@@ -68,16 +77,17 @@ NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I
 # Drop non-actionable think pieces (kept if they have CVE/patch signals)
 SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
 SIGNAL_RE = re.compile(
-    r"(CVE-\d{4}-\d{4,7}|vulnerab|advisory|security (update|fix|bulletin|patch)|\bKB\d{6,}\b|update guide|msrc)",
+    r"(CVE-\d{4}-\d{4,7}|\badvisory\b|\bsecurity (update|fix|bulletin|patch)\b|\bKB\d{6,}\b|update guide)",
     re.I,
 )
 BLOGGY_RE = re.compile(
-    r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|hunting for variant)",
+    r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|hunting for variant|bluehat)",
     re.I,
 )
 
-def _is_signal(title: str, summary: str, link: str, source: str) -> bool:
-    blob = " ".join([title or "", summary or "", link or "", source or ""])
+def _is_signal(title: str, summary: str, link: str, _source: str) -> bool:
+    # Only title/summary/link content counts; _source (domain) no longer triggers signal
+    blob = " ".join([title or "", summary or "", link or ""])
     return bool(SIGNAL_RE.search(blob)) and not BLOGGY_RE.search(blob)
 
 # --- Relevance --------------------------------------------------------------
@@ -331,6 +341,7 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             vendor = (v.get("vendorProject") or "").strip()
             prod = (v.get("product") or "").strip()
             title = f"{cve} — {vendor} {prod}".strip(" —")
+            # when building KEV items (inside build_fallback_pool)
             out.append({
                 "title": title,
                 "summary": _strip_html(v.get("shortDescription") or ""),
@@ -339,7 +350,19 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 "link": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                 "source": "CISA KEV",
                 "cve": cve,
-                "ts": added,                    # <-- NEW
+                "ts": added,  # <- add this
+            })
+
+            # when building feed items
+            out.append({
+                "title": title,
+                "summary": summary,
+                "kev": kev_flag,
+                "vendor_guess": title.lower(),
+                "link": e.get("link") or "",
+                "source": url,
+                "cve": cves[0] if cves else None,
+                "ts": ts,  # <- add this
             })
 
     # Vendor / ecosystem feeds
@@ -399,8 +422,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     # Collapse by product (prefer KEV, then higher EPSS, then newest)
     by_product: Dict[str, Dict[str,Any]] = {}
 
-    now = time.time()
-
     def _score(it: Dict[str,Any]) -> tuple:
         kev = 1 if it.get("kev") or it.get("known_exploited") else 0
         try:
@@ -410,18 +431,16 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
         ts = float(it.get("ts") or 0.0)  # newer preferred
         return (kev, epss, ts)
 
-    # small deterministic daily jitter to rotate ties without true randomness
+    # deterministic daily jitter so ties rotate each day
     import random
-    _seed = int(time.strftime("%Y%m%d", time.gmtime(now)))
+    _seed = int(time.strftime("%Y%m%d", time.gmtime()))
     _rng = random.Random(_seed)
-
     for it in uniq:
         it["_jitter"] = _rng.random()
 
     for it in uniq:
         key = _product_key(it)
         cur = by_product.get(key)
-        # prefer higher score; for exact ties, prefer the one with higher jitter (rotates daily)
         if cur is None:
             by_product[key] = it
         else:
@@ -659,13 +678,93 @@ def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str
         pass
     return out[:n]
 
+# --- Recently posted memory (per team) ---------------------------------------
+_recent: dict[str, list[dict]] = {}
+def _recent_load():
+    global _recent
+    try:
+        p = pathlib.Path(RECENT_STORE)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _recent = json.loads(p.read_text()) if p.exists() else {}
+    except Exception:
+        _recent = {}
+
+def _recent_save():
+    try:
+        p = pathlib.Path(RECENT_STORE)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(_recent))
+    except Exception:
+        pass
+
+def _recent_keys(team_id: str | None) -> set[str]:
+    if not team_id:
+        return set()
+    now = time.time()
+    cutoff = now - REMEMBER_DAYS * 86400
+    items = _recent.get(team_id, [])
+    # prune old
+    items = [x for x in items if (x.get("ts") or 0) >= cutoff]
+    _recent[team_id] = items
+    return {x.get("k") for x in items if x.get("k")}
+
+def mark_posted(team_id: str | None, items: List[Dict[str,Any]]):
+    if not team_id:
+        return
+    now = time.time()
+    lst = _recent.get(team_id, [])
+    for it in items:
+        lst.append({"k": str(_key_for(it)), "ts": now})
+    # de-dupe & trim
+    seen = set(); deduped = []
+    for x in reversed(lst):
+        k = x["k"]
+        if k in seen:
+            continue
+        seen.add(k); deduped.append(x)
+    _recent[team_id] = list(reversed(deduped))[-500:]  # keep last 500
+    _recent_save()
+
+_recent_load()
+
 # --- Public API --------------------------------------------------------------
 def topN_today(n: int = 5, ws=None) -> List[Dict[str,Any]]:
     pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS)
     if len(pool) < n:
         pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)
+
+    team_id = getattr(ws, "team_id", None) if ws else None
+    seen = _recent_keys(team_id) if team_id else set()
+    # prefer unseen; if too few, fall back to full pool
+    pool2 = [it for it in pool if str(_key_for(it)) not in seen] or pool
+
     ws = ws or type("W", (), {"stack_mode":"universal","stack_tokens":None})()
-    return pick_top_candidates(pool, n, ws)
+    picks = pick_top_candidates(pool2, n, ws)
+
+    # enforce vendor variety
+    def _vendor_of(it: Dict[str,Any]) -> str:
+        t = _tokens(_text(it))
+        for v in ["microsoft","apple","google","adobe","citrix","git","cisco","vmware","fortinet","oracle",
+                  "ubuntu","debian","suse","red","mozilla","chrome","f5","juniper","palo","ivy","progress"]:
+            if v in t:
+                return v
+        return "other"
+
+    counts: Dict[str,int] = {}
+    variety: List[Dict[str,Any]] = []
+    extras: List[Dict[str,Any]] = []
+    for it in picks:
+        v = _vendor_of(it)
+        if counts.get(v,0) < MAX_PER_VENDOR:
+            variety.append(it); counts[v] = counts.get(v,0)+1
+        else:
+            extras.append(it)
+    for it in extras:
+        if len(variety) >= n:
+            break
+        variety.append(it)
+
+    return variety[:n]
 
 # --- OAuth installation storage (file-backed) --------------------------------
 import pathlib, json, os, time  # (safe if already imported)

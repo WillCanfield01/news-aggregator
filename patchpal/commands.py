@@ -5,7 +5,7 @@ from datetime import datetime
 from slack_bolt import App
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from slack_sdk.errors import SlackApiError
-
+from .selector import mark_posted
 from .storage import SessionLocal, Workspace
 from .billing import ensure_trial
 
@@ -375,6 +375,7 @@ def register_commands(app: App):
                             logger.exception("chat.postMessage failed")
                             respond(f"Couldn’t post: `{err or 'unknown_error'}`. Please try again shortly.")
                         return
+                    mark_posted(ws.team_id, items)
 
                     # Post each item as a thread reply
                     for i, it in enumerate(items, 1):
