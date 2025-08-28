@@ -3,6 +3,7 @@ from __future__ import annotations
 import os, sys, re, time, html, json, pathlib
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
+from slack_sdk.errors import SlackApiError  # add near the top with other imports
 import requests
 import feedparser
 
@@ -829,36 +830,84 @@ def _fallback_text(md: str, limit: int = 300) -> str:
     return (s[:limit].rstrip() + "…") if len(s) > limit else s
 
 def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
-    from slack_sdk.web import WebClient
-
+    from slack_sdk.web import WebClient  # lazy import
     token = get_bot_token(team_id)
     if not token:
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-    ws_stub = type("W", (), {"team_id": team_id, "stack_mode":"universal", "stack_tokens":None})()
-    items = topN_today(n=5, ws=ws_stub, team_id=team_id)
+    # 0) Sanity: token belongs to this team
+    try:
+        auth = client.auth_test()
+        if auth.get("team_id") != team_id:
+            # wrong/expired install; bail early
+            print(f"[scheduler] auth mismatch for team {team_id}")
+            return
+    except SlackApiError as e:
+        print(f"[scheduler] auth.test failed: {e.response.get('error')}")
+        return
 
-    # ✅ Remember these so the next run doesn’t repeat them
+    # 1) Channel existence + membership
+    try:
+        info = client.conversations_info(channel=channel_id)
+    except SlackApiError as e:
+        err = e.response.get("error")
+        print(f"[scheduler] conversations.info failed for {channel_id}: {err}")
+        return
+
+    ch = info.get("channel") or {}
+    if ch.get("is_archived"):
+        print(f"[scheduler] channel archived: {channel_id}")
+        return
+
+    is_private = ch.get("is_private")
+    is_member  = ch.get("is_member")
+
+    if not is_member:
+        if is_private:
+            # cannot auto-join private channels
+            print(f"[scheduler] not a member of private channel {channel_id} — invite the app")
+            return
+        # public: try to join
+        try:
+            client.conversations_join(channel=channel_id)
+        except SlackApiError as e:
+            print(f"[scheduler] join failed for {channel_id}: {e.response.get('error')}")
+            return
+
+    # 2) Build items (de-duped per team) and remember them to avoid repeats
+    ws_stub = type("W", (), {"team_id": team_id, "stack_mode": "universal", "stack_tokens": None})()
+    items = topN_today(n=5, ws=ws_stub, team_id=team_id)
+    if not items:
+        print(f"[scheduler] no items to post for {team_id}")
+        return
     mark_posted(team_id, items)
 
-    hdr = client.chat_postMessage(
-        channel=channel_id,
-        text="Today’s Top 5 Patches / CVEs",
-        blocks=[{
-            "type": "header",
-            "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True},
-        }],
-    )
+    # 3) Post header
+    try:
+        hdr = client.chat_postMessage(
+            channel=channel_id,
+            text="Today’s Top 5 Patches / CVEs",
+            blocks=[{
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True},
+            }],
+        )
+    except SlackApiError as e:
+        print(f"[scheduler] chat.postMessage header failed: {e.response.get('error')}")
+        return
+
     parent_ts = hdr["ts"]
 
+    # 4) Post each item as a thread reply (with fallback text for notifications)
     for idx, it in enumerate(items, 1):
-        body = render_item_text(it, idx, tone)
-        if not body or not isinstance(body, str):
-            body = f"{idx}) (no details)"
-        client.chat_postMessage(
-            channel=channel_id,
-            thread_ts=parent_ts,
-            text=_fallback_text(body, 300),
-            blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": body}}],
-        )
+        body = render_item_text(it, idx, tone) or f"{idx}) (no details)"
+        try:
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=parent_ts,
+                text=_fallback_text(body, 300),
+                blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": body}}],
+            )
+        except SlackApiError as e:
+            print(f"[scheduler] chat.postMessage item {idx} failed: {e.response.get('error')}")
