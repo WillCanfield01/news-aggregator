@@ -1,6 +1,8 @@
 # patchpal/commands.py
 import os
 import re
+import time
+import random
 from datetime import datetime
 from slack_bolt import App
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -8,6 +10,7 @@ from slack_sdk.errors import SlackApiError
 from .selector import mark_posted
 from .storage import SessionLocal, Workspace
 from .billing import ensure_trial
+from .billing import can_post, checkout_url
 
 LEGAL_URL = (os.getenv("APP_BASE_URL", "").rstrip("/") or "https://your-patchpal-host") + "/legal"
 
@@ -25,6 +28,8 @@ HELP = (
     "• `/patchpal billing`  (plan, next renewal, manage link)\n"
     "• `/patchpal status`\n"
     "• `/patchpal post-now`  (test immediately)\n"
+    "• `/patchpal delete-data`  (delete all workspace data — requires confirm)\n"
+    "_Note: For **private** channels, invite the app with `/invite @PatchPal`._\n"
     f"• *Legal:* <{LEGAL_URL}|Terms & Privacy>\n"
 )
 
@@ -45,7 +50,6 @@ def _fallback_text(md: str, limit: int = 300) -> str:
     s = _FMT_RE.sub("", s)
     s = " ".join(s.split())
     return (s[:limit].rstrip() + "…") if len(s) > limit else s
-
 
 def _resolve_channel_id(text: str, body: dict, client, logger):
     t = (text or "").strip()
@@ -117,7 +121,6 @@ def _parse_stack_args(arg: str):
     return cleaned, rejected
 
 def _catalog_text():
-    # compact, readable catalog + examples
     lines = ["*Choose your stack* (comma-separated), e.g. `windows, ms365, chrome`"]
     for title, items in STACK_CATALOG.items():
         lines.append(f"• *{title}:* " + ", ".join(items))
@@ -129,6 +132,21 @@ def _catalog_text():
         "Tip: Switch targeting with `/patchpal mode stack` (tailored) or `universal` (broad)."
     )
     return "\n".join(lines)
+
+# ── Slack posting backoff ─────────────────────────────────────────────────────
+def _post_with_retry(client, **kwargs):
+    attempts = 5
+    for i in range(attempts):
+        try:
+            return client.chat_postMessage(**kwargs)
+        except SlackApiError as e:
+            status = getattr(e.response, "status_code", None)
+            err = (e.response.get("error") if hasattr(e, "response") else None) or ""
+            if status == 429 or err in {"ratelimited", "rate_limited"}:
+                retry = int(e.response.headers.get("Retry-After", "1")) if hasattr(e, "response") else 1
+                time.sleep(retry + random.uniform(0, 0.5 * (i + 1)))
+                continue
+            raise
 
 # ── Command router ────────────────────────────────────────────────────────────
 def register_commands(app: App):
@@ -153,38 +171,30 @@ def register_commands(app: App):
 
                 # ---------- quick info commands ----------
                 if text.startswith("stacks"):
-                    respond(_catalog_text())
-                    return
+                    respond(_catalog_text()); return
 
                 if text.startswith("show-stack"):
                     stack = ws.stack_tokens or "none"
                     mode = ws.stack_mode or "universal"
                     respond(f"*Mode:* {mode}  |  *Stack:* `{stack}`\n"
-                            "Change with `/patchpal set-stack …` or `/patchpal mode stack`.")
-                    return
+                            "Change with `/patchpal set-stack …` or `/patchpal mode stack`."); return
 
                 if text.startswith("preset"):
                     key = (text.split(maxsplit=1)[1].strip().lower() if len(text.split()) > 1 else "")
                     if key not in PRESETS:
                         respond("Presets: `office-it`, `mac-shop`, `cloud-dev`, `network`.\n"
-                                "Use like: `/patchpal preset office-it`.")
-                        return
-                    ws.stack_tokens = ",".join(PRESETS[key])
-                    ws.stack_mode = "stack"
-                    db.commit()
+                                "Use like: `/patchpal preset office-it`."); return
+                    ws.stack_tokens = ",".join(PRESETS[key]); ws.stack_mode = "stack"; db.commit()
                     respond(f"Preset *{key}* applied. Mode set to *stack*. "
-                            f"Current stack: `{ws.stack_tokens}`.")
-                    return
+                            f"Current stack: `{ws.stack_tokens}`."); return
 
                 # ---------- billing ----------
                 if text.startswith("upgrade"):
-                    from .billing import checkout_url
                     url = checkout_url(team_id)
-                    respond(f"Upgrade to *PatchPal Pro* ($9/workspace/mo): <{url}|Open Stripe Checkout>")
-                    return
+                    respond(f"Upgrade to *PatchPal Pro* ($9/workspace/mo): <{url}|Open Stripe Checkout>"); return
 
                 if text.startswith("billing"):
-                    from .billing import portal_url, get_next_renewal, checkout_url
+                    from .billing import portal_url, get_next_renewal
                     plan = ws.plan or "trial"
                     if plan == "pro" and ws.subscription_id:
                         nxt = get_next_renewal(ws)
@@ -213,56 +223,43 @@ def register_commands(app: App):
                             "Please *mention* the channel or run `/patchpal set-channel here` in the target channel.\n"
                             "_Tip: enable “Escape channels, users, and links sent to your app.” in your Slash Command._\n"
                             f"*Legal:* <{LEGAL_URL}|Terms & Privacy>"
-                        )
-                        return
-                    ws.post_channel = cid
-                    db.commit()
-                    respond(f"Got it. I’ll post in <#{ws.post_channel}> at {ws.post_time}.")
-                    return
+                        ); return
+                    ws.post_channel = cid; db.commit()
+                    when_txt = ws.post_time or "use `/patchpal set-time HH:MM` to choose a time"
+                    respond(f"Got it. I’ll post in <#{ws.post_channel}> — {when_txt}."); return
 
                 if text.startswith("set-time"):
                     parts = text.split()
                     hhmm = parts[-1] if len(parts) >= 2 else ""
                     if not TIME_RE.match(hhmm):
-                        respond("Use HH:MM 24h, e.g., `09:00`.")
-                        return
+                        respond("Use HH:MM 24h, e.g., `09:00`."); return
                     h, m = hhmm.split(":")
-                    ws.post_time = f"{int(h):02d}:{int(m):02d}"
-                    db.commit()
-                    respond(f"Time set to {ws.post_time}.")
-                    return
+                    ws.post_time = f"{int(h):02d}:{int(m):02d}"; db.commit()
+                    respond(f"Time set to {ws.post_time}."); return
 
                 if text.startswith("set-tone"):
                     tone = (text.split(maxsplit=1)[1].strip().lower() if len(text.split()) > 1 else "")
                     if tone not in ("simple", "detailed"):
-                        respond("Use `simple` or `detailed`, e.g., `/patchpal set-tone simple`.")
-                        return
-                    ws.tone = tone
-                    db.commit()
-                    respond(f"Tone set to *{ws.tone}*.")
-                    return
+                        respond("Use `simple` or `detailed`, e.g., `/patchpal set-tone simple`."); return
+                    ws.tone = tone; db.commit()
+                    respond(f"Tone set to *{ws.tone}*."); return
 
                 if text.startswith("mode"):
                     mode = (text.split(maxsplit=1)[1].strip().lower() if len(text.split()) > 1 else "")
                     if mode not in ("universal", "stack"):
-                        respond("Use `/patchpal mode universal` or `/patchpal mode stack`.")
-                        return
-                    ws.stack_mode = mode
-                    db.commit()
-                    respond(f"Relevance mode set to *{ws.stack_mode}*.")
-                    return
+                        respond("Use `/patchpal mode universal` or `/patchpal mode stack`."); return
+                    ws.stack_mode = mode; db.commit()
+                    respond(f"Relevance mode set to *{ws.stack_mode}*."); return
 
                 if text.startswith("set-stack"):
                     arg = text.split(" ", 1)[1] if " " in text else ""
                     chosen, rejected = _parse_stack_args(arg)
-                    ws.stack_tokens = ",".join(chosen) if chosen else None
-                    db.commit()
+                    ws.stack_tokens = ",".join(chosen) if chosen else None; db.commit()
                     msg = f"Stack set to: `{ws.stack_tokens or 'none'}`."
                     if rejected:
                         msg += f" (ignored unknown: {', '.join(rejected)})"
                     msg += " Run `/patchpal mode stack` for tailored posts, or stay in `universal`."
-                    respond(msg + f"\nSee options: `/patchpal stacks`  ·  *Legal:* <{LEGAL_URL}|Terms & Privacy>")
-                    return
+                    respond(msg + f"\nSee options: `/patchpal stacks`  ·  *Legal:* <{LEGAL_URL}|Terms & Privacy>"); return
 
                 # ---------- info & action ----------
                 if text.startswith("status"):
@@ -275,37 +272,36 @@ def register_commands(app: App):
                         f"|  Plan: *{plan}*  |  Trial ends: *{trial}*  |  TZ: {ws.tz}\n"
                         f"Relevance: *{ws.stack_mode or 'universal'}*  |  Stack: `{stack}`\n"
                         f"*Legal:* <{LEGAL_URL}|Terms & Privacy>"
-                    )
-                    return
+                    ); return
 
                 if text.startswith("post-now"):
                     if not ws.post_channel:
-                        respond("Set a channel first: run `/patchpal set-channel here` in the target channel.")
-                        return
+                        respond("Set a channel first: run `/patchpal set-channel here` in the target channel."); return
 
-                    # If command is run in a different channel than the configured one, explain it.
                     current_cid = body.get("channel_id")
                     if current_cid and current_cid != ws.post_channel:
                         respond(
                             f"I’m configured to post in <#{ws.post_channel}>, "
                             f"but you ran this in <#{current_cid}>.\n"
                             "Run `/patchpal set-channel here` to change it, or run the command in the configured channel."
-                        )
-                        return
+                        ); return
 
-                    # 1) Sanity check: the token belongs to this workspace
+                    if not can_post(ws):
+                        url = checkout_url(ws.team_id)
+                        respond("Your trial has ended. Upgrade to continue daily posts: "
+                                f"<{url}|Open Stripe Checkout>"); return
+
+                    # 1) Sanity: token belongs to this team
                     try:
                         auth = client.auth_test()
                         if auth.get("team_id") != team_id:
                             respond(
                                 "My authorization looks out of date for this workspace. "
                                 "Please reinstall me using the install link and try again."
-                            )
-                            return
+                            ); return
                     except SlackApiError as e:
                         respond("Slack auth failed. Please try again, or reinstall the app.")
-                        logger.info(f"auth.test failed: {e.response.get('error')}")
-                        return
+                        logger.info(f"auth.test failed: {e.response.get('error')}"); return
 
                     # 2) Membership check (auto-join public; guide for private)
                     try:
@@ -313,10 +309,8 @@ def register_commands(app: App):
                     except SlackApiError as e:
                         err = e.response.get("error")
                         if err in ("channel_not_found", "invalid_channel"):
-                            respond(
-                                "I can’t find that channel. Run `/patchpal set-channel here` "
-                                "in the channel where you want me to post."
-                            )
+                            respond("I can’t find that channel. Run `/patchpal set-channel here` "
+                                    "in the channel where you want me to post.")
                         else:
                             respond(f"Slack error while checking the channel: `{err}`.")
                         return
@@ -331,29 +325,25 @@ def register_commands(app: App):
                                 "I need to be in that channel before I can post.\n"
                                 "• For **private** channels: invite me with `/invite @PatchPal` in the channel.\n"
                                 "Then run `/patchpal post-now` again."
-                            )
-                            return
+                            ); return
                         else:
                             try:
                                 client.conversations_join(channel=ws.post_channel)
                             except SlackApiError:
-                                respond(
-                                    "I couldn’t join that public channel automatically. "
-                                    "Please invite me with `/invite @PatchPal` and try again."
-                                )
-                                return
+                                respond("I couldn’t join that public channel automatically. "
+                                        "Please invite me with `/invite @PatchPal` and try again."); return
 
                     # 3) Fetch items and post
                     from .selector import topN_today, render_item_text
                     items = topN_today(5, ws=ws)
                     if not items:
-                        respond("No items found right now.")
-                        return
+                        respond("No items found right now."); return
 
                     try:
-                        hdr = client.chat_postMessage(
+                        hdr = _post_with_retry(
+                            client,
                             channel=ws.post_channel,
-                            text="Today’s Top 5 Patches / CVEs",  # accessibility fallback
+                            text="Today’s Top 5 Patches / CVEs",
                             blocks=[{
                                 "type": "header",
                                 "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True}
@@ -371,28 +361,53 @@ def register_commands(app: App):
                                 "• For **public** channels: invite me the same way (or I can join automatically if an admin allows it).\n"
                                 "Then run `/patchpal post-now` again."
                             )
+                        elif err == "dispatch_failed":
+                            respond("Slack couldn’t dispatch the message (transient). Please try again in a minute.")
                         else:
                             logger.exception("chat.postMessage failed")
                             respond(f"Couldn’t post: `{err or 'unknown_error'}`. Please try again shortly.")
                         return
+
                     mark_posted(ws.team_id, items)
 
-                    # Post each item as a thread reply
+                    # Thread items with retry
                     for i, it in enumerate(items, 1):
-                        txt = render_item_text(it, i, ws.tone or "simple")
-                        if not isinstance(txt, str) or not txt.strip():
-                            txt = f"{i}) (no details)"
+                        txt = render_item_text(it, i, ws.tone or "simple") or f"{i}) (no details)"
                         fallback = _fallback_text(txt, 300)
+                        try:
+                            _post_with_retry(
+                                client,
+                                channel=ws.post_channel,
+                                thread_ts=parent_ts,
+                                text=fallback,
+                                blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
+                            )
+                        except SlackApiError as e:
+                            logger.info(f"post item {i} failed: {e.response.get('error')}")
 
-                        client.chat_postMessage(
-                            channel=ws.post_channel,
-                            thread_ts=parent_ts,
-                            text=fallback,
-                            blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
-                        )
+                    respond(f"Posted {len(items)} item(s) to <#{ws.post_channel}>."); return
 
-                    respond(f"Posted {len(items)} item(s) to <#{ws.post_channel}>.")
-                    return
+                # ---------- delete data ----------
+                if text.startswith("delete-data"):
+                    # Restrict to the recorded workspace contact to avoid random deletions.
+                    if user_id != (ws.contact_user_id or ""):
+                        respond(
+                            "For safety, only the recorded workspace contact can delete data. "
+                            f"Ask <@{ws.contact_user_id}> to run `/patchpal delete-data`."
+                        ); return
+                    if "confirm" not in text.lower():
+                        respond(
+                            "*This will delete all PatchPal data for your workspace* "
+                            "(install tokens, workspace settings, recent post memory) and stop all posts.\n"
+                            "Run `/patchpal delete-data confirm` to proceed."
+                        ); return
+                    from .install_store import delete_install
+                    from .storage import delete_recent_for_team
+                    # Delete rows and installations
+                    delete_recent_for_team(team_id)
+                    delete_install(team_id)
+                    db.delete(ws); db.commit()
+                    respond("✅ Deleted all workspace data and uninstalled. You can reinstall any time."); return
 
                 # default help
                 respond(HELP)

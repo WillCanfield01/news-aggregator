@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import (
     create_engine,
     Column,
@@ -13,9 +14,9 @@ from sqlalchemy import (
     text,
     inspect,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
-
 
 # ---------------------------------------------------------------------------
 # DB URL normalization (prefer psycopg v3 driver on Postgres)
@@ -46,7 +47,6 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 Base = declarative_base()
 
-
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ class Workspace(Base):
     __tablename__ = "workspaces"
 
     id = Column(Integer, primary_key=True)
-    team_id = Column(String, index=True)
+    team_id = Column(String, index=True, unique=True, nullable=False)
     team_name = Column(String, nullable=True)
 
     # posting prefs
@@ -107,12 +107,74 @@ class PostLog(Base):
     post_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class RecentPost(Base):
+    __tablename__ = "recent_posts"
+    team_id   = Column(String, primary_key=True)
+    item_key  = Column(String, primary_key=True)
+    posted_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+# --- helpers ---
+
+def _dialect_name(bind) -> str:
+    try:
+        return bind.dialect.name
+    except Exception:
+        return ""
+
+def recent_keys(team_id: str, remember_days: int) -> set[str]:
+    """Return keys posted within the last `remember_days`, cross-dialect safe."""
+    if not team_id:
+        return set()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=remember_days)
+    with SessionLocal() as db:
+        rows = (
+            db.query(RecentPost.item_key)
+              .filter(RecentPost.team_id == team_id, RecentPost.posted_at >= cutoff)
+              .all()
+        )
+    return {r[0] for r in rows}
+
+def remember_posts(team_id: str, item_keys: list[str]) -> None:
+    """Upsert recent posts; works on Postgres and SQLite; merges otherwise."""
+    if not team_id or not item_keys:
+        return
+    with SessionLocal() as db:
+        bind = db.get_bind()
+        dname = _dialect_name(bind)
+        values = [{"team_id": team_id, "item_key": k} for k in item_keys]
+
+        try:
+            if dname.startswith("postgres"):
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(RecentPost).values(values).on_conflict_do_update(
+                    index_elements=[RecentPost.team_id, RecentPost.item_key],
+                    set_={"posted_at": func.now()},
+                )
+                db.execute(stmt)
+            elif dname == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                stmt = sqlite_insert(RecentPost).values(values).on_conflict_do_update(
+                    index_elements=[RecentPost.team_id, RecentPost.item_key],
+                    set_={"posted_at": func.now()},
+                )
+                db.execute(stmt)
+            else:
+                # Portable fallback
+                now = datetime.now(timezone.utc)
+                for k in item_keys:
+                    db.merge(RecentPost(team_id=team_id, item_key=k, posted_at=now))
+        finally:
+            db.commit()
+
+def delete_recent_for_team(team_id: str) -> None:
+    with SessionLocal() as db:
+        db.query(RecentPost).filter_by(team_id=team_id).delete(synchronize_session=False)
+        db.commit()
 
 # ---------------------------------------------------------------------------
-# Create tables
+# Create tables (do this here; remove the duplicate call in app.py)
 # ---------------------------------------------------------------------------
 Base.metadata.create_all(engine)
-
 
 # ---------------------------------------------------------------------------
 # Tiny migrations (idempotent)
@@ -153,12 +215,12 @@ try:
         if "ignore_tokens" not in cols:
             conn.execute(text("ALTER TABLE workspaces ADD COLUMN ignore_tokens TEXT NULL"))
 
-        # PostLog uniqueness & helpful indexes
+        # Ensure uniqueness and helpful indexes
         conn.execute(
             text("CREATE UNIQUE INDEX IF NOT EXISTS uq_postlog_team_date ON post_logs (team_id, post_date)")
         )
         conn.execute(
-            text("CREATE INDEX IF NOT EXISTS ix_workspaces_team_id ON workspaces (team_id)")
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_workspaces_team_id ON workspaces (team_id)")
         )
 
 except Exception:

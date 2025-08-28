@@ -9,14 +9,13 @@ from flask import Blueprint, request, jsonify
 from slack_sdk import WebClient
 
 from .storage import SessionLocal, Workspace
+from .install_store import get_bot_token
 
 # --- Config ---
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 PRICE_ID = os.getenv("STRIPE_PRICE_ID")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://example.com")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
-slack_client = WebClient(token=SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
 
 billing_bp = Blueprint("billing_bp", __name__)
 
@@ -49,6 +48,9 @@ def checkout_url(team_id: str) -> str:
         allow_promotion_codes=True,
         client_reference_id=team_id,
         metadata={"team_id": team_id},
+        subscription_data={
+            "metadata": {"team_id": team_id},  # helps correlate sub->workspace later
+        },
         success_url=f"{APP_BASE_URL}/billing/success?team_id={team_id}&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{APP_BASE_URL}/billing/cancel?team_id={team_id}",
     )
@@ -72,12 +74,19 @@ def get_next_renewal(ws: Workspace) -> Optional[datetime]:
     ts = int(sub.get("current_period_end", 0))
     return datetime.utcfromtimestamp(ts) if ts else None
 
-# ---------- DMs / notifications ----------
+# ---------- Slack DM helpers ----------
 
-def _dm(slack: WebClient, user_id: Optional[str], channel_id: Optional[str], text: str):
+def _slack_for(team_id: Optional[str]) -> Optional[WebClient]:
+    if not team_id:
+        return None
+    token = get_bot_token(team_id)
+    return WebClient(token=token) if token else None
+
+def _dm(team_id: Optional[str], user_id: Optional[str], channel_id: Optional[str], text: str):
+    slack = _slack_for(team_id)
+    if slack is None:
+        return
     try:
-        if slack is None:
-            return
         if user_id:
             im = slack.conversations_open(users=user_id)
             cid = im["channel"]["id"]
@@ -85,9 +94,10 @@ def _dm(slack: WebClient, user_id: Optional[str], channel_id: Optional[str], tex
         elif channel_id:
             slack.chat_postMessage(channel=channel_id, text=text)
     except Exception:
+        # Swallow: DMs are best-effort.
         pass
 
-def dm_trial_or_checkout(slack: WebClient, ws: Workspace) -> None:
+def dm_trial_or_checkout(ws: Workspace) -> None:
     """Inactive: send daily upgrade DM with Checkout link."""
     now = datetime.utcnow()
     if ws.last_billing_nag and (now - ws.last_billing_nag).days < 1:
@@ -98,36 +108,37 @@ def dm_trial_or_checkout(slack: WebClient, ws: Workspace) -> None:
         f"Upgrade to resume daily Top 5: {url}\n"
         "_$9/workspace/mo_"
     )
-    _dm(slack, ws.contact_user_id, ws.post_channel, text)
+    _dm(ws.team_id, ws.contact_user_id, ws.post_channel, text)
     with SessionLocal() as db:
         w = db.query(Workspace).filter_by(id=ws.id).first()
         if w:
             w.last_billing_nag = now
             db.commit()
 
-def dm_trial_ending_soon(slack: WebClient, ws: Workspace) -> None:
-    """3-day pre-expiry reminder (rate-limited to once/day)."""
+def dm_trial_ending_soon(ws: Workspace) -> None:
+    """~3-day pre-expiry reminder (rate-limited to once/day)."""
     if not ws.trial_ends_at:
         return
     now = datetime.utcnow()
     days_left = (ws.trial_ends_at - now).days
-    if days_left != 3:
+    # Be lenient so we don't miss the window due to time-of-day rounding.
+    if days_left not in (2, 3):
         return
     if ws.last_trial_warn and (now - ws.last_trial_warn).days < 1:
         return
     url = checkout_url(ws.team_id)
     text = (
-        "🔔 *Your PatchPal trial ends in ~3 days.*\n"
+        f"🔔 *Your PatchPal trial ends in ~{days_left} days.*\n"
         f"Keep the daily Top 5 coming: {url}"
     )
-    _dm(slack, ws.contact_user_id, ws.post_channel, text)
+    _dm(ws.team_id, ws.contact_user_id, ws.post_channel, text)
     with SessionLocal() as db:
         w = db.query(Workspace).filter_by(id=ws.id).first()
         if w:
             w.last_trial_warn = now
             db.commit()
 
-def dm_payment_failed(slack: WebClient, ws: Workspace) -> None:
+def dm_payment_failed(ws: Workspace) -> None:
     """Warn on renewal failure (rate-limited to once/day)."""
     now = datetime.utcnow()
     if ws.last_payment_fail_nag and (now - ws.last_payment_fail_nag).days < 1:
@@ -137,12 +148,19 @@ def dm_payment_failed(slack: WebClient, ws: Workspace) -> None:
         "⚠️ *PatchPal payment failed.* Posts will pause if not resolved.\n"
         f"Update payment details here: {url}"
     )
-    _dm(slack, ws.contact_user_id, ws.post_channel, text)
+    _dm(ws.team_id, ws.contact_user_id, ws.post_channel, text)
     with SessionLocal() as db:
         w = db.query(Workspace).filter_by(id=ws.id).first()
         if w:
             w.last_payment_fail_nag = now
             db.commit()
+
+def can_post(ws) -> bool:
+    plan = (ws.plan or "trial").lower()
+    if plan == "pro":
+        return True
+    # trial
+    return bool(ws.trial_ends_at and ws.trial_ends_at > datetime.utcnow())
 
 # ---------- Webhook ----------
 
@@ -164,34 +182,47 @@ def stripe_webhook():
 
     with SessionLocal() as db:
         if etype == "checkout.session.completed":
+            # Store customer/subscription references, but don't mark paid yet.
             team_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("team_id")
             sub_id = obj.get("subscription")
             cust_id = obj.get("customer")
             if team_id:
                 ws = db.query(Workspace).filter_by(team_id=team_id).first()
                 if ws:
-                    ws.plan = "pro"
-                    ws.paid_at = datetime.utcnow()
-                    ws.subscription_id = sub_id
+                    if sub_id:
+                        ws.subscription_id = sub_id
                     if cust_id:
                         ws.customer_id = cust_id
+                    # leave plan until invoice.payment_succeeded
                     db.commit()
 
-        elif etype in {"customer.subscription.deleted", "customer.subscription.canceled"}:
-            sub_id = obj.get("id")
-            if sub_id:
-                ws = db.query(Workspace).filter_by(subscription_id=sub_id).first()
-                if ws:
-                    ws.plan = "canceled"
-                    db.commit()
-
-        elif etype == "invoice.payment_failed":
-            # Look up workspace by subscription; send a polite DM with portal link.
+        elif etype in {"invoice.payment_succeeded"}:
+            # Mark as pro when the first invoice succeeds (or renewals).
             sub_id = obj.get("subscription")
             if sub_id:
                 ws = db.query(Workspace).filter_by(subscription_id=sub_id).first()
                 if ws:
-                    dm_payment_failed(slack_client, ws)
+                    ws.plan = "pro"
+                    ws.paid_at = datetime.utcnow()
+                    db.commit()
+
+        elif etype in {"customer.subscription.deleted", "customer.subscription.updated"}:
+            # Subscription ended or status changed to a non-active state.
+            sub = obj
+            sub_id = sub.get("id")
+            status = (sub.get("status") or "").lower()
+            if sub_id:
+                ws = db.query(Workspace).filter_by(subscription_id=sub_id).first()
+                if ws and status in {"canceled", "unpaid", "incomplete_expired"}:
+                    ws.plan = "canceled"
+                    db.commit()
+
+        elif etype == "invoice.payment_failed":
+            sub_id = obj.get("subscription")
+            if sub_id:
+                ws = db.query(Workspace).filter_by(subscription_id=sub_id).first()
+                if ws:
+                    dm_payment_failed(ws)
 
     return jsonify(received=True)
 
@@ -203,3 +234,7 @@ def success_page():
 @billing_bp.route("/cancel")
 def cancel_page():
     return "No worries—your trial remains. You can upgrade anytime from Slack."
+
+@billing_bp.route("/upgrade-not-configured")
+def not_configured_page():
+    return "Billing isn’t configured yet. Please contact support."

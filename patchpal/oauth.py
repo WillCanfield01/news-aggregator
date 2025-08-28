@@ -3,8 +3,10 @@ import os, secrets, requests
 from flask import Blueprint, redirect, request, session
 from slack_sdk.oauth import AuthorizeUrlGenerator
 from slack_sdk.web import WebClient
+
 from .install_store import upsert_installation
-from .install_store import upsert_installation  # <- correct
+from .storage import SessionLocal, Workspace
+from .billing import ensure_trial
 
 bp = Blueprint("slack_oauth", __name__)
 
@@ -16,11 +18,16 @@ CLIENT_ID     = os.environ["SLACK_CLIENT_ID"]
 CLIENT_SECRET = os.environ["SLACK_CLIENT_SECRET"]
 REDIRECT_URI  = f"{APP_BASE_URL}/slack/oauth/callback"
 
+# Add scopes you actually use
 SCOPES = [
     "chat:write",
     "channels:read",
     "groups:read",
     "commands",
+    "channels:join",     # for conversations.join
+    "im:write",          # for conversations.open (DMs)
+    "chat:write.public", # optional, post to public channels w/o joining
+    "users:read",        # optional, nicer UX later
 ]
 
 authz = AuthorizeUrlGenerator(
@@ -37,7 +44,9 @@ def slack_install():
 
 @bp.get("/slack/oauth/callback")
 def slack_oauth_callback():
-    if request.args.get("state") != session.get("oauth_state"):
+    # single-use state
+    expected = session.pop("oauth_state", None)
+    if request.args.get("state") != expected or not expected:
         return "Invalid state", 400
 
     code = request.args.get("code")
@@ -55,15 +64,16 @@ def slack_oauth_callback():
     if not r.get("ok"):
         return f"OAuth error: {r}", 400
 
-    team_id   = r["team"]["id"]
-    team_name = r["team"]["name"]
-    bot_token = r["access_token"]     # xoxb-...
-    bot_user  = r["bot_user_id"]
+    team      = r.get("team") or {}
+    team_id   = team.get("id")
+    team_name = team.get("name", "")
+    bot_token = r.get("access_token")     # xoxb-...
+    bot_user  = r.get("bot_user_id")
     scopes    = r.get("scope") or ""
     installer = (r.get("authed_user") or {}).get("id")
-
-    # persist installation
     enterprise_id = (r.get("enterprise") or {}).get("id")
+
+    # Persist installation
     upsert_installation(
         team_id=team_id,
         team_name=team_name,
@@ -74,12 +84,33 @@ def slack_oauth_callback():
         enterprise_id=enterprise_id,
     )
 
-    # optional: DM the installer
+    # Ensure workspace row exists and start trial immediately
     try:
-        if installer:
-            WebClient(token=bot_token).chat_postMessage(
-                channel=installer,
-                text=f"✅ PatchPal installed in *{team_name}*. Invite me to a channel and I’ll start posting."
+        with SessionLocal() as db:
+            ws = db.query(Workspace).filter_by(team_id=team_id).first()
+            if not ws:
+                ws = Workspace(team_id=team_id, team_name=team_name, contact_user_id=installer)
+                db.add(ws); db.commit()
+                ensure_trial(ws, db)
+            else:
+                # keep contact up-to-date
+                if installer and ws.contact_user_id != installer:
+                    ws.contact_user_id = installer
+                    db.commit()
+    except Exception:
+        # Non-fatal: installation is saved, just skip bootstrap if DB hiccups
+        pass
+
+    # Optional: DM the installer (requires im:write)
+    try:
+        if installer and bot_token:
+            slack = WebClient(token=bot_token)
+            im = slack.conversations_open(users=installer)
+            slack.chat_postMessage(
+                channel=im["channel"]["id"],
+                text=f"✅ PatchPal installed in *{team_name}*.\n"
+                     "Run `/patchpal set-channel here` in the target channel to start daily posts.\n"
+                     "_For private channels: invite me with `/invite @PatchPal`._"
             )
     except Exception:
         pass

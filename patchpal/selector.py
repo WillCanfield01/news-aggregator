@@ -6,10 +6,10 @@ from typing import List, Dict, Any, Tuple
 from slack_sdk.errors import SlackApiError  # add near the top with other imports
 import requests
 import feedparser
-
+from .storage import recent_keys as _db_recent_keys, remember_posts as _db_remember_posts
 # use DB-backed token store
 from .install_store import get_bot_token
-
+import random
 # --- import path (repo root) -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -31,7 +31,6 @@ MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
 
 # Per-team dedupe memory
 REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
-RECENT_STORE    = os.getenv("PP_RECENT_STORE", "/opt/render/project/data/recent_posts.json")
 # Title style
 SIMPLE_TITLES       = os.getenv("PATCHPAL_SIMPLE_TITLES", "1").lower() in ("1","true","yes")
 SHOW_IDS_IN_TITLE   = os.getenv("PATCHPAL_SHOW_IDS", "0").lower() in ("1","true","yes")
@@ -140,6 +139,25 @@ STACK_MAP = {
     "fortinet":{"fortinet","fortigate"},
     "vmware":{"vmware"},
 }
+
+ALIASES = {
+    "microsoft windows": "Windows",
+    "microsoft edge": "Microsoft Edge",
+    "citrix netscaler application delivery controller and gateway": "Citrix NetScaler",
+    "citrix netscaler adc and gateway": "Citrix NetScaler",
+    "citrix session recording": "Citrix Session Recording",
+    "google chrome": "Chrome",
+    "red hat enterprise linux": "Red Hat Enterprise Linux",
+    "palo alto networks": "Palo Alto Networks",
+    "qnap qhora-322": "QNAP QHora-322",
+}
+
+def _alias_product(name: str) -> str:
+    s = name.lower()
+    for k, v in ALIASES.items():
+        if k in s:
+            return v
+    return name
 
 # --- Shared regex / helpers --------------------------------------------------
 _WORDS   = re.compile(r"[A-Za-z0-9.+#/_-]+")
@@ -373,8 +391,9 @@ def _product_guess(raw_title: str) -> str:
     elif "—" in s or "-" in s:
         s = re.split(r"[—-]", s, 1)[0]
     # Trim obvious junk tokens
-    s = re.sub(r"\b(RCE|XSS|DoS|CVE-\d{4}-\d{4,7}|ZDI[-–—]?\d{2,4}-\d+)\b.*", "", s, flags=re.I)
-    return s.strip() or "This product"
+    s = re.sub(r"\b(RCE|XSS|DoS|CVE-\d{4}-\d{4,7}|ZDI[-–—]?\d{2,4}-\d+)\b.*", "", s, flags=re.I).strip()
+    s = s or "This product"
+    return _alias_product(s)
 
 def _ids_from(raw_title: str) -> str:
     parts = []
@@ -723,53 +742,14 @@ def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str
     return out[:n]
 
 # --- Recently posted memory (per team) ---------------------------------------
-_recent: dict[str, list[dict]] = {}
-def _recent_load():
-    global _recent
-    try:
-        p = pathlib.Path(RECENT_STORE)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        _recent = json.loads(p.read_text()) if p.exists() else {}
-    except Exception:
-        _recent = {}
 
-def _recent_save():
-    try:
-        p = pathlib.Path(RECENT_STORE)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(_recent))
-    except Exception:
-        pass
-
+# --- Recently posted memory (per team) ---------------------------------------
 def _recent_keys(team_id: str | None) -> set[str]:
-    if not team_id:
-        return set()
-    now = time.time()
-    cutoff = now - REMEMBER_DAYS * 86400
-    items = _recent.get(team_id, [])
-    # prune old
-    items = [x for x in items if (x.get("ts") or 0) >= cutoff]
-    _recent[team_id] = items
-    return {x.get("k") for x in items if x.get("k")}
+    return _db_recent_keys(team_id or "", REMEMBER_DAYS) if team_id else set()
 
 def mark_posted(team_id: str | None, items: List[Dict[str,Any]]):
-    if not team_id:
-        return
-    now = time.time()
-    lst = _recent.get(team_id, [])
-    for it in items:
-        lst.append({"k": str(_key_for(it)), "ts": now})
-    # de-dupe & trim
-    seen = set(); deduped = []
-    for x in reversed(lst):
-        k = x["k"]
-        if k in seen:
-            continue
-        seen.add(k); deduped.append(x)
-    _recent[team_id] = list(reversed(deduped))[-500:]  # keep last 500
-    _recent_save()
-
-_recent_load()
+    if team_id:
+        _db_remember_posts(team_id, [str(_key_for(it)) for it in items])
 
 # --- Public API --------------------------------------------------------------
 def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str,Any]]:
@@ -836,24 +816,24 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-    # 0) Sanity: token belongs to this team
+     # 0) Sanity: token belongs to this team
     try:
         auth = client.auth_test()
         if auth.get("team_id") != team_id:
-            # wrong/expired install; bail early
             print(f"[scheduler] auth mismatch for team {team_id}")
             return
     except SlackApiError as e:
         print(f"[scheduler] auth.test failed: {e.response.get('error')}")
         return
-
-    # 1) Channel existence + membership
+ 
+     # 1) Channel existence + membership
     try:
-        info = client.conversations_info(channel=channel_id)
+         info = client.conversations_info(channel=channel_id)
     except SlackApiError as e:
-        err = e.response.get("error")
-        print(f"[scheduler] conversations.info failed for {channel_id}: {err}")
+        print(f"[scheduler] conversations.info failed for {channel_id}: {e.response.get('error')}")
         return
+ 
+    ch = info.get("channel") or {}
 
     ch = info.get("channel") or {}
     if ch.get("is_archived"):
@@ -883,9 +863,10 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         return
     mark_posted(team_id, items)
 
-    # 3) Post header
+    # 3) Post header (rate-limit safe)
     try:
-        hdr = client.chat_postMessage(
+        hdr = _post_with_retry(
+            client,
             channel=channel_id,
             text="Today’s Top 5 Patches / CVEs",
             blocks=[{
@@ -894,20 +875,38 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
             }],
         )
     except SlackApiError as e:
-        print(f"[scheduler] chat.postMessage header failed: {e.response.get('error')}")
+        print(f"[scheduler] header post failed: {e.response.get('error')}")
         return
 
     parent_ts = hdr["ts"]
 
-    # 4) Post each item as a thread reply (with fallback text for notifications)
+    # 4) Post each item as a thread reply (rate-limit safe)
     for idx, it in enumerate(items, 1):
         body = render_item_text(it, idx, tone) or f"{idx}) (no details)"
         try:
-            client.chat_postMessage(
+            _post_with_retry(
                 channel=channel_id,
                 thread_ts=parent_ts,
                 text=_fallback_text(body, 300),
                 blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": body}}],
             )
         except SlackApiError as e:
-            print(f"[scheduler] chat.postMessage item {idx} failed: {e.response.get('error')}")
+            print(f"[scheduler] item {idx} failed: {e.response.get('error')}")
+
+def _post_with_retry(client, **kwargs):
+    """chat.postMessage with 429 handling + light jitter."""
+    attempts = 5
+    for i in range(attempts):
+        try:
+            return client.chat_postMessage(**kwargs)
+        except SlackApiError as e:
+            status = getattr(e.response, "status_code", None)
+            err = (e.response.get("error") if hasattr(e, "response") else None) or ""
+            if status == 429 or err in {"ratelimited", "rate_limited"}:
+                retry = int(e.response.headers.get("Retry-After", "1")) if hasattr(e, "response") else 1
+                sleep = retry + random.uniform(0, 0.5 * (i + 1))
+                time.sleep(sleep)
+                continue
+            raise
+
+           
