@@ -31,6 +31,10 @@ MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
 # Per-team dedupe memory
 REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
 RECENT_STORE    = os.getenv("PP_RECENT_STORE", "/opt/render/project/data/recent_posts.json")
+# Title style
+SIMPLE_TITLES       = os.getenv("PATCHPAL_SIMPLE_TITLES", "1").lower() in ("1","true","yes")
+SHOW_IDS_IN_TITLE   = os.getenv("PATCHPAL_SHOW_IDS", "0").lower() in ("1","true","yes")
+TITLE_MAX_CHARS     = int(os.getenv("PATCHPAL_TITLE_MAX", "90"))
 
 # --- Feeds -------------------------------------------------------------------
 BASE_FEEDS = [
@@ -331,6 +335,69 @@ def _enrich_epss(items: List[Dict[str,Any]]) -> None:
         except Exception:
             continue
 
+# --- Extra-simple title humanizer -------------------------------------------
+ZDI_ID_RE     = re.compile(r"\bZDI[-–—]?\s*\d{2,4}[-–—]?\d+\b", re.I)
+CVE_IN_TITLE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+
+def _clean_noise_segments(s: str) -> str:
+    s = re.sub(r"[_/\\]+", " ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" -–—,:;.")
+    return s
+
+def _guess_plain_label(text: str) -> str:
+    t = text or ""
+    if re.search(r"command injection", t, re.I):
+        return "lets attackers run code"
+    if re.search(r"\bremote code execution\b|\bRCE\b", t, re.I):
+        return "lets attackers run code"
+    if re.search(r"\b(privilege\s*(escalation|elevation))\b", t, re.I):
+        return "lets attackers gain extra access"
+    if re.search(r"\bauth(entication)?\s*bypass\b|login bypass", t, re.I):
+        return "lets attackers bypass login"
+    if re.search(r"\bdenial of service\b|\bDoS\b|\bcrash", t, re.I):
+        return "can crash or stop the service"
+    if re.search(r"\bsql injection\b", t, re.I):
+        return "lets attackers inject database commands"
+    if re.search(r"\bcross[- ]site scripting\b|\bXSS\b", t, re.I):
+        return "injects scripts into web pages"
+    if re.search(r"\b(info(?:rmation)? disclosure|data leak|exposure)\b", t, re.I):
+        return "can leak data"
+    return "security bug"
+
+def _product_guess(raw_title: str) -> str:
+    s = _clean_noise_segments(_strip_html(raw_title or ""))
+    # Prefer the left side of a colon; otherwise the first clause before a dash
+    if ":" in s:
+        s = s.split(":", 1)[0]
+    elif "—" in s or "-" in s:
+        s = re.split(r"[—-]", s, 1)[0]
+    # Trim obvious junk tokens
+    s = re.sub(r"\b(RCE|XSS|DoS|CVE-\d{4}-\d{4,7}|ZDI[-–—]?\d{2,4}-\d+)\b.*", "", s, flags=re.I)
+    return s.strip() or "This product"
+
+def _ids_from(raw_title: str) -> str:
+    parts = []
+    m1 = ZDI_ID_RE.search(raw_title or "")
+    m2 = CVE_IN_TITLE.search(raw_title or "")
+    if m1: parts.append(m1.group(0).upper().replace(" ", ""))
+    if m2: parts.append(m2.group(0).upper())
+    return " / ".join(dict.fromkeys(parts))  # de-dup while keeping order
+
+def _human_title_very_simple(raw_title: str, context: str = "") -> str:
+    """
+    Build: '<Product>: <plain label>' and optionally add ' — <IDs>'.
+    """
+    product = _product_guess(raw_title)
+    label   = _guess_plain_label((raw_title or "") + " " + (context or ""))
+    headline = f"{product}: {label}"
+    ids = _ids_from(raw_title)
+    if SHOW_IDS_IN_TITLE and ids:
+        headline = f"{headline} — {ids}"
+    # hard cap
+    if len(headline) > TITLE_MAX_CHARS:
+        headline = headline[:TITLE_MAX_CHARS-1].rstrip() + "…"
+    return headline
+
 def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     now = time.time()
@@ -598,10 +665,15 @@ def _summary_text(title: str, summary: str, *, tone: str) -> str:
     hard_cap = 420 if (tone or "simple") == "simple" else 800
     return (text[:hard_cap-1].rstrip()+"…") if len(text) > hard_cap else text
 
+def _humanize_title(s: str) -> str:
+    # safe fallback when SIMPLE_TITLES is disabled
+    return _tidy_title(s or "")
+
 def render_item_text(item: dict, idx: int, tone: str) -> str:
-    title = _tidy_title((item.get("title") or "").strip())
-    meta  = _meta_lines(item)
+    raw_t = _tidy_title((item.get("title") or "").strip())
     summary_src = item.get("summary") or item.get("content") or ""
+    title = _human_title_very_simple(raw_t, summary_src) if SIMPLE_TITLES else _humanize_title(raw_t)
+    meta  = _meta_lines(item)
     summary = _summary_text(title, summary_src, tone=(tone or "simple"))
     fix, verify = _build_actions(title, summary, tone or "simple")
     actions_lines = [f"{BULLET} {a}" for a in fix]
@@ -715,11 +787,14 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
 
     # vendor variety
     def _vendor_of(it: Dict[str,Any]) -> str:
-        t = _tokens(_text(it))
+        raw = (_text(it) or "").lower()
+        if "red hat" in raw: return "redhat"
+        if "palo alto" in raw: return "paloalto"
+        if "google chrome" in raw or "chrome" in raw: return "chrome"
         for v in ["microsoft","apple","google","adobe","citrix","git","cisco","vmware",
-                  "fortinet","oracle","ubuntu","debian","suse","red","mozilla","chrome",
-                  "f5","juniper","palo","netapp","jenkins","drupal"]:
-            if v in t:
+                "fortinet","oracle","ubuntu","debian","suse","mozilla","f5","juniper",
+                "netapp","jenkins","drupal","qnap","progress","atlassian"]:
+            if v in raw:
                 return v
         return "other"
 
@@ -754,15 +829,18 @@ def _fallback_text(md: str, limit: int = 300) -> str:
     return (s[:limit].rstrip() + "…") if len(s) > limit else s
 
 def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
-    from slack_sdk.web import WebClient  # lazy import
+    from slack_sdk.web import WebClient
+
     token = get_bot_token(team_id)
     if not token:
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-    # pass team_id so repeats are avoided here too
     ws_stub = type("W", (), {"team_id": team_id, "stack_mode":"universal", "stack_tokens":None})()
     items = topN_today(n=5, ws=ws_stub, team_id=team_id)
+
+    # ✅ Remember these so the next run doesn’t repeat them
+    mark_posted(team_id, items)
 
     hdr = client.chat_postMessage(
         channel=channel_id,
