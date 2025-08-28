@@ -1,241 +1,127 @@
-# patchpal/storage.py
+# patchpal/scheduler.py
 from __future__ import annotations
 
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+import pytz
+from slack_sdk import WebClient
 
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    Text,
-    text,
-    inspect,
-    UniqueConstraint,
-    func,
-)
-from sqlalchemy.orm import declarative_base, sessionmaker
+from .install_store import get_bot_token
+from .storage import SessionLocal, Workspace, PostLog
+from .selector import topN_today, render_item_text
 
-# ---------------------------------------------------------------------------
-# DB URL normalization (prefer psycopg v3 driver on Postgres)
-# ---------------------------------------------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///patchpal.db")
+DEF_TZ = "America/Boise"
 
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    if not (
-        DATABASE_URL.startswith("postgresql+psycopg://")
-        or DATABASE_URL.startswith("postgresql+psycopg2://")
-    ):
-        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql+psycopg2://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
-
-is_sqlite = DATABASE_URL.startswith("sqlite")
-
-# SQLite needs this arg; Postgres does not.
-connect_args = {"check_same_thread": False} if is_sqlite else {}
-
-_engine_kwargs = dict(
-    future=True,
-    pool_pre_ping=True,
-    connect_args=connect_args,
-)
-
-# Only QueuePool settings for non-SQLite
-if not is_sqlite:
-    _engine_kwargs.update(
-        pool_recycle=int(os.getenv("SQL_POOL_RECYCLE", "300")),
-        pool_size=int(os.getenv("SQL_POOL_SIZE", "5")),
-        max_overflow=int(os.getenv("SQL_MAX_OVERFLOW", "10")),
-        pool_use_lifo=True,
-    )
-
-engine = create_engine(DATABASE_URL, **_engine_kwargs)
-
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
-Base = declarative_base()
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-class Workspace(Base):
-    __tablename__ = "workspaces"
-
-    id = Column(Integer, primary_key=True)
-    team_id = Column(String, index=True, unique=True, nullable=False)
-    team_name = Column(String, nullable=True)
-
-    # posting prefs
-    tz = Column(String, default="America/Boise")
-    post_channel = Column(String, nullable=True)
-    post_time = Column(String, default="09:00")
-    tone = Column(String, default="simple")
-
-    # relevance controls
-    stack_mode = Column(String, default="universal")  # 'universal' | 'stack'
-    stack_tokens = Column(Text, nullable=True)        # csv e.g. "windows,ms365,chrome"
-    ignore_tokens = Column(Text, nullable=True)       # reserved for feedback buttons
-
-    # billing / trial
-    plan = Column(String, default="trial")            # 'trial' | 'pro' | 'canceled'
-    trial_ends_at = Column(DateTime, nullable=True)
-    paid_at = Column(DateTime, nullable=True)
-    subscription_id = Column(String, nullable=True)
-    customer_id = Column(String, nullable=True)       # for Stripe Portal
-
-    # contacts / nags
-    contact_user_id = Column(String, nullable=True)
-    last_billing_nag = Column(DateTime, nullable=True)
-    last_trial_warn = Column(DateTime, nullable=True)
-    last_payment_fail_nag = Column(DateTime, nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-class Installation(Base):
-    __tablename__ = "installations"
-    team_id = Column(String(64), primary_key=True)
-    team_name = Column(String(255))
-    bot_token = Column(Text, nullable=False)
-    bot_user  = Column(String(64))
-    scopes    = Column(Text)
-    installed_by_user_id = Column(String(64))
-    enterprise_id = Column(String(64))
-    installed_at = Column(DateTime, default=datetime.utcnow)
-    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-class PostLog(Base):
-    __tablename__ = "post_logs"
-    __table_args__ = (
-        UniqueConstraint("team_id", "post_date", name="uq_postlog_team_date"),
-    )
-
-    id = Column(Integer, primary_key=True)
-    team_id = Column(String, index=True, nullable=False)
-    post_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-class RecentPost(Base):
-    __tablename__ = "recent_posts"
-    team_id   = Column(String, primary_key=True)
-    item_key  = Column(String, primary_key=True)
-    # Cross-dialect default (Postgres/SQLite)
-    posted_at = Column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-
-# --- helpers ---
-
-def _dialect_name(bind) -> str:
+def should_post_now(tz_str: str | None, hhmm: str | None) -> bool:
+    """Return True exactly at HH:MM (workspace tz), Mon–Fri."""
     try:
-        return bind.dialect.name or ""
+        tz = pytz.timezone(tz_str or DEF_TZ)
     except Exception:
-        return ""
+        tz = pytz.timezone(DEF_TZ)
 
-def recent_keys(team_id: str, remember_days: int) -> set[str]:
-    """Return keys posted within the last `remember_days`, cross-dialect safe."""
-    if not team_id:
-        return set()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=remember_days)
+    now = datetime.now(tz)
+    try:
+        h, m = map(int, (hhmm or "09:00").split(":"))
+    except Exception:
+        h, m = 9, 0
+
+    return now.weekday() < 5 and now.hour == h and now.minute == m
+
+def _client_for(team_id: str) -> WebClient | None:
+    tok = get_bot_token(team_id)
+    return WebClient(token=tok) if tok else None
+
+def run_once(_unused_client: WebClient | None = None) -> None:
+    """One scheduler tick. Safe to run every minute; posts per-team with their own tokens."""
+    # Lazy import to avoid any import-time circular refs
+    from .billing import (
+        is_active,
+        ensure_trial,
+        dm_trial_or_checkout,
+        dm_trial_ending_soon,
+    )
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+
     with SessionLocal() as db:
-        rows = (
-            db.query(RecentPost.item_key)
-              .filter(RecentPost.team_id == team_id, RecentPost.posted_at >= cutoff)
-              .all()
-        )
-    return {r[0] for r in rows}
+        teams = db.query(Workspace).all()
 
-def remember_posts(team_id: str, item_keys: list[str]) -> None:
-    """Upsert recent posts; works on Postgres and SQLite; merge fallback otherwise."""
-    if not team_id or not item_keys:
-        return
-    with SessionLocal() as db:
-        bind = db.get_bind()
-        dname = _dialect_name(bind)
-        values = [{"team_id": team_id, "item_key": k} for k in item_keys]
+        for ws in teams:
+            # Ensure every workspace has a trial start date (idempotent)
+            try:
+                ensure_trial(ws, db)
+            except Exception:
+                pass
 
-        try:
-            if dname.startswith("postgres"):
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
-                stmt = pg_insert(RecentPost).values(values).on_conflict_do_update(
-                    index_elements=[RecentPost.team_id, RecentPost.item_key],
-                    set_={"posted_at": func.current_timestamp()},
+            client = _client_for(ws.team_id)
+
+            # Best-effort pre-expiry reminder (3 days prior)
+            try:
+                if client:
+                    dm_trial_ending_soon(client, ws)
+            except Exception:
+                pass
+
+            # Only at configured time on weekdays and if a channel is set
+            if not (ws.post_channel and should_post_now(ws.tz, ws.post_time)):
+                continue
+
+            # One post per team per day
+            if db.query(PostLog).filter_by(team_id=ws.team_id, post_date=today).first():
+                continue
+
+            # Billing gate (pause + DM if inactive)
+            if not is_active(ws=ws):
+                try:
+                    if client:
+                        dm_trial_or_checkout(client, ws)
+                except Exception:
+                    pass
+                continue
+
+            if not client:
+                print(f"[scheduler] no token for team {ws.team_id}; skipping")
+                continue
+
+            # Build and post
+            items = topN_today(5, ws=ws, team_id=ws.team_id)
+            if not items:
+                continue
+
+            try:
+                hdr = client.chat_postMessage(
+                    channel=ws.post_channel,
+                    text="Today’s Top 5 Patches / CVEs",
+                    blocks=[{
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": "Today’s Top 5 Patches / CVEs", "emoji": True},
+                    }],
                 )
-                db.execute(stmt)
-            elif dname == "sqlite":
-                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-                stmt = sqlite_insert(RecentPost).values(values).on_conflict_do_update(
-                    index_elements=[RecentPost.team_id, RecentPost.item_key],
-                    set_={"posted_at": func.current_timestamp()},
+                parent_ts = hdr["ts"]
+
+                tone = ws.tone or "simple"
+                for i, it in enumerate(items, 1):
+                    txt = render_item_text(it, i, tone)
+                    client.chat_postMessage(
+                        channel=ws.post_channel,
+                        thread_ts=parent_ts,
+                        text=f"{i})",  # fallback
+                        blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": txt}}],
+                    )
+
+                client.chat_postMessage(
+                    channel=ws.post_channel,
+                    thread_ts=parent_ts,
+                    text="",
+                    blocks=[{
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "Auto-posted by PatchPal · by The Real Roundup"}],
+                    }],
                 )
-                db.execute(stmt)
-            else:
-                # Portable fallback
-                now = datetime.now(timezone.utc)
-                for k in item_keys:
-                    db.merge(RecentPost(team_id=team_id, item_key=k, posted_at=now))
-        finally:
-            db.commit()
 
-def delete_recent_for_team(team_id: str) -> None:
-    with SessionLocal() as db:
-        db.query(RecentPost).filter_by(team_id=team_id).delete(synchronize_session=False)
-        db.commit()
+                db.add(PostLog(team_id=ws.team_id, post_date=today))
+                db.commit()
 
-# ---------------------------------------------------------------------------
-# Create tables (do this here; remove the duplicate call in app.py)
-# ---------------------------------------------------------------------------
-Base.metadata.create_all(engine)
+            except Exception as e:
+                print(f"[scheduler] post failed for team {ws.team_id}: {e}")
 
-# ---------------------------------------------------------------------------
-# Tiny migrations (idempotent)
-# ---------------------------------------------------------------------------
-try:
-    insp = inspect(engine)
-    cols = {c["name"] for c in insp.get_columns("workspaces")}
-
-    with engine.begin() as conn:
-        # legacy columns (safe if already present)
-        if "tone" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN tone VARCHAR"))
-        if "plan" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN plan VARCHAR DEFAULT 'trial'"))
-        if "trial_ends_at" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN trial_ends_at TIMESTAMP NULL"))
-        if "paid_at" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN paid_at TIMESTAMP NULL"))
-        if "subscription_id" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN subscription_id VARCHAR NULL"))
-        if "customer_id" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN customer_id VARCHAR NULL"))
-        if "contact_user_id" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN contact_user_id VARCHAR NULL"))
-        if "last_billing_nag" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_billing_nag TIMESTAMP NULL"))
-        if "last_trial_warn" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_trial_warn TIMESTAMP NULL"))
-        if "last_payment_fail_nag" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN last_payment_fail_nag TIMESTAMP NULL"))
-
-        # NEW relevance fields
-        if "stack_mode" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN stack_mode VARCHAR DEFAULT 'universal'"))
-            conn.execute(text("UPDATE workspaces SET stack_mode='universal' WHERE stack_mode IS NULL"))
-        if "stack_tokens" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN stack_tokens TEXT NULL"))
-        if "ignore_tokens" not in cols:
-            conn.execute(text("ALTER TABLE workspaces ADD COLUMN ignore_tokens TEXT NULL"))
-
-        # Ensure uniqueness and helpful indexes
-        conn.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_postlog_team_date ON post_logs (team_id, post_date)")
-        )
-        conn.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_workspaces_team_id ON workspaces (team_id)")
-        )
-
-except Exception:
-    # don't block startup if ALTER/INDEX creation fails (first boot / transient states)
-    pass
+__all__ = ["run_once", "should_post_now"]
