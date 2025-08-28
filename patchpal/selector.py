@@ -3,26 +3,22 @@ from __future__ import annotations
 import os, sys, re, time, html, json, pathlib
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-from slack_sdk.errors import SlackApiError  # add near the top with other imports
+from slack_sdk.errors import SlackApiError
 import requests
 import feedparser
 from .storage import recent_keys as _db_recent_keys, remember_posts as _db_remember_posts
-# use DB-backed token store
 from .install_store import get_bot_token
 import random
-# --- import path (repo root) -------------------------------------------------
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # --- Tunables ---------------------------------------------------------------
 EPSS_THRESHOLD  = float(os.getenv("PATCHPAL_EPSS_THRESHOLD", "0.70"))
-FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))   # fresher pool by default
+FALLBACK_DAYS   = int(os.getenv("PATCHPAL_FALLBACK_DAYS", "3"))
 REQUEST_TIMEOUT = int(os.getenv("PATCHPAL_HTTP_TIMEOUT", "10"))
-CISA_KEV_URL    = os.getenv(
-    "PATCHPAL_KEV_URL",
-    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-)
+CISA_KEV_URL    = os.getenv("PATCHPAL_KEV_URL", "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json")
 AI_SUMMARY_ON   = os.getenv("PATCHPAL_AI_REWRITE", "0").lower() in ("1","true","yes")
 AI_MODEL        = os.getenv("PATCHPAL_AI_MODEL", "gpt-4o-mini")
 
@@ -33,80 +29,57 @@ MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
 REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
 
 # Caching & speed controls
-POOL_TTL_SEC    = int(os.getenv("PATCHPAL_POOL_TTL", "180"))  # reuse pool for ~3m
+POOL_TTL_SEC    = int(os.getenv("PATCHPAL_POOL_TTL", "180"))
 SKIP_EPSS       = os.getenv("PATCHPAL_SKIP_EPSS", "0").lower() in ("1", "true", "yes")
 
 # Title style
-SIMPLE_TITLES       = os.getenv("PATCHPAL_SIMPLE_TITLES", "1").lower() in ("1","true","yes")
-SHOW_IDS_IN_TITLE   = os.getenv("PATCHPAL_SHOW_IDS", "0").lower() in ("1","true","yes")
-TITLE_MAX_CHARS     = int(os.getenv("PATCHPAL_TITLE_MAX", "90"))
+SIMPLE_TITLES     = os.getenv("PATCHPAL_SIMPLE_TITLES", "1").lower() in ("1","true","yes")
+SHOW_IDS_IN_TITLE = os.getenv("PATCHPAL_SHOW_IDS", "0").lower() in ("1","true","yes")
+TITLE_MAX_CHARS   = int(os.getenv("PATCHPAL_TITLE_MAX", "90"))
 _POOL_CACHE: dict[tuple, tuple[float, List[Dict[str, Any]]]] = {}
 
 # --- Feeds -------------------------------------------------------------------
 BASE_FEEDS = [
-    # Browsers & OS vendors
     "https://chromereleases.googleblog.com/atom.xml",
     "https://www.mozilla.org/en-US/security/advisories/feed/",
     "https://helpx.adobe.com/security/atom.xml",
     "https://www.openssl.org/news/news.rss",
-
-    # Microsoft
     "https://msrc.microsoft.com/update-guide/rss",
     "https://msrc.microsoft.com/blog/feed/",
-
-    # Network & appliances PSIRTs
     "https://www.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml",
     "https://www.vmware.com/security/advisories.xml",
     "https://advisories.fortinet.com/rss.xml",
-    "https://support.f5.com/csp/article/k9997/feed",                 # F5
-    "https://support.citrix.com/security-bulletins/rss.xml",         # Citrix
-    "https://kb.juniper.net/Feed?channel=SECURITY_ADVISORIES",       # Juniper
-    "https://security.netapp.com/advisory/rss.xml",                  # NetApp
-    "https://security.paloaltonetworks.com/rss.xml",                 # Palo Alto Networks
-
-    # Cloud / platforms
+    "https://support.f5.com/csp/article/k9997/feed",
+    "https://support.citrix.com/security-bulletins/rss.xml",
+    "https://kb.juniper.net/Feed?channel=SECURITY_ADVISORIES",
+    "https://security.netapp.com/advisory/rss.xml",
+    "https://security.paloaltonetworks.com/rss.xml",
     "https://cloud.google.com/feeds/gcp-security-bulletins.xml",
     "https://aws.amazon.com/security/feed/",
     "https://about.gitlab.com/security/advisories.xml",
     "https://groups.google.com/forum/feed/kubernetes-announce/msgs/rss_v2_0.xml",
-
-    # Linux & distro security
-    "https://usn.ubuntu.com/rss.xml",                                # Ubuntu USN
-    "https://www.debian.org/security/dsa.rdf",                       # Debian DSA
-    "https://www.suse.com/support/update/announcement/rss/",         # SUSE
+    "https://usn.ubuntu.com/rss.xml",
+    "https://www.debian.org/security/dsa.rdf",
+    "https://www.suse.com/support/update/announcement/rss/",
     "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/latest.rss",
-    "https://access.redhat.com/hydra/rest/securitydata/cvrf.xml",    # Red Hat (CVRF index)
-
-    # Apps / ecosystems
+    "https://access.redhat.com/hydra/rest/securitydata/cvrf.xml",
     "https://www.jenkins.io/security/advisories/rss.xml",
     "https://www.drupal.org/security/rss.xml",
     "https://zerodayinitiative.com/rss/published/",
-
-    # Mobile / Oracle CPU
     "https://source.android.com/security/bulletin/atom.xml",
     "https://www.oracle.com/security-alerts/rss-notifications.xml",
-
-    # Gov alerts
     "https://www.cisa.gov/uscert/ncas/alerts.xml",
     "https://www.cisa.gov/uscert/ncas/current-activity.xml",
 ]
 EXTRA_FEEDS = [u.strip() for u in os.getenv("PATCHPAL_EXTRA_FEEDS", "").replace("\n"," ").split(" ") if u.strip()]
 FALLBACK_FEEDS = BASE_FEEDS + EXTRA_FEEDS
 
-# Drop pre-release noise unless explicitly allowed
 SKIP_PRE_RELEASE = os.getenv("PATCHPAL_INCLUDE_PRE_RELEASE", "0").lower() not in ("1","true","yes")
 NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I)
 
-# Drop think pieces (kept if clear CVE/patch signals)
 SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
-SIGNAL_RE = re.compile(
-    r"(CVE-\d{4}-\d{4,7}|\badvisory\b|\bsecurity (update|fix|bulletin|patch)\b|\bKB\d{6,}\b|update guide|msrc)",
-    re.I,
-)
-BLOGGY_RE = re.compile(
-    r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|bluehat)",
-    re.I,
-)
+SIGNAL_RE = re.compile(r"(CVE-\d{4}-\d{4,7}|\badvisory\b|\bsecurity (update|fix|bulletin|patch)\b|\bKB\d{6,}\b|update guide|msrc)", re.I)
+BLOGGY_RE = re.compile(r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|bluehat)", re.I)
 
 def _is_signal(title: str, summary: str, link: str, _source: str) -> bool:
     blob = " ".join([title or "", summary or "", link or ""])
@@ -165,6 +138,38 @@ def _alias_product(name: str) -> str:
             return v
     return name
 
+# --- Vendor labels for titles -----------------------------------------------
+VENDOR_LABELS = {
+    "palo alto networks": "Palo Alto Networks",
+    "red hat": "Red Hat",
+    "google chrome": "Google Chrome",
+    "microsoft": "Microsoft",
+    "apple": "Apple",
+    "google": "Google",
+    "ubuntu": "Ubuntu",
+    "debian": "Debian",
+    "suse": "SUSE",
+    "cisco": "Cisco",
+    "vmware": "VMware",
+    "fortinet": "Fortinet",
+    "citrix": "Citrix",
+    "juniper": "Juniper",
+    "netapp": "NetApp",
+    "oracle": "Oracle",
+    "jenkins": "Jenkins",
+    "drupal": "Drupal",
+    "openssl": "OpenSSL",
+    "zoom": "Zoom",
+    "android": "Android",
+}
+
+def _vendor_from_text(text: str) -> str:
+    t = (text or "").lower()
+    for key in sorted(VENDOR_LABELS.keys(), key=len, reverse=True):
+        if key in t:
+            return VENDOR_LABELS[key]
+    return ""
+
 # --- Shared regex / helpers --------------------------------------------------
 _WORDS   = re.compile(r"[A-Za-z0-9.+#/_-]+")
 _CVE_RE  = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
@@ -188,7 +193,6 @@ URL_FINDER_RE   = re.compile(r"https?://[^\s>]+'|https?://[^\s>]+")
 
 BULLET = "•"
 
-# ------------ html & text cleanup -------------
 def _strip_html(s: str | None) -> str:
     s = html.unescape((s or "").replace("\xa0", " "))
     s = BR_RE.sub("\n", s)
@@ -322,11 +326,7 @@ def _get_json(url: str) -> dict | None:
 
 def _parse_feed(url: str):
     try:
-        r = requests.get(
-            url,
-            timeout=REQUEST_TIMEOUT,
-            headers={"User-Agent": "PatchPal/1.0 (+https://therealroundup.com/patchpal)"},
-        )
+        r = requests.get(url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": "PatchPal/1.0 (+https://therealroundup.com/patchpal)"})
         if not r.ok:
             return {"entries": []}
         return feedparser.parse(r.content)
@@ -400,12 +400,10 @@ def _guess_plain_label(text: str) -> str:
 
 def _product_guess(raw_title: str) -> str:
     s = _clean_noise_segments(_strip_html(raw_title or ""))
-    # Prefer the left side of a colon; otherwise the first clause before a dash
     if ":" in s:
         s = s.split(":", 1)[0]
     elif "—" in s or "-" in s:
         s = re.split(r"[—-]", s, 1)[0]
-    # Trim obvious junk tokens
     s = re.sub(r"\b(RCE|XSS|DoS|CVE-\d{4}-\d{4,7}|ZDI[-–—]?\d{2,4}-\d+)\b.*", "", s, flags=re.I).strip()
     s = s or "This product"
     return _alias_product(s)
@@ -416,19 +414,24 @@ def _ids_from(raw_title: str) -> str:
     m2 = CVE_IN_TITLE.search(raw_title or "")
     if m1: parts.append(m1.group(0).upper().replace(" ", ""))
     if m2: parts.append(m2.group(0).upper())
-    return " / ".join(dict.fromkeys(parts))  # de-dup while keeping order
+    return " / ".join(dict.fromkeys(parts))
 
 def _human_title_very_simple(raw_title: str, context: str = "") -> str:
     """
-    Build: '<Product>: <plain label>' and optionally add ' — <IDs>'.
+    Build: '<Vendor> <Product>: <plain label>' and optionally add ' — <IDs>'.
     """
     product = _product_guess(raw_title)
     label   = _guess_plain_label((raw_title or "") + " " + (context or ""))
-    headline = f"{product}: {label}"
+    vendor  = _vendor_from_text((raw_title or "") + " " + (context or ""))
+
+    headline_prod = product
+    if vendor and vendor.lower() not in (product or "").lower():
+        headline_prod = f"{vendor} {product}"
+
+    headline = f"{headline_prod}: {label}"
     ids = _ids_from(raw_title)
     if SHOW_IDS_IN_TITLE and ids:
         headline = f"{headline} — {ids}"
-    # hard cap
     if len(headline) > TITLE_MAX_CHARS:
         headline = headline[:TITLE_MAX_CHARS-1].rstrip() + "…"
     return headline
@@ -438,14 +441,12 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     key = (days,)
     cached = _POOL_CACHE.get(key)
     if cached and (now - cached[0]) < POOL_TTL_SEC:
-        # Serve from cache (copy then slice so callers can mutate safely)
         return cached[1][:max_items]
 
     out: List[Dict[str, Any]] = []
     cutoff = now - days * 86400
     kev_set = _load_kev_set()
 
-    # ---- KEV (recent only) ----
     kev_json = _get_json(CISA_KEV_URL)
     if isinstance(kev_json, dict):
         for v in kev_json.get("vulnerabilities", []):
@@ -470,7 +471,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 "cve": cve,
             })
 
-    # ---- Vendor / ecosystem feeds ----
     for url in FALLBACK_FEEDS:
         feed = _parse_feed(url)
         for e in feed.get("entries", []):
@@ -513,7 +513,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
                 "cve": cves[0] if cves else None,
             })
 
-    # ---- De-dupe by CVE/title ----
     seen_cve, seen_title, uniq = set(), set(), []
     for it in out:
         cve = (it.get("cve") or "").upper()
@@ -532,7 +531,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
     _enrich_epss(uniq)
 
-    # ---- Collapse by product, prefer KEV/EPSS ----
     def _score(it: Dict[str, Any]) -> Tuple[int, float]:
         kev = 1 if it.get("kev") or it.get("known_exploited") else 0
         try:
@@ -551,7 +549,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     collapsed = list(by_product.values())
     collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
 
-    # Back-fill to capacity
     chosen = {_key_for(it) for it in collapsed}
     for it in uniq:
         k = _key_for(it)
@@ -562,7 +559,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
         if len(collapsed) >= max_items:
             break
 
-    # Save full collapsed list to cache (not just the slice)
     _POOL_CACHE[key] = (time.time(), collapsed)
     return collapsed[:max_items]
 
@@ -705,7 +701,6 @@ def _summary_text(title: str, summary: str, *, tone: str) -> str:
     return (text[:hard_cap-1].rstrip()+"…") if len(text) > hard_cap else text
 
 def _humanize_title(s: str) -> str:
-    # safe fallback when SIMPLE_TITLES is disabled
     return _tidy_title(s or "")
 
 def render_item_text(item: dict, idx: int, tone: str) -> str:
@@ -761,8 +756,6 @@ def pick_top_candidates(pool: List[Dict[str, Any]], n: int, ws) -> List[Dict[str
     return out[:n]
 
 # --- Recently posted memory (per team) ---------------------------------------
-
-# --- Recently posted memory (per team) ---------------------------------------
 def _recent_keys(team_id: str | None) -> set[str]:
     return _db_recent_keys(team_id or "", REMEMBER_DAYS) if team_id else set()
 
@@ -777,7 +770,6 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
     if len(pool) < n:
         pool = build_fallback_pool(max_items=300, days=FALLBACK_DAYS * 2)
 
-    # dedupe by team memory
     tid = team_id or (getattr(ws, "team_id", None) if ws else None)
     seen = _recent_keys(tid) if tid else set()
     pool2 = [it for it in pool if str(_key_for(it)) not in seen] or pool
@@ -792,8 +784,8 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
         if "palo alto" in raw: return "paloalto"
         if "google chrome" in raw or "chrome" in raw: return "chrome"
         for v in ["microsoft","apple","google","adobe","citrix","git","cisco","vmware",
-                "fortinet","oracle","ubuntu","debian","suse","mozilla","f5","juniper",
-                "netapp","jenkins","drupal","qnap","progress","atlassian"]:
+                  "fortinet","oracle","ubuntu","debian","suse","mozilla","f5","juniper",
+                  "netapp","jenkins","drupal","qnap","progress","atlassian"]:
             if v in raw:
                 return v
         return "other"
@@ -812,9 +804,20 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
             break
         variety.append(it)
 
+    # --- NEW: final backfill to guarantee n items ---------------------------
+    if len(variety) < n:
+        have = {_key_for(x) for x in variety}
+        for it in pool2:
+            k = _key_for(it)
+            if k in have:
+                continue
+            variety.append(it)
+            have.add(k)
+            if len(variety) >= n:
+                break
+
     return variety[:n]
 
-# --- Posting helper ----------------------------------------------------------
 # --- Posting helper ----------------------------------------------------------
 _LINK_RE = re.compile(r"<([^>|]+)\|([^>]+)>")
 _TAG_RE  = re.compile(r"<[@#!][^>]+>")
@@ -836,7 +839,6 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-    # 0) Sanity: token belongs to this team
     try:
         auth = client.auth_test()
         if auth.get("team_id") != team_id:
@@ -846,7 +848,6 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         print(f"[scheduler] auth.test failed: {e.response.get('error')}")
         return
 
-    # 1) Channel existence + membership
     try:
         info = client.conversations_info(channel=channel_id)
     except SlackApiError as e:
@@ -863,24 +864,20 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
 
     if not is_member:
         if is_private:
-            # cannot auto-join private channels
             print(f"[scheduler] not a member of private channel {channel_id} — invite the app")
             return
-        # public: try to join
         try:
             client.conversations_join(channel=channel_id)
         except SlackApiError as e:
             print(f"[scheduler] join failed for {channel_id}: {e.response.get('error')}")
             return
 
-    # 2) Build items (de-duped per team)
     ws_stub = type("W", (), {"team_id": team_id, "stack_mode": "universal", "stack_tokens": None})()
     items = topN_today(n=5, ws=ws_stub, team_id=team_id)
     if not items:
         print(f"[scheduler] no items to post for {team_id}")
         return
 
-    # 3) Post header (rate-limit safe)
     try:
         hdr = _post_with_retry(
             client,
@@ -897,7 +894,6 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
 
     parent_ts = hdr["ts"]
 
-    # 4) Post each item as a thread reply (rate-limit safe)
     for idx, it in enumerate(items, 1):
         body = render_item_text(it, idx, tone) or f"{idx}) (no details)"
         try:
@@ -911,11 +907,9 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         except SlackApiError as e:
             print(f"[scheduler] item {idx} failed: {e.response.get('error')}")
 
-    # mark items as posted only after we successfully post the header & loop
     mark_posted(team_id, items)
 
 def _post_with_retry(client, **kwargs):
-    """chat.postMessage with 429 handling + light jitter."""
     attempts = 5
     for i in range(attempts):
         try:
@@ -929,5 +923,3 @@ def _post_with_retry(client, **kwargs):
                 time.sleep(sleep)
                 continue
             raise
-
-           
