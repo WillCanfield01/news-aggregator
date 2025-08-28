@@ -796,6 +796,7 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
     return variety[:n]
 
 # --- Posting helper ----------------------------------------------------------
+# --- Posting helper ----------------------------------------------------------
 _LINK_RE = re.compile(r"<([^>|]+)\|([^>]+)>")
 _TAG_RE  = re.compile(r"<[@#!][^>]+>")
 _FMT_RE  = re.compile(r"[*_`~]")
@@ -816,7 +817,7 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         raise RuntimeError(f"No installation found for team {team_id}")
     client = WebClient(token=token)
 
-     # 0) Sanity: token belongs to this team
+    # 0) Sanity: token belongs to this team
     try:
         auth = client.auth_test()
         if auth.get("team_id") != team_id:
@@ -825,15 +826,13 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
     except SlackApiError as e:
         print(f"[scheduler] auth.test failed: {e.response.get('error')}")
         return
- 
-     # 1) Channel existence + membership
+
+    # 1) Channel existence + membership
     try:
-         info = client.conversations_info(channel=channel_id)
+        info = client.conversations_info(channel=channel_id)
     except SlackApiError as e:
         print(f"[scheduler] conversations.info failed for {channel_id}: {e.response.get('error')}")
         return
- 
-    ch = info.get("channel") or {}
 
     ch = info.get("channel") or {}
     if ch.get("is_archived"):
@@ -855,13 +854,12 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
             print(f"[scheduler] join failed for {channel_id}: {e.response.get('error')}")
             return
 
-    # 2) Build items (de-duped per team) and remember them to avoid repeats
+    # 2) Build items (de-duped per team)
     ws_stub = type("W", (), {"team_id": team_id, "stack_mode": "universal", "stack_tokens": None})()
     items = topN_today(n=5, ws=ws_stub, team_id=team_id)
     if not items:
         print(f"[scheduler] no items to post for {team_id}")
         return
-    mark_posted(team_id, items)
 
     # 3) Post header (rate-limit safe)
     try:
@@ -885,6 +883,7 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
         body = render_item_text(it, idx, tone) or f"{idx}) (no details)"
         try:
             _post_with_retry(
+                client,
                 channel=channel_id,
                 thread_ts=parent_ts,
                 text=_fallback_text(body, 300),
@@ -892,6 +891,9 @@ def post_daily_digest(team_id: str, channel_id: str, tone: str = "simple"):
             )
         except SlackApiError as e:
             print(f"[scheduler] item {idx} failed: {e.response.get('error')}")
+
+    # mark items as posted only after we successfully post the header & loop
+    mark_posted(team_id, items)
 
 def _post_with_retry(client, **kwargs):
     """chat.postMessage with 429 handling + light jitter."""

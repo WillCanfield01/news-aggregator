@@ -39,8 +39,12 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,
     future=True,
+    pool_pre_ping=True,                      # already there, keep it
+    pool_recycle=int(os.getenv("SQL_POOL_RECYCLE", "300")),  # refresh idle conns ~5m
+    pool_size=int(os.getenv("SQL_POOL_SIZE", "5")),
+    max_overflow=int(os.getenv("SQL_MAX_OVERFLOW", "10")),
+    pool_use_lifo=True,
     connect_args=connect_args,
 )
 
