@@ -31,10 +31,16 @@ MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
 
 # Per-team dedupe memory
 REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
+
+# Caching & speed controls
+POOL_TTL_SEC    = int(os.getenv("PATCHPAL_POOL_TTL", "180"))  # reuse pool for ~3m
+SKIP_EPSS       = os.getenv("PATCHPAL_SKIP_EPSS", "0").lower() in ("1", "true", "yes")
+
 # Title style
 SIMPLE_TITLES       = os.getenv("PATCHPAL_SIMPLE_TITLES", "1").lower() in ("1","true","yes")
 SHOW_IDS_IN_TITLE   = os.getenv("PATCHPAL_SHOW_IDS", "0").lower() in ("1","true","yes")
 TITLE_MAX_CHARS     = int(os.getenv("PATCHPAL_TITLE_MAX", "90"))
+_POOL_CACHE: dict[tuple, tuple[float, List[Dict[str, Any]]]] = {}
 
 # --- Feeds -------------------------------------------------------------------
 BASE_FEEDS = [
@@ -316,7 +322,14 @@ def _get_json(url: str) -> dict | None:
 
 def _parse_feed(url: str):
     try:
-        return feedparser.parse(url)
+        r = requests.get(
+            url,
+            timeout=REQUEST_TIMEOUT,
+            headers={"User-Agent": "PatchPal/1.0 (+https://therealroundup.com/patchpal)"},
+        )
+        if not r.ok:
+            return {"entries": []}
+        return feedparser.parse(r.content)
     except Exception:
         return {"entries": []}
 
@@ -331,6 +344,8 @@ def _load_kev_set() -> set[str]:
     return kev_set
 
 def _enrich_epss(items: List[Dict[str,Any]]) -> None:
+    if SKIP_EPSS:
+        return
     cves, seen = [], set()
     for it in items:
         for c in _extract_cves(it.get("title",""), it.get("summary","")):
@@ -419,10 +434,15 @@ def _human_title_very_simple(raw_title: str, context: str = "") -> str:
     return headline
 
 def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
     now = time.time()
-    cutoff = now - days * 86400
+    key = (days,)
+    cached = _POOL_CACHE.get(key)
+    if cached and (now - cached[0]) < POOL_TTL_SEC:
+        # Serve from cache (copy then slice so callers can mutate safely)
+        return cached[1][:max_items]
 
+    out: List[Dict[str, Any]] = []
+    cutoff = now - days * 86400
     kev_set = _load_kev_set()
 
     # ---- KEV (recent only) ----
@@ -454,7 +474,6 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
     for url in FALLBACK_FEEDS:
         feed = _parse_feed(url)
         for e in feed.get("entries", []):
-            # timestamp
             try:
                 updated = e.get("updated_parsed") or e.get("published_parsed") or e.get("created_parsed")
                 ts = time.mktime(updated) if updated else now
@@ -463,10 +482,8 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
             if ts < cutoff:
                 continue
 
-            # title
             title = _tidy_title(_strip_html(str(e.get("title") or "").strip())) or "(untitled)"
 
-            # body (always defined)
             entry_summary = ""
             try:
                 content = e.get("content")
@@ -526,10 +543,10 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
 
     by_product: Dict[str, Dict[str, Any]] = {}
     for it in uniq:
-        key = _product_key(it)
-        cur = by_product.get(key)
+        key_prod = _product_key(it)
+        cur = by_product.get(key_prod)
         if cur is None or _score(it) > _score(cur):
-            by_product[key] = it
+            by_product[key_prod] = it
 
     collapsed = list(by_product.values())
     collapsed.sort(key=lambda it: (_score(it), (it.get("title") or "")), reverse=True)
@@ -545,6 +562,8 @@ def build_fallback_pool(max_items: int = 300, days: int = FALLBACK_DAYS) -> List
         if len(collapsed) >= max_items:
             break
 
+    # Save full collapsed list to cache (not just the slice)
+    _POOL_CACHE[key] = (time.time(), collapsed)
     return collapsed[:max_items]
 
 # --- AI (summary-only) -------------------------------------------------------
