@@ -656,7 +656,6 @@ def build_archetype_mix(rng: random.Random) -> List[str]:
     rng.shuffle(pool)
     return pool[:3]
 
-
 def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
     mix = build_archetype_mix(rng)
     pack: List[Puzzle] = []
@@ -670,15 +669,18 @@ def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
             pack.append(gen_vigenere(rng, pid, blacklist))
         elif archetype == "numeric_lock":
             pack.append(gen_numeric_lock(rng, pid))
-    return pack
 
+    # Absolute safety: never return empty
+    if not pack:
+        pack = [gen_numeric_lock(rng, "pz_1")]
+    return pack
 
 def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
     blob = llm_wrap_story_and_clues(algo_pack, date_key)
-    if blob is None:
+    # If LLM not available or returned malformed/empty structure, use offline
+    if not isinstance(blob, dict) or not isinstance(blob.get("puzzles"), list) or not blob["puzzles"]:
         blob = offline_wrap(algo_pack, date_key, rng)
     return blob
-
 
 def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
     seed = daily_seed(date_key, server_secret)
@@ -694,6 +696,11 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
     pack = build_algorithmic_pack(rng, blacklist)
     room = compose_room(pack, date_key, rng)
 
+    # Final guard: if anything upstream produced an empty puzzles list, force offline
+    if not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
+        room = offline_wrap(pack, date_key, rng)
+
+    # ---- rest of your function unchanged below ----
     end_id = room.get("graph", {}).get("end")
     node_ids = {n.get("id") for n in room.get("graph", {}).get("nodes", [])}
     puzzle_ids = [p["id"] for p in room.get("puzzles", [])]
@@ -720,7 +727,6 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
     room = llm_critic_patch(room)
     room = validate_room(room)
     return room
-
 
 # ---------- Public API: ensure/caching ----------
 
