@@ -794,34 +794,46 @@ def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
 
 # ---------- Scheduler hook ----------
 
+# in app/escape/core.py
+
 _scheduler_started = False
 
 def schedule_daily_generation(app) -> None:
     """Start APScheduler to generate the daily room just after local midnight."""
     global _scheduler_started
     if _scheduler_started:
-        current_app.logger.info("[escape] scheduler already started; skipping.")
+        # Use app.logger (safe outside app context)
+        try:
+            app.logger.info("[escape] scheduler already started; skipping.")
+        except Exception:
+            pass
         return
     _scheduler_started = True
 
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
     except Exception as e:
-        current_app.logger.warning(f"[escape] APScheduler not available: {e}")
+        try:
+            app.logger.warning(f"[escape] APScheduler not available: {e}")
+        except Exception:
+            pass
         return
 
     tz = pytz.timezone(TIMEZONE)
     scheduler = BackgroundScheduler(timezone=tz)
 
     def job():
+        # Push an app context for any DB/current_app usage
         with app.app_context():
             date_key = get_today_key()
             try:
                 ensure_daily_room(date_key)
-                current_app.logger.info(f"[escape] Daily room generated for {date_key}")
+                app.logger.info(f"[escape] Daily room generated for {date_key}")
             except Exception as e:
-                current_app.logger.error(f"[escape] Daily generation failed for {date_key}: {e}")
+                app.logger.error(f"[escape] Daily generation failed for {date_key}: {e}")
 
+    # Run at 00:05 local time
     scheduler.add_job(job, "cron", hour=0, minute=5, id="escape_daily_gen", replace_existing=True)
     scheduler.start()
-    current_app.logger.info("[escape] scheduler started (daily 00:05 local).")
+    app.logger.info("[escape] scheduler started (daily 00:05 local).")
+
