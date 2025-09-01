@@ -10,7 +10,7 @@ from flask import Blueprint, render_template, jsonify
 from markdown2 import markdown
 from unidecode import unidecode
 from app.models import CommunityArticle
-from app import db
+from app.extensions import db
 from rapidfuzz import fuzz
 import feedparser
 from urllib.parse import urlparse
