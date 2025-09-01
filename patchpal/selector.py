@@ -80,6 +80,14 @@ NOISY_TITLES = re.compile(r"\b(dev|beta|canary|nightly|insider|preview)\b", re.I
 SKIP_LOW_SIGNAL = os.getenv("PATCHPAL_SKIP_LOW_SIGNAL", "1").lower() not in ("0","false","no")
 SIGNAL_RE = re.compile(r"(CVE-\d{4}-\d{4,7}|\badvisory\b|\bsecurity (update|fix|bulletin|patch)\b|\bKB\d{6,}\b|update guide|msrc)", re.I)
 BLOGGY_RE = re.compile(r"(securing the ecosystem|best practices|what we learned|case study|our approach|defense in depth|bluehat)", re.I)
+ADVISORY_PREFIX_RE = re.compile(
+    r'^\s*(USN|DSA|RHSA|GLSA|ALSA|ELSA|GHSA|SSA|ZDI|CVE|KBA|KB|MSRC)[- ]?\d',
+    re.I,
+)
+TRAILING_JUNK_RE = re.compile(
+    r'\b(security (notice|notices|bulletin|advisory|advisories)|vulnerabilit(?:y|ies)|update|updates)\b',
+    re.I,
+)
 
 def _is_signal(title: str, summary: str, link: str, _source: str) -> bool:
     blob = " ".join([title or "", summary or "", link or ""])
@@ -258,6 +266,16 @@ def _tokens(s: str) -> set[str]:
 def _product_key(item: Dict[str, Any]) -> str:
     t = _text(item)
     title = (item.get("title") or "").lower()
+
+    # Collapse distro Linux-kernel variants (OEM/FIPS/RPi/etc.) into one key
+    if ("ubuntu" in t and "linux kernel" in t) or ("usn-" in title and "linux kernel" in t):
+        return "ubuntu-linux-kernel"
+    if "debian" in t and "linux kernel" in t:
+        return "debian-linux-kernel"
+    if ("red hat" in t or "rhel" in t) and "kernel" in t:
+        return "redhat-linux-kernel"
+
+    # Existing special cases
     if "citrix" in t and "session recording" in t:
         return "citrix-session-recording"
     if "google" in t and "chrome" in t:
@@ -266,6 +284,7 @@ def _product_key(item: Dict[str, Any]) -> str:
         return "apple-ecosystem"
     if "git " in (" " + t) or title.startswith("git "):
         return "git-core"
+
     return _normalize_title_for_key(item.get("title") or "")
 
 def _extract_cves(*chunks: str) -> list[str]:
@@ -400,13 +419,25 @@ def _guess_plain_label(text: str) -> str:
 
 def _product_guess(raw_title: str) -> str:
     s = _clean_noise_segments(_strip_html(raw_title or ""))
+
+    # If left of the colon looks like an advisory id (USN/DSA/RHSA/etc),
+    # prefer the right side; otherwise use the left side.
     if ":" in s:
-        s = s.split(":", 1)[0]
-    elif "—" in s or "-" in s:
-        s = re.split(r"[—-]", s, 1)[0]
-    s = re.sub(r"\b(RCE|XSS|DoS|CVE-\d{4}-\d{4,7}|ZDI[-–—]?\d{2,4}-\d+)\b.*", "", s, flags=re.I).strip()
-    s = s or "This product"
-    return _alias_product(s)
+        left, right = s.split(":", 1)
+        use = right if ADVISORY_PREFIX_RE.search(left.strip()) else left
+    else:
+        use = s
+
+    # Prefer first clause before a long dash
+    if "—" in use or "-" in use:
+        use = re.split(r"[—-]", use, 1)[0]
+
+    # Trim generic trailing words
+    use = TRAILING_JUNK_RE.sub("", use).strip()
+    # Drop noisy tokens
+    use = re.sub(r"\b(RCE|XSS|DoS|CVE-\d{4}-\d{4,7}|ZDI[-–—]?\d{2,4}-\d+)\b.*", "", use, flags=re.I).strip()
+    use = use or "This product"
+    return _alias_product(use)
 
 def _ids_from(raw_title: str) -> str:
     parts = []
@@ -791,30 +822,47 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
         return "other"
 
     counts: Dict[str,int] = {}
+    family_seen: set[str] = set()
     variety: List[Dict[str,Any]] = []
     extras: List[Dict[str,Any]] = []
+
     for it in picks:
+        fam = _product_key(it)
         v = _vendor_of(it)
-        if counts.get(v,0) < MAX_PER_VENDOR:
-            variety.append(it); counts[v] = counts.get(v,0)+1
-        else:
+        if fam in family_seen or counts.get(v, 0) >= MAX_PER_VENDOR:
             extras.append(it)
+            continue
+        variety.append(it)
+        family_seen.add(fam)
+        counts[v] = counts.get(v, 0) + 1
+
+    # Prefer extras that introduce a new family first
     for it in extras:
         if len(variety) >= n:
             break
+        fam = _product_key(it)
+        if fam in family_seen:
+            continue
+        v = _vendor_of(it)
+        if counts.get(v, 0) >= MAX_PER_VENDOR:
+            continue
         variety.append(it)
+        family_seen.add(fam)
+        counts[v] = counts.get(v, 0) + 1
 
-    # --- NEW: final backfill to guarantee n items ---------------------------
+    # Final backfill to guarantee N, still avoiding family dupes when possible
     if len(variety) < n:
-        have = {_key_for(x) for x in variety}
+        have_keys = {_key_for(x) for x in variety}
         for it in pool2:
-            k = _key_for(it)
-            if k in have:
-                continue
-            variety.append(it)
-            have.add(k)
             if len(variety) >= n:
                 break
+            k = _key_for(it)
+            fam = _product_key(it)
+            if k in have_keys or fam in family_seen:
+                continue
+            variety.append(it)
+            have_keys.add(k)
+            family_seen.add(fam)
 
     return variety[:n]
 
