@@ -1,0 +1,764 @@
+<!-- app/templates/escape/play.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Mini Escape — {{ date_key }} ({{ difficulty|default('medium')|title }})</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root {
+            --bg: #0f1220;
+            --panel: #151a2f;
+            --panel-2: #101527;
+            --text: #e6eaf6;
+            --muted: #9aa3c7;
+            --brand: #58bbff;
+            --ok: #55d38e;
+            --warn: #ffd166;
+            --err: #ff6b6b;
+            --shadow: rgba(0, 0, 0, .35);
+            --radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            height: 100%
+        }
+
+        body {
+            margin: 0;
+            background: radial-gradient(1200px 900px at 10% 0%, #121735 0%, #0f1220 50%, #0b0f1c 100%);
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+            line-height: 1.45;
+        }
+
+        a {
+            color: var(--brand);
+            text-decoration: none
+        }
+
+        a:hover {
+            text-decoration: underline
+        }
+
+        .wrap {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 24px 16px 80px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .title {
+            font-size: clamp(20px, 3.2vw, 28px);
+            font-weight: 800;
+            letter-spacing: .2px;
+        }
+
+        .meta {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #172042, #121a38);
+            border: 1px solid #26325f;
+            color: #b6c4ff;
+        }
+
+        .timer {
+            margin-left: auto;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            letter-spacing: .3px;
+            background: linear-gradient(180deg, #172042, #121a38);
+            border: 1px solid #26325f;
+            border-radius: 12px;
+            padding: 8px 12px;
+        }
+
+        .intro {
+            background: linear-gradient(180deg, #151a2f, #11162a);
+            border: 1px solid #24305b;
+            border-radius: var(--radius);
+            box-shadow: 0 10px 30px var(--shadow);
+            padding: 16px 16px;
+            margin: 12px 0 18px;
+        }
+
+        .pane {
+            background: linear-gradient(180deg, #141a30, #0f1427);
+            border: 1px solid #232e57;
+            border-radius: var(--radius);
+            box-shadow: 0 10px 30px var(--shadow);
+            overflow: hidden;
+        }
+
+        .puzzles {
+            padding: 8px;
+            display: grid;
+            gap: 12px;
+        }
+
+        .puzzle {
+            background: linear-gradient(180deg, #101527, #0d1120);
+            border: 1px solid #1f284b;
+            border-radius: 12px;
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+            position: relative;
+        }
+
+        .puzzle.solved {
+            border-color: #2a805d;
+            background: linear-gradient(180deg, #0f1b20, #0b161b)
+        }
+
+        .puzzle-head {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .p-title {
+            font-weight: 700
+        }
+
+        .p-arch {
+            color: #9fb0ff;
+            font-size: 12px;
+            letter-spacing: .3px;
+            text-transform: uppercase
+        }
+
+        .p-prompt {
+            color: #dce4ff;
+            white-space: pre-wrap
+        }
+
+        .p-paraphrase {
+            color: #a8b3df;
+            font-size: 13px
+        }
+
+        .p-hints {
+            color: #bfc7e6;
+            font-size: 13px;
+            display: grid;
+            gap: 6px;
+        }
+
+        .hint-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+            background: #0f1730;
+            border: 1px dashed #2a3769;
+            color: #a9b4e6;
+            padding: 6px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+            width: max-content;
+        }
+
+        .hint-pill[disabled] {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .hint-text {
+            background: #0c1428;
+            border: 1px solid #25305a;
+            padding: 8px 10px;
+            border-radius: 10px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            background: #0b1226;
+            border: 1px solid #24305b;
+            color: var(--text);
+            border-radius: 10px;
+            padding: 10px 12px;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: #4a69d8;
+            box-shadow: 0 0 0 3px rgba(74, 105, 216, .2)
+        }
+
+        button {
+            background: linear-gradient(180deg, #1c2a4e, #152244);
+            border: 1px solid #2a3c73;
+            color: #cfe3ff;
+            font-weight: 700;
+            letter-spacing: .2px;
+            border-radius: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            filter: brightness(1.06)
+        }
+
+        button:active {
+            transform: translateY(1px)
+        }
+
+        .status {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .status.ok {
+            color: var(--ok)
+        }
+
+        .status.err {
+            color: var(--err)
+        }
+
+        .footer {
+            margin-top: 16px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            background: linear-gradient(180deg, #161d36, #11182d);
+            border: 1px solid #25305b;
+            border-radius: var(--radius);
+        }
+
+        .final-gate {
+            display: grid;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .share {
+            margin-top: 12px;
+            padding: 12px;
+            border: 1px dashed #2a3769;
+            border-radius: 12px;
+            color: #b6c4ff;
+            display: none;
+        }
+
+        .share.show {
+            display: block
+        }
+
+        .copy-btn {
+            background: #0f2038;
+            border-color: #27406f
+        }
+
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(7, 10, 18, .6);
+            backdrop-filter: blur(6px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+
+        .start-card {
+            width: min(680px, 92vw);
+            background: linear-gradient(180deg, #141a30, #0f1427);
+            border: 1px solid #24305b;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 20px 60px var(--shadow);
+            display: grid;
+            gap: 12px;
+            text-align: center;
+        }
+
+        .start-title {
+            font-size: 22px;
+            font-weight: 800
+        }
+
+        .start-sub {
+            color: #b6c4ff
+        }
+
+        .start-btn {
+            font-size: 16px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: linear-gradient(180deg, #1b7bc0, #175f95);
+            border-color: #2f8bd5
+        }
+
+        .hidden {
+            display: none !important
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #0e182e;
+            color: #dce4ff;
+            border: 1px solid #2c3a69;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px var(--shadow);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: .2s ease;
+            z-index: 60;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0)
+        }
+
+        .kbd {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            background: #0b1226;
+            border: 1px solid #26325f;
+            padding: 2px 6px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="overlay" class="overlay">
+        <div class="start-card">
+            <div class="start-title">Mini Escape — Daily Room</div>
+            <div class="start-sub">Solve the puzzles as fast as you can. Hints unlock after <span class="kbd">60s</span>
+                and <span class="kbd">120s</span>. Submit correct answers to progress. When all puzzles are solved,
+                enter the Final Code (if present) and finish to post your time.</div>
+            <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                <button id="startBtn" class="start-btn">Start Today’s Escape</button>
+                <a class="badge" href="/escape/leaderboard" target="_blank" rel="noopener">View Leaderboard</a>
+            </div>
+            <div class="start-sub" style="font-size:12px; opacity:.8;">Date: <span id="startDate">{{ date_key }}</span>
+                • Difficulty: {{ difficulty|default('medium')|title }}</div>
+        </div>
+    </div>
+
+    <div class="wrap">
+        <header>
+            <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
+            <div class="meta">
+                <span class="badge">Difficulty: <strong id="difficulty">{{ difficulty|default('medium')|title
+                        }}</strong></span>
+                <span class="badge" id="puzzleCount">Puzzles: —</span>
+            </div>
+            <div class="timer" id="timer">00:00.000</div>
+        </header>
+
+        <section class="intro">
+            <div id="roomTitle" style="font-weight:800; margin-bottom:6px;">Loading…</div>
+            <div id="roomIntro" style="color:#c8d4ff;">Please wait…</div>
+        </section>
+
+        <section class="pane">
+            <div id="puzzles" class="puzzles"></div>
+        </section>
+
+        <section class="footer">
+            <div id="finalGate" class="final-gate hidden">
+                <div><strong>Final Code</strong> — Combine what you’ve learned.</div>
+                <div class="input-row">
+                    <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
+                    <button id="finishBtn">Finish & Submit Time</button>
+                </div>
+                <div id="finalStatus" class="status"></div>
+            </div>
+
+            <div id="share" class="share">
+                <div id="shareText">Share your time!</div>
+                <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                    <button class="copy-btn" id="copyBtn">Copy Result</button>
+                    <a id="tweetLink" target="_blank" rel="noopener">
+                        <button>Post on X</button>
+                    </a>
+                    <a href="/escape/leaderboard" target="_blank" rel="noopener">
+                        <button>View Leaderboard</button>
+                    </a>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="toast" class="toast">Saved</div>
+
+    <script>
+        // ----------- State -----------
+        const state = {
+            dateKey: "{{ date_key }}",
+            difficulty: "{{ difficulty|default('medium') }}",
+            startedMs: null,
+            tickHandle: null,
+            room: null,
+            puzzles: [], // {id, archetype, prompt, paraphrases, hints, solved, inputEl, statusEl}
+            solvedCount: 0,
+            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
+            finalRequired: false,
+            finalUnlocked: false,
+            finished: false,
+        };
+
+        // Allow ?date=YYYY-MM-DD to preview a specific day (if exists)
+        const urlParams = new URLSearchParams(window.location.search);
+        const paramDate = urlParams.get("date");
+        if (paramDate) state.dateKey = paramDate;
+
+        // ----------- Helpers -----------
+        const $ = (id) => document.getElementById(id);
+        function fmtTime(ms) {
+            const m = Math.floor(ms / 60000);
+            const s = Math.floor((ms % 60000) / 1000);
+            const ms3 = String(ms % 1000).padStart(3, "0");
+            return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
+        }
+        function toast(msg) {
+            const t = $("toast");
+            t.textContent = msg;
+            t.classList.add("show");
+            setTimeout(() => t.classList.remove("show"), 1800);
+        }
+        function randomPick(arr, fallback = "") {
+            if (!arr || !arr.length) return fallback;
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        // ----------- Fetch room -----------
+        async function fetchRoom() {
+            const qs = state.dateKey ? `?date=${encodeURIComponent(state.dateKey)}` : "";
+            const res = await fetch(`/escape/api/today${qs}`, { cache: "no-store" });
+            if (!res.ok) throw new Error("Failed to load room");
+            const room = await res.json();
+
+            // Update UI header
+            $("dateKey").textContent = state.dateKey;
+            $("difficulty").textContent = (room.difficulty || state.difficulty || "medium").toString().toUpperCase().slice(0, 1) + (room.difficulty || state.difficulty || "medium").toString().slice(1);
+            state.hintPolicy = room.server_hint_policy || state.hintPolicy;
+
+            // Set intro
+            $("roomTitle").textContent = room.title || "Today's Room";
+            $("roomIntro").textContent = room.intro || "";
+
+            // Prepare puzzles
+            const list = room.puzzles || [];
+            state.puzzles = list.map((p, idx) => {
+                return {
+                    id: p.id,
+                    archetype: p.archetype,
+                    prompt: p.prompt,
+                    paraphrases: p.paraphrases || [],
+                    hints: p.hints || [],
+                    solved: false,
+                    idx,
+                };
+            });
+            state.room = room;
+            state.finalRequired = !!(room.meta_gate || room.final_code);
+
+            $("puzzleCount").textContent = `Puzzles: ${state.puzzles.length}`;
+            renderPuzzles();
+            maybeShowFinalGate();
+        }
+
+        // ----------- Render puzzles -----------
+        function renderPuzzles() {
+            const holder = $("puzzles");
+            holder.innerHTML = "";
+            state.puzzles.forEach((pz, i) => {
+                const box = document.createElement("div");
+                box.className = "puzzle";
+                box.id = `pz-${pz.id}`;
+
+                const head = document.createElement("div");
+                head.className = "puzzle-head";
+                const title = document.createElement("div");
+                title.className = "p-title";
+                title.textContent = `Puzzle ${i + 1}`;
+                const arch = document.createElement("div");
+                arch.className = "p-arch";
+                arch.textContent = pz.archetype.replace(/_/g, " ");
+                head.appendChild(title); head.appendChild(arch);
+
+                const prompt = document.createElement("div");
+                prompt.className = "p-prompt";
+                prompt.textContent = pz.prompt || "";
+
+                const paraphrase = document.createElement("div");
+                paraphrase.className = "p-paraphrase";
+                paraphrase.textContent = randomPick(pz.paraphrases, "");
+
+                const inputRow = document.createElement("div");
+                inputRow.className = "input-row";
+                const input = document.createElement("input");
+                input.type = "text";
+                input.placeholder = "Type your answer…";
+                input.autocomplete = "off";
+                const btn = document.createElement("button");
+                btn.textContent = "Submit";
+                inputRow.appendChild(input); inputRow.appendChild(btn);
+
+                const status = document.createElement("div");
+                status.className = "status";
+                status.textContent = "Awaiting answer…";
+
+                // Hints
+                const hintsWrap = document.createElement("div");
+                hintsWrap.className = "p-hints";
+                const h1btn = document.createElement("button");
+                h1btn.className = "hint-pill";
+                h1btn.textContent = "Reveal Hint 1 (60s)";
+                const h1text = document.createElement("div");
+                h1text.className = "hint-text hidden";
+                const h2btn = document.createElement("button");
+                h2btn.className = "hint-pill";
+                h2btn.textContent = "Reveal Hint 2 (120s)";
+                const h2text = document.createElement("div");
+                h2text.className = "hint-text hidden";
+                hintsWrap.appendChild(h1btn);
+                hintsWrap.appendChild(h1text);
+                hintsWrap.appendChild(h2btn);
+                hintsWrap.appendChild(h2text);
+
+                // Attach
+                box.appendChild(head);
+                box.appendChild(prompt);
+                if (paraphrase.textContent) box.appendChild(paraphrase);
+                box.appendChild(inputRow);
+                box.appendChild(status);
+                if ((pz.hints || []).length) {
+                    box.appendChild(hintsWrap);
+                }
+                holder.appendChild(box);
+
+                // Save refs
+                pz.inputEl = input;
+                pz.statusEl = status;
+                pz.boxEl = box;
+                pz.h1btn = h1btn; pz.h1text = h1text;
+                pz.h2btn = h2btn; pz.h2text = h2text;
+
+                // Wire events
+                btn.addEventListener("click", () => submitAnswer(pz));
+                input.addEventListener("keydown", (e) => { if (e.key === "Enter") { submitAnswer(pz); } });
+
+                // Hint unlock timers follow global timer (based on startedMs)
+                const updateHints = () => {
+                    if (!state.startedMs) return;
+                    const elapsed = Date.now() - state.startedMs;
+                    const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000;
+                    const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000;
+                    h1btn.disabled = elapsed < d1;
+                    h1btn.textContent = h1btn.disabled ? `Hint 1 in ${(Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
+                    h2btn.disabled = elapsed < d2;
+                    h2btn.textContent = h2btn.disabled ? `Hint 2 in ${(Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
+                };
+                setInterval(updateHints, 250);
+                h1btn.addEventListener("click", () => {
+                    if (h1btn.disabled) return;
+                    pz.h1text.textContent = pz.hints[0] || "No hint provided.";
+                    pz.h1text.classList.remove("hidden");
+                });
+                h2btn.addEventListener("click", () => {
+                    if (h2btn.disabled) return;
+                    pz.h2text.textContent = pz.hints[1] || "No additional hint.";
+                    pz.h2text.classList.remove("hidden");
+                });
+            });
+        }
+
+        // ----------- Submit puzzle answer -----------
+        async function submitAnswer(pz) {
+            if (state.finished) return;
+            const answer = (pz.inputEl.value || "").trim();
+            if (!answer) {
+                pz.statusEl.textContent = "Enter an answer."; pz.statusEl.className = "status";
+                return;
+            }
+            pz.statusEl.textContent = "Checking…";
+            pz.statusEl.className = "status";
+            try {
+                const res = await fetch(`/escape/api/submit`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        date_key: state.dateKey,
+                        puzzle_id: pz.id,
+                        answer
+                    })
+                });
+                const data = await res.json();
+                if (data && data.correct) {
+                    pz.solved = true;
+                    pz.boxEl.classList.add("solved");
+                    pz.statusEl.textContent = "Correct!";
+                    pz.statusEl.className = "status ok";
+                    pz.inputEl.disabled = true;
+                    state.solvedCount = state.puzzles.filter(x => x.solved).length;
+                    maybeShowFinalGate();
+                    if (state.solvedCount === state.puzzles.length && !state.finalRequired) {
+                        // Finish immediately if no meta gate
+                        doFinish(true);
+                    }
+                } else {
+                    pz.statusEl.textContent = "Not yet. Try another angle.";
+                    pz.statusEl.className = "status err";
+                }
+            } catch (e) {
+                pz.statusEl.textContent = "Network error — try again.";
+                pz.statusEl.className = "status err";
+            }
+        }
+
+        function maybeShowFinalGate() {
+            if (state.solvedCount >= state.puzzles.length) {
+                state.finalUnlocked = true;
+                if (state.finalRequired) {
+                    $("finalGate").classList.remove("hidden");
+                }
+            }
+        }
+
+        // ----------- Finish flow -----------
+        $("finishBtn").addEventListener("click", async () => {
+            if (!state.finalUnlocked) { toast("Solve all puzzles first."); return; }
+            const finalVal = ($("finalInput").value || "").trim();
+            const needsFinal = !!(state.room && (state.room.meta_gate || state.room.final_code));
+            if (needsFinal && !finalVal) {
+                $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err";
+                return;
+            }
+            await doFinish(true, finalVal);
+        });
+
+        async function doFinish(success, finalCode = null) {
+            if (state.finished) return;
+            try {
+                const res = await fetch(`/escape/api/finish`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        date_key: state.dateKey,
+                        started_ms: state.startedMs,
+                        success: !!success,
+                        final_code: finalCode,
+                        meta: {
+                            ua: navigator.userAgent,
+                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                            width: window.innerWidth, height: window.innerHeight
+                        }
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) {
+                    $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err";
+                    return;
+                }
+                if (!data.success) {
+                    $("finalStatus").textContent = "Final check failed. Re-check the code or puzzle answers.";
+                    $("finalStatus").className = "status err";
+                    return;
+                }
+                state.finished = true;
+                stopTimer();
+                revealShare(data.time_ms || (Date.now() - state.startedMs));
+                toast("Time submitted!");
+            } catch (e) {
+                $("finalStatus").textContent = "Network error — try again.";
+                $("finalStatus").className = "status err";
+            }
+        }
+
+        function revealShare(timeMs) {
+            const share = $("share");
+            const txt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
+            $("shareText").textContent = txt;
+            $("copyBtn").onclick = async () => {
+                try { await navigator.clipboard.writeText(txt + " /escape/today"); toast("Copied!"); } catch (e) { toast("Copy failed"); }
+            };
+            const tweet = new URL("https://twitter.com/intent/tweet");
+            tweet.searchParams.set("text", txt + " ");
+            tweet.searchParams.set("url", window.location.origin + "/escape/today");
+            $("tweetLink").href = tweet.toString();
+            share.classList.add("show");
+        }
+
+        // ----------- Timer -----------
+        function startTimer() {
+            state.startedMs = Date.now();
+            const tEl = $("timer");
+            state.tickHandle = setInterval(() => {
+                tEl.textContent = fmtTime(Date.now() - state.startedMs);
+            }, 33);
+        }
+        function stopTimer() {
+            if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; }
+        }
+
+        // ----------- Start flow -----------
+        $("startBtn").addEventListener("click", async () => {
+            $("overlay").classList.add("hidden");
+            await fetchRoom();
+            startTimer();
+        });
+
+        // Keyboard: Ctrl/Cmd+Enter = submit focused puzzle if any
+        document.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                const active = document.activeElement;
+                if (active && active.tagName === "INPUT") {
+                    const pz = state.puzzles.find(p => p.inputEl === active);
+                    if (pz) submitAnswer(pz);
+                }
+            }
+        });
+
+        // Optional: Auto-start if user reloads after starting
+        // (Comment this out if you want strict manual start)
+        // window.addEventListener("load", ()=>{
+        //   $("overlay").classList.add("hidden");
+        //   fetchRoom().then(startTimer);
+        // });
+    </script>
+</body>
+
+</html>

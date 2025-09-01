@@ -6,6 +6,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
+from app.escape import create_escape_bp
+from app.escape.core import schedule_daily_generation
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -23,7 +25,8 @@ def schedule_daily_reddit_article(app):
 
 def create_app():
     app = Flask(__name__, template_folder="templates", static_folder="static")
-
+    app.register_blueprint(create_escape_bp(), url_prefix="/escape")
+    schedule_daily_generation(app)
     # ---- Configs ----
     # 1) Read the URL
     db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
@@ -46,6 +49,13 @@ def create_app():
     login_manager.init_app(app)
     login_manager.login_view = "aggregator.login"
 
+    # Make sure models are imported so tables are known
+    from app.escape import models as _escape_models  # noqa: F401
+
+    # One-time table creation (okay for MVP; remove once you add migrations)
+    with app.app_context():
+        db.create_all()
+        
     # ---- Blueprints ----
     from app.aggregator import aggregator_bp, start_background_tasks
     from app.reddit_articles import bp as reddit_bp
