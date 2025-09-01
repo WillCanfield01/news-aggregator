@@ -3,19 +3,16 @@
 """
 Mini Escape Rooms - Core Engine (MVP, condensed)
 
-Responsibilities:
 - Deterministic daily room generation via seed (HMAC(date, server_secret))
 - Algorithmic puzzle archetypes (cipher, anagram, numeric lock)
 - Optional LLM "story + clue" wrapper with architect/critic passes (fallback offline if no API)
 - Similarity + answer-collision guardrails (last 60 days)
 - Heuristic solver sanity check; "harden" if too easy
-- JSON schema validation (lightweight, explicit checks)
-- Exposed functions:
-    - ensure_daily_room(date_key=None) -> EscapeRoom (creates/caches in DB)
-    - verify_puzzle(room_json, puzzle_id, answer) -> bool
-    - schedule_daily_generation(app)  # APScheduler cron at local midnight
-
-You may tweak thresholds and archetype pools over time.
+- Lightweight validation
+- Public API:
+    ensure_daily_room(date_key=None) -> EscapeRoom row (created if missing)
+    verify_puzzle(room_json, puzzle_id, answer) -> bool
+    schedule_daily_generation(app)  # APScheduler cron at local midnight
 """
 
 from __future__ import annotations
@@ -27,15 +24,22 @@ import string
 import re
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import datetime as dt
 
 import pytz
 from flask import current_app
 
-# DB + models
-from app import db
-from .models import EscapeRoom  # EscapeAttempt is used by routes, not required here
+# ─────────────────────────────────────────────────────────────────────────────
+# IMPORTANT: do NOT import app.db or models at module import time.
+# We lazy-import them with _get_db_and_models() to avoid circular imports.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_db_and_models():
+    """Late import to avoid circulars at module load time."""
+    from app.extensions import db  # provides SQLAlchemy() instance
+    from .models import EscapeRoom  # ORM model
+    return db, EscapeRoom
 
 
 # ---------- Configurable constants ----------
@@ -46,13 +50,12 @@ MAX_GEN_ATTEMPTS = 3
 DEFAULT_DIFFICULTY = "medium"
 TIMEZONE = os.getenv("ESCAPE_TZ", "America/Boise")
 
-# Common riddle answers to avoid; these are flagged in validation/hardening
+# Common riddle answers to avoid
 COMMON_STOCK_ANSWERS = {
     "piano", "keyboard", "silence", "time", "shadow", "map", "echo", "fire", "ice",
     "darkness", "light", "egg", "door", "wind", "river"
 }
 
-# Word pools for anagrams that avoid cliché answers (you can expand)
 ANAGRAM_WORDS = [
     "lantern", "saffron", "garnet", "amplify", "banquet", "topaz", "onyx",
     "galaxy", "harbor", "cobalt", "jasper", "velvet", "sepia", "orchid",
@@ -60,7 +63,6 @@ ANAGRAM_WORDS = [
     "zephyr", "coral", "indigo", "scarlet"
 ]
 
-# Key names/items/themes for variety (used in offline story wrapper)
 THEMES = [
     ("The Clockmaker’s Loft", "Dusty gears tick as you wake beneath copper skylights."),
     ("Signal in the Sublevel", "A faint hum from heavy conduits thrums through the floor."),
@@ -71,7 +73,6 @@ THEMES = [
     ("Radio Silence", "A dead station blinks a lone cursor on a green-glass screen."),
 ]
 
-# Final answer formatting guardrails
 FINAL_CODE_MIN_LEN = 4
 FINAL_CODE_MAX_LEN = 12
 
@@ -79,9 +80,6 @@ FINAL_CODE_MAX_LEN = 12
 # ---------- Utility: deterministic seed ----------
 
 def daily_seed(date_key: str, secret: str) -> int:
-    """
-    Deterministically derive a 64-bit seed from date_key and a server secret.
-    """
     digest = hmac.new(secret.encode("utf-8"), date_key.encode("utf-8"), hashlib.sha256).digest()
     return int.from_bytes(digest[:8], "big", signed=False)
 
@@ -117,10 +115,9 @@ def jaccard(a: set, b: set) -> float:
     return inter / union
 
 
-def recent_rooms(window_days: int = RECENT_WINDOW_DAYS) -> List[EscapeRoom]:
-    """
-    Pull recent rooms to compare novelty and answers.
-    """
+def recent_rooms(window_days: int = RECENT_WINDOW_DAYS) -> List[Any]:
+    """Pull recent rooms to compare novelty and answers."""
+    db, EscapeRoom = _get_db_and_models()
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=window_days)
     return (
         db.session.query(EscapeRoom)
@@ -134,9 +131,6 @@ def recent_rooms(window_days: int = RECENT_WINDOW_DAYS) -> List[EscapeRoom]:
 def is_too_similar_to_recent(room_json: Dict[str, Any],
                              window_days: int = RECENT_WINDOW_DAYS,
                              sim_threshold: float = 0.35) -> bool:
-    """
-    Compare title+intro and clue texts vs recent rooms via character shingles.
-    """
     text = f"{room_json.get('title','')} {room_json.get('intro','')}"
     for p in room_json.get("puzzles", []):
         text += " " + p.get("prompt", "")
@@ -158,16 +152,11 @@ def is_too_similar_to_recent(room_json: Dict[str, Any],
 
 
 def answer_recently_used(answer: str, cooldown_days: int = ANSWER_COOLDOWN_DAYS) -> bool:
-    """
-    Avoid identical answers repeating within a short window.
-    """
+    """Avoid identical answers repeating within a short window."""
+    db, EscapeRoom = _get_db_and_models()
     answer_norm = normalize_answer(answer)
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=cooldown_days)
-    rs = (
-        db.session.query(EscapeRoom)
-        .filter(EscapeRoom.created_at >= cutoff)
-        .all()
-    )
+    rs = db.session.query(EscapeRoom).filter(EscapeRoom.created_at >= cutoff).all()
     for r in rs:
         blob = r.json_blob or {}
         for p in blob.get("puzzles", []):
@@ -217,14 +206,12 @@ def _random_word(rng: random.Random, blacklist: set) -> str:
 def gen_anagram(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
     word = _random_word(rng, blacklist)
     letters = list(word)
-    # ensure scramble isn't identical
     while True:
         rng.shuffle(letters)
         if "".join(letters) != word:
             break
     scrambled = "".join(letters)
     decoys = []
-    # generate two plausible decoys by swapping pairs
     for _ in range(2):
         l2 = letters[:]
         i, j = rng.randrange(len(l2)), rng.randrange(len(l2))
@@ -232,7 +219,7 @@ def gen_anagram(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         decoys.append("".join(l2))
 
     prompt = f"The note shows a scrambled word: **{scrambled}**. Unscramble it to form a valid English word."
-    hints = [f"Look for common consonant clusters.", f"It relates loosely to color/materials or objects."]
+    hints = ["Look for common consonant clusters.", "It relates loosely to color/materials or objects."]
     paraphrases = [
         f"On the desk is an anagram: {scrambled}. Restore it.",
         f"You spot letters jumbled into {scrambled}. What is the word?",
@@ -251,7 +238,6 @@ def gen_anagram(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
 
 
 def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
-    # choose a non-stock answer 5-8 letters
     candidates = [w for w in ANAGRAM_WORDS if 5 <= len(w) <= 8 and w not in blacklist]
     answer = rng.choice(candidates) if candidates else _random_word(rng, blacklist)
     shift = rng.randrange(1, 25)
@@ -271,7 +257,7 @@ def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         f"A faded label reads: **{ciphertext}**.\n"
         f"It appears to be a Caesar shift. Enter the decoded word (A–Z only)."
     )
-    hints = [f"The shift is not 13.", f"Try small positive shifts first."]
+    hints = ["The shift is not 13.", "Try small positive shifts first."]
     decoys = [enc_caesar(answer, (shift + d) % 26) for d in (1, 2)]
     paraphrases = [
         f"The inscription {ciphertext} looks shifted. What plaintext restores it?",
@@ -291,13 +277,9 @@ def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
 
 
 def gen_vigenere(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
-    # choose a word to *extract* as final answer from plaintext; use key with length 5-7
-    key_len = rng.randrange(5, 8)
-    # pick a key distinct from answer candidates
     key_pool = [w for w in ANAGRAM_WORDS if 5 <= len(w) <= 8 and w not in blacklist]
     key = rng.choice(key_pool) if key_pool else "VELVET"
 
-    # plaintext phrase: embed a 4-8 letter code (letters only)
     code_candidates = [w for w in ANAGRAM_WORDS if 4 <= len(w) <= 8 and w not in blacklist and w.lower() != key.lower()]
     code = rng.choice(code_candidates) if code_candidates else "EMBER"
     phrase_templates = [
@@ -347,15 +329,11 @@ def gen_vigenere(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
 
 
 def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
-    """
-    Generate a solvable 4-digit code with constraints.
-    """
     d1 = rng.randrange(0, 10)
     d2 = rng.randrange(0, 10)
     d3 = rng.randrange(0, 10)
     d4 = rng.randrange(0, 10)
 
-    # Add constraints that are consistent (not necessarily unique, but good enough for MVP)
     c1 = f"The first two digits sum to {d1 + d2}."
     c2 = f"The third digit is the first digit plus {d3 - d1}."
     c3 = f"The last digit equals the second digit plus {d4 - d2}."
@@ -368,7 +346,6 @@ def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
     )
     hints = ["Try writing the constraints as equations.", "Solve for the first digits, then propagate."]
     decoys = []
-    # nearby decoys
     for delta in (1, -1):
         nd1 = (d1 + delta) % 10
         decoys.append(f"{nd1}{d2}{d3}{d4}")
@@ -392,23 +369,15 @@ def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
 # ---------- Optional LLM wrapper (architect + critic) ----------
 
 def _get_openai_client():
-    """
-    Try to initialize an OpenAI client if available, otherwise return None.
-    Supports both new 'openai.OpenAI()' and legacy 'openai' interface.
-    """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None, None
-
-    # prefer modern client
     try:
         from openai import OpenAI  # type: ignore
         client = OpenAI(api_key=api_key)
         return client, "modern"
     except Exception:
         pass
-
-    # fallback legacy
     try:
         import openai  # type: ignore
         openai.api_key = api_key
@@ -418,11 +387,6 @@ def _get_openai_client():
 
 
 def _architect_prompt(algo_pack: List[Puzzle], date_key: str) -> str:
-    """
-    Compose a system+user prompt that asks the LLM to wrap puzzles in story JSON.
-    We'll feed the algorithmic puzzles (with answers) and ask it to output structured JSON
-    conforming to our expected keys (title, intro, graph, puzzles, etc.).
-    """
     base = (
         "You are a puzzle architect. You wrap algorithmic puzzles into a coherent, fair, "
         "novel daily escape room. Avoid stock riddles like 'piano', 'keyboard', 'silence', 'time', 'shadow', 'map', 'echo'. "
@@ -431,14 +395,10 @@ def _architect_prompt(algo_pack: List[Puzzle], date_key: str) -> str:
         "Return STRICT JSON with keys: id, title, intro, graph:{nodes[],start[],end}, puzzles[], inventory[], locks[], "
         "anti_spoiler:{paraphrase_variants,decoys}, difficulty. Include puzzle.solution as provided."
     )
-    # Pass algo details to the LLM
     algo_json = json.dumps([p.to_json() for p in algo_pack], ensure_ascii=False)
     return (
-        f"{base}\n\n"
-        f"DATE_KEY: {date_key}\n"
-        f"ALGO_PUZZLES_JSON:\n{algo_json}\n\n"
-        "Rules:\n"
-        "- Keep language concise and atmospheric.\n"
+        f"{base}\n\nDATE_KEY: {date_key}\nALGO_PUZZLES_JSON:\n{algo_json}\n\n"
+        "Rules:\n- Keep language concise and atmospheric.\n"
         "- Do not reveal solutions in the title/intro.\n"
         "- Final gate unlocks only when all puzzle ids have been correctly answered.\n"
     )
@@ -457,12 +417,10 @@ def _critic_prompt(room_json: Dict[str, Any]) -> str:
 def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional[Dict[str, Any]]:
     client, mode = _get_openai_client()
     if not client:
-        return None  # offline wrapper will be used
-
+        return None
     content = _architect_prompt(algo_pack, date_key)
     try:
         if mode == "modern":
-            # Try Responses API first
             try:
                 resp = client.responses.create(
                     model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
@@ -471,7 +429,6 @@ def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional
                 )
                 text = resp.output_text  # type: ignore
             except Exception:
-                # Fallback to chat.completions if responses failed
                 resp = client.chat.completions.create(
                     model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
                     messages=[{"role": "user", "content": content}],
@@ -479,15 +436,12 @@ def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional
                 )
                 text = resp.choices[0].message.content  # type: ignore
         else:
-            # legacy openai
             text = client.ChatCompletion.create(  # type: ignore
                 model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
                 messages=[{"role": "user", "content": content}],
                 temperature=0.8,
             )["choices"][0]["message"]["content"]
-        # Parse JSON block in response
         text = text.strip()
-        # Try to extract JSON if the model wrapped it in formatting
         match = re.search(r"\{.*\}\s*$", text, re.S)
         blob = json.loads(match.group(0) if match else text)
         return blob
@@ -497,14 +451,9 @@ def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional
 
 
 def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Run a lightweight critic; if LLM unavailable, return the original unmodified.
-    We apply a JSON patch if provided correctly; else ignore.
-    """
     client, mode = _get_openai_client()
     if not client:
         return room_json
-
     content = _critic_prompt(room_json)
     patch_ops: List[Dict[str, Any]] = []
     try:
@@ -535,14 +484,11 @@ def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
         return room_json
 
     try:
-        # Basic JSON Patch (limited to replace/add)
         blob = json.loads(json.dumps(room_json))  # deep copy
         for op in patch_ops:
             path = op.get("path", "")
             parts = [p for p in path.split("/") if p]
-            if op.get("op") == "replace":
-                _json_path_set(blob, parts, op.get("value"))
-            elif op.get("op") == "add":
+            if op.get("op") in ("replace", "add"):
                 _json_path_set(blob, parts, op.get("value"))
         return blob
     except Exception:
@@ -564,12 +510,7 @@ def _json_path_set(blob: Dict[str, Any], parts: List[str], value: Any):
 # ---------- Offline story wrapper (if no LLM) ----------
 
 def offline_wrap(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
-    """
-    Produce a coherent room JSON without any external model.
-    We paraphrase and theme from fixed pools.
-    """
     title, intro = rng.choice(THEMES)
-    # Build dependency: all puzzles must be solved, then final gate opens
     node_ids = [p.id for p in algo_pack]
     nodes = [{"id": nid, "type": "puzzle", "requires": []} for nid in node_ids]
     final_gate = "final_door"
@@ -581,9 +522,7 @@ def offline_wrap(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> 
         "intro": intro,
         "graph": {"nodes": nodes, "start": ["room_intro"], "end": final_gate},
         "puzzles": [p.to_json() for p in algo_pack],
-        "inventory": [
-            {"id": "brass_key", "desc": "Worn and warm to the touch."},
-        ],
+        "inventory": [{"id": "brass_key", "desc": "Worn and warm to the touch."}],
         "locks": [],
         "anti_spoiler": {"paraphrase_variants": 3, "decoys": 2},
         "difficulty": DEFAULT_DIFFICULTY,
@@ -594,9 +533,6 @@ def offline_wrap(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> 
 # ---------- Validation ----------
 
 def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Minimal explicit validation; raises ValueError if unacceptable.
-    """
     required_top = {"id", "title", "intro", "graph", "puzzles", "anti_spoiler", "difficulty"}
     missing = [k for k in required_top if k not in room_json]
     if missing:
@@ -605,7 +541,6 @@ def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(room_json["puzzles"], list) or not room_json["puzzles"]:
         raise ValueError("Room must contain at least one puzzle")
 
-    # Validate puzzle fields & answer cooldowns
     seen_ids = set()
     for p in room_json["puzzles"]:
         for key in ("id", "archetype", "prompt", "answer_format", "solution"):
@@ -621,31 +556,24 @@ def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
         if not ans or len(normalize_answer(ans)) == 0:
             raise ValueError("Puzzle has empty solution answer")
 
-        # Avoid stock clichés
         if normalize_answer(ans).lower() in {s.upper() for s in COMMON_STOCK_ANSWERS}:
             raise ValueError("Puzzle uses stock/cliché answer")
 
-        # Apply answer cooldown
         if answer_recently_used(str(ans)):
             raise ValueError("Answer recently used in the cooldown window")
 
-        # Pattern sanity
         pattern = p.get("answer_format", {}).get("pattern")
         if pattern:
             if not re.match(r"^\^.*\$$", pattern):
                 raise ValueError("answer_format.pattern must be anchored ^...$")
-            # Quick check: the solution should match its own pattern
             if not re.match(pattern, str(ans)):
-                # Permit normalization mismatch (e.g., plaintext vs uppercase)
                 if not re.match(pattern, normalize_answer(str(ans))):
                     raise ValueError("Solution does not match its declared pattern")
 
-    # Graph end gate required
     graph = room_json.get("graph", {})
     if "end" not in graph:
         raise ValueError("Graph must define an 'end' gate id")
 
-    # Final code sanity (if present)
     fc = room_json.get("final_code")
     if fc:
         if not (FINAL_CODE_MIN_LEN <= len(normalize_answer(fc)) <= FINAL_CODE_MAX_LEN):
@@ -657,12 +585,9 @@ def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
 # ---------- Heuristic solver & hardening ----------
 
 def too_easy(room_json: Dict[str, Any]) -> bool:
-    """
-    Heuristic: flag trivially easy rooms (e.g., all puzzles single-step with common patterns).
-    """
     puzzles = room_json.get("puzzles", [])
     if len(puzzles) <= 1:
-        return True  # a single puzzle is too easy for "daily" feel
+        return True
 
     easy_count = 0
     for p in puzzles:
@@ -674,27 +599,19 @@ def too_easy(room_json: Dict[str, Any]) -> bool:
             easy_count += 1
         if arch == "numeric_lock" and pattern == r"^\d{4}$":
             easy_count += 1
-
-        # common sequences
         if ans in {"1234", "1111", "0000", "2580"}:
             easy_count += 1
 
-    return easy_count >= len(puzzles)  # if all are "easy-ish", mark too easy
+    return easy_count >= len(puzzles)
 
 
 def harden(room_json: Dict[str, Any], rng: Optional[random.Random] = None) -> Dict[str, Any]:
-    """
-    Increase difficulty slightly: add more decoys, extend hints delay (client can use),
-    and optionally add a light-weight meta step (final code = concat of first letters/digits).
-    """
     if rng is None:
         rng = random.Random()
 
-    # Add decoys to all puzzles
     for p in room_json.get("puzzles", []):
         decs = p.get("decoys") or []
         while len(decs) < 3:
-            # fabricate a decoy by shuffling or tweaking answer
             ans = str(p.get("solution", {}).get("answer", ""))
             if p.get("archetype") in {"anagram", "caesar", "vigenere"} and ans.isalpha():
                 letters = list(ans)
@@ -708,29 +625,24 @@ def harden(room_json: Dict[str, Any], rng: Optional[random.Random] = None) -> Di
                 decs.append(ans[::-1])
         p["decoys"] = decs
 
-    # Add a simple meta "final_code" if not present:
     if not room_json.get("final_code"):
         pieces: List[str] = []
         for p in room_json.get("puzzles", []):
             ans = str(p.get("solution", {}).get("answer", ""))
             if re.match(r"^\d+$", ans):
-                pieces.append(ans[-2:])  # last two digits
+                pieces.append(ans[-2:])
             else:
-                pieces.append(normalize_answer(ans)[:2])  # first two letters
+                pieces.append(normalize_answer(ans)[:2])
         meta = "".join(pieces)
-        # clip within bounds
         meta = meta[:FINAL_CODE_MAX_LEN]
         if len(meta) < FINAL_CODE_MIN_LEN:
             meta = (meta + "X" * FINAL_CODE_MIN_LEN)[:FINAL_CODE_MAX_LEN]
         room_json["final_code"] = meta
-        # Wrap a meta gate in the graph (client should prompt after all puzzles)
         end_id = room_json.get("graph", {}).get("end", "final_door")
-        room_json["graph"]["end"] = end_id  # ensure exists
+        room_json["graph"]["end"] = end_id
         room_json.setdefault("meta_gate", {"requires_all": True, "expects": "final_code"})
 
-    # Increase conceptual difficulty
     room_json["difficulty"] = "hard"
-    # Anti-spoiler: increment decoys target
     anti = room_json.get("anti_spoiler", {})
     anti["decoys"] = max(3, anti.get("decoys", 2))
     room_json["anti_spoiler"] = anti
@@ -740,19 +652,12 @@ def harden(room_json: Dict[str, Any], rng: Optional[random.Random] = None) -> Di
 # ---------- Room assembly pipeline ----------
 
 def build_archetype_mix(rng: random.Random) -> List[str]:
-    """
-    Rotate across a small pool; guarantee diversity.
-    """
     pool = ["anagram", "caesar", "vigenere", "numeric_lock"]
     rng.shuffle(pool)
-    # pick 3 distinct types per day
     return pool[:3]
 
 
 def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
-    """
-    Create a set of puzzle objects (answers known).
-    """
     mix = build_archetype_mix(rng)
     pack: List[Puzzle] = []
     for idx, archetype in enumerate(mix, start=1):
@@ -769,9 +674,6 @@ def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
 
 
 def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
-    """
-    Try LLM wrapper; fallback to offline wrapper.
-    """
     blob = llm_wrap_story_and_clues(algo_pack, date_key)
     if blob is None:
         blob = offline_wrap(algo_pack, date_key, rng)
@@ -779,13 +681,9 @@ def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> 
 
 
 def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
-    """
-    Full generation pipeline with guardrails and hardening.
-    """
     seed = daily_seed(date_key, server_secret)
     rng = rng_from_seed(seed)
 
-    # Populate blacklist from recent answers to pre-empt cooldown failures
     blacklist = set(COMMON_STOCK_ANSWERS)
     for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
         for p in (r.json_blob or {}).get("puzzles", []):
@@ -796,7 +694,6 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
     pack = build_algorithmic_pack(rng, blacklist)
     room = compose_room(pack, date_key, rng)
 
-    # Ensure graph "end" requires all puzzles (if LLM attempted something else)
     end_id = room.get("graph", {}).get("end")
     node_ids = {n.get("id") for n in room.get("graph", {}).get("nodes", [])}
     puzzle_ids = [p["id"] for p in room.get("puzzles", [])]
@@ -806,25 +703,20 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
         )
         room["graph"]["end"] = "final_door"
     else:
-        # patch requires to include all puzzle ids
         for n in room["graph"]["nodes"]:
             if n.get("id") == end_id:
                 n["requires"] = puzzle_ids
 
-    # Validate; if too easy, harden; revalidate
     room = validate_room(room)
     if too_easy(room):
         room = harden(room, rng)
         room = validate_room(room)
 
-    # Similarity guard; if too similar, perturb by regenerating offline wrapper title/intro
     if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
-        # tweak title/intro deterministically
         t2, i2 = rng.choice(THEMES)
         room["title"] = t2
         room["intro"] = i2
 
-    # Optional critic refinement
     room = llm_critic_patch(room)
     room = validate_room(room)
     return room
@@ -832,10 +724,10 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
 
 # ---------- Public API: ensure/caching ----------
 
-def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False) -> EscapeRoom:
-    """
-    Get today’s room or generate and cache it.
-    """
+def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False) -> Any:
+    """Get today’s room or generate and cache it."""
+    db, EscapeRoom = _get_db_and_models()
+
     if date_key is None:
         date_key = get_today_key()
 
@@ -867,33 +759,23 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
             last_error = e
             current_app.logger.warning(f"[escape] generation attempt {attempt} failed: {e}")
 
-    # If repeated failures, raise the last error (so you notice in logs)
     raise RuntimeError(f"Failed to generate room after {MAX_GEN_ATTEMPTS} attempts: {last_error}")
 
 
 # ---------- Verify answers (server-side truth) ----------
 
 def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool:
-    """
-    Compare with normalization; pattern-limited if specified.
-    """
     if submitted is None:
         return False
     s = submitted.strip()
     e = str(expected)
-    # If numeric pattern, require exact format
     if pattern and re.fullmatch(r"^\^\d+\$$", pattern):
         return s == e
-    # Alphanumeric: compare normalized uppercase without spaces/punct
     return normalize_answer(s) == normalize_answer(e)
 
 
 def verify_puzzle(room_json: Dict[str, Any], puzzle_id: str, answer: str) -> bool:
-    """
-    Routes will use this to check a submitted answer.
-    """
-    puzzles = room_json.get("puzzles", [])
-    for p in puzzles:
+    for p in room_json.get("puzzles", []):
         if p.get("id") == puzzle_id:
             sol = (p.get("solution") or {}).get("answer")
             pattern = (p.get("answer_format") or {}).get("pattern")
@@ -904,9 +786,6 @@ def verify_puzzle(room_json: Dict[str, Any], puzzle_id: str, answer: str) -> boo
 
 
 def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
-    """
-    If you enable a meta final code (created during harden()), verify here.
-    """
     expect = room_json.get("final_code")
     if not expect:
         return False
@@ -918,10 +797,7 @@ def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
 _scheduler_started = False
 
 def schedule_daily_generation(app) -> None:
-    """
-    Start APScheduler to generate the daily room just after local midnight.
-    Safe to call from your app factory; idempotent within a process.
-    """
+    """Start APScheduler to generate the daily room just after local midnight."""
     global _scheduler_started
     if _scheduler_started:
         current_app.logger.info("[escape] scheduler already started; skipping.")
@@ -946,7 +822,6 @@ def schedule_daily_generation(app) -> None:
             except Exception as e:
                 current_app.logger.error(f"[escape] Daily generation failed for {date_key}: {e}")
 
-    # Generate at 00:05 local time
     scheduler.add_job(job, "cron", hour=0, minute=5, id="escape_daily_gen", replace_existing=True)
     scheduler.start()
     current_app.logger.info("[escape] scheduler started (daily 00:05 local).")

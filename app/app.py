@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 from app.escape import create_escape_bp
 from app.escape.core import schedule_daily_generation
+from app.extensions import db, login_manager          # << change
 
 db = SQLAlchemy()
 login_manager = LoginManager()

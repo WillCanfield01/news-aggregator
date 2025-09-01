@@ -18,7 +18,7 @@ from datetime import datetime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Index
 from app import db
-
+from app.extensions import db   # << change
 
 class EscapeRoom(db.Model):
     __tablename__ = "escape_rooms"
