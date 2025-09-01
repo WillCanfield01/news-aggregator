@@ -46,6 +46,7 @@ def create_app():
     app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
     # ---- Extensions ----
+    from app.extensions import db, login_manager
     db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = "aggregator.login"
