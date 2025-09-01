@@ -29,8 +29,7 @@ from flask import (
     render_template,
     current_app,
 )
-
-from app import db
+from app.extensions import db
 from .models import EscapeAttempt
 from .models import EscapeRoom
 from .models import DailyLeaderboardView

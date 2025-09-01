@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 from datetime import datetime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Index
-from app import db
+from app.extensions import db
 from app.extensions import db   # << change
 
 class EscapeRoom(db.Model):
