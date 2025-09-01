@@ -23,7 +23,7 @@ AI_SUMMARY_ON   = os.getenv("PATCHPAL_AI_REWRITE", "0").lower() in ("1","true","
 AI_MODEL        = os.getenv("PATCHPAL_AI_MODEL", "gpt-4o-mini")
 
 # Variety controls
-MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "2"))
+MAX_PER_VENDOR  = int(os.getenv("PATCHPAL_MAX_PER_VENDOR", "1"))
 
 # Per-team dedupe memory
 REMEMBER_DAYS   = int(os.getenv("PATCHPAL_REMEMBER_DAYS", "5"))
@@ -266,6 +266,7 @@ def _tokens(s: str) -> set[str]:
 def _product_key(item: Dict[str, Any]) -> str:
     t = _text(item)
     title = (item.get("title") or "").lower()
+    prod_guess = _product_guess(item.get("title") or "")
 
     # Collapse distro Linux-kernel variants (OEM/FIPS/RPi/etc.) into one key
     if ("ubuntu" in t and "linux kernel" in t) or ("usn-" in title and "linux kernel" in t):
@@ -274,6 +275,14 @@ def _product_key(item: Dict[str, Any]) -> str:
         return "debian-linux-kernel"
     if ("red hat" in t or "rhel" in t) and "kernel" in t:
         return "redhat-linux-kernel"
+
+    # Debian DSA that doesn't name a specific product → collapse to one family
+    if "debian" in t and ("dsa-" in title or "debian security advisory" in title):
+        if not re.search(
+            r"\b(kernel|xorg|openssl|apache|nginx|git|chrom|samba|bind|postgres|mysql)\b",
+            prod_guess.lower(),
+        ):
+            return "debian-dsa-generic"
 
     # Existing special cases
     if "citrix" in t and "session recording" in t:
@@ -850,7 +859,7 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
         family_seen.add(fam)
         counts[v] = counts.get(v, 0) + 1
 
-    # Final backfill to guarantee N, still avoiding family dupes when possible
+    # Final backfill step 1: only new families
     if len(variety) < n:
         have_keys = {_key_for(x) for x in variety}
         for it in pool2:
@@ -858,11 +867,28 @@ def topN_today(n: int = 5, ws=None, team_id: str | None = None) -> List[Dict[str
                 break
             k = _key_for(it)
             fam = _product_key(it)
-            if k in have_keys or fam in family_seen:
+            v = _vendor_of(it)
+            if k in have_keys or fam in family_seen or counts.get(v, 0) >= MAX_PER_VENDOR:
+                continue
+            variety.append(it)
+            have_keys.add(k); family_seen.add(fam)
+            counts[v] = counts.get(v, 0) + 1
+
+    # Final backfill step 2: allow family repeats to guarantee N (still respect vendor cap)
+    if len(variety) < n:
+        have_keys = {_key_for(x) for x in variety}
+        for it in pool2:
+            if len(variety) >= n:
+                break
+            k = _key_for(it)
+            if k in have_keys:
+                continue
+            v = _vendor_of(it)
+            if counts.get(v, 0) >= MAX_PER_VENDOR:
                 continue
             variety.append(it)
             have_keys.add(k)
-            family_seen.add(fam)
+            counts[v] = counts.get(v, 0) + 1
 
     return variety[:n]
 
