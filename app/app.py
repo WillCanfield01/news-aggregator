@@ -1,17 +1,17 @@
 # app/app.py
 import os, re
 from datetime import datetime
-from flask import Flask, render_template, Response, url_for, current_app, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager
+from flask import Flask, render_template, Response, url_for, current_app, jsonify, redirect
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
-from app.escape import create_escape_bp
-from app.escape.core import schedule_daily_generation
-from app.extensions import db, login_manager          # << change
 
-db = SQLAlchemy()
-login_manager = LoginManager()
+# singletons (do NOT re-create them in this file)
+from app.extensions import db, login_manager
+
+# escape feature
+from app.escape.core import schedule_daily_generation
+from app.escape import create_escape_bp
+
 
 def schedule_daily_reddit_article(app):
     def scheduled_job():
@@ -24,15 +24,14 @@ def schedule_daily_reddit_article(app):
     scheduler.add_job(scheduled_job, "cron", hour=17, minute=0)
     scheduler.start()
 
+
 def create_app():
     app = Flask(__name__, template_folder="templates", static_folder="static")
-    app.register_blueprint(create_escape_bp(), url_prefix="/escape")
-    schedule_daily_generation(app)
+
     # ---- Configs ----
-    # 1) Read the URL
     db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
 
-    # 2) Normalize to psycopg v3 driver
+    # Normalize to psycopg v3 driver
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
     elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+psycopg://"):
@@ -45,26 +44,28 @@ def create_app():
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-dev-key")
     app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
-    # ---- Extensions ----
-    from app.extensions import db, login_manager
+    # ---- Bind extensions FIRST ----
     db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = "aggregator.login"
 
-    # Make sure models are imported so tables are known
+    # ---- Import models so SQLAlchemy knows them, then (optionally) create tables ----
     from app.escape import models as _escape_models  # noqa: F401
-
-    # One-time table creation (okay for MVP; remove once you add migrations)
+    from app.models import CommunityArticle          # site models
     with app.app_context():
         db.create_all()
-        
+
     # ---- Blueprints ----
     from app.aggregator import aggregator_bp, start_background_tasks
     from app.reddit_articles import bp as reddit_bp
     app.register_blueprint(aggregator_bp)
     app.register_blueprint(reddit_bp)
+    app.register_blueprint(create_escape_bp(), url_prefix="/escape")
 
-    from app.models import CommunityArticle
+    # Optional: /escape → /escape/today convenience
+    @app.route("/escape")
+    def escape_root_redirect():
+        return redirect("/escape/today", code=302)
 
     # ---- Routes ----
     @app.route("/")
@@ -76,52 +77,46 @@ def create_app():
     def sitemap():
         from flask import make_response
         try:
-            articles = (CommunityArticle.query
-                        .order_by(CommunityArticle.date.desc(), CommunityArticle.id.desc())
-                        .all())
-
+            articles = (
+                CommunityArticle.query
+                .order_by(CommunityArticle.date.desc(), CommunityArticle.id.desc())
+                .all()
+            )
             latest_date = (articles[0].date if articles and articles[0].date else None)
 
             urls = []
-
-            # Homepage
             urls.append(f"""<url>
-    <loc>{url_for('landing', _external=True, _scheme='https')}</loc>
-    {f"<lastmod>{latest_date.strftime('%Y-%m-%d')}</lastmod>" if latest_date else ""}
-    <changefreq>daily</changefreq><priority>1.0</priority>
-    </url>""")
+<loc>{url_for('landing', _external=True, _scheme='https')}</loc>
+{f"<lastmod>{latest_date.strftime('%Y-%m-%d')}</lastmod>" if latest_date else ""}
+<changefreq>daily</changefreq><priority>1.0</priority>
+</url>""")
 
-            # “All Published Articles” index page
             urls.append(f"""<url>
-    <loc>{url_for('all_articles.published_articles', _external=True, _scheme='https')}</loc>
-    {f"<lastmod>{latest_date.strftime('%Y-%m-%d')}</lastmod>" if latest_date else ""}
-    <changefreq>daily</changefreq><priority>0.9</priority>
-    </url>""")
+<loc>{url_for('all_articles.published_articles', _external=True, _scheme='https')}</loc>
+{f"<lastmod>{latest_date.strftime('%Y-%m-%d')}</lastmod>" if latest_date else ""}
+<changefreq>daily</changefreq><priority>0.9</priority>
+</url>""")
 
-            # Individual articles
             for a in articles:
-                loc = url_for("all_articles.read_article",
-                            filename=a.filename, _external=True, _scheme='https')
+                loc = url_for("all_articles.read_article", filename=a.filename, _external=True, _scheme='https')
                 lastmod = a.date.strftime("%Y-%m-%d") if a.date else ""
                 urls.append(f"""<url>
-    <loc>{loc}</loc>
-    {f"<lastmod>{lastmod}</lastmod>" if lastmod else ""}
-    <changefreq>weekly</changefreq><priority>0.8</priority>
-    </url>""")
+<loc>{loc}</loc>
+{f"<lastmod>{lastmod}</lastmod>" if lastmod else ""}
+<changefreq>weekly</changefreq><priority>0.8</priority>
+</url>""")
 
             xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-    {''.join(urls)}
-    </urlset>"""
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{''.join(urls)}
+</urlset>"""
 
             resp = make_response(xml, 200)
             resp.headers["Content-Type"] = "application/xml; charset=utf-8"
-            # keep it fresh so GSC doesn’t hold onto an old 2-URL version
             resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             resp.headers["Pragma"] = "no-cache"
             resp.headers["Expires"] = "0"
             return resp
-
         except Exception as e:
             current_app.logger.error(f"Sitemap error: {e}")
             return Response("Internal Server Error", status=500)
@@ -156,9 +151,10 @@ def create_app():
     with app.app_context():
         start_background_tasks()
         schedule_daily_reddit_article(app)
+        schedule_daily_generation(app)
 
-    # IMPORTANT: return the Flask app
     return app
+
 
 if __name__ == "__main__":
     app = create_app()
