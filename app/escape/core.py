@@ -1,21 +1,23 @@
 # app/escape/core.py
 # -*- coding: utf-8 -*-
 """
-Mini Escape Rooms - Core Engine (MVP, condensed)
+Mini Escape Rooms - Core Engine (OpenAI-enabled, hardened)
 
-- Deterministic daily room generation via seed (HMAC(date, server_secret))
-- Algorithmic puzzle archetypes (cipher, anagram, numeric lock)
-- Optional LLM "story + clue" wrapper with architect/critic passes (fallback offline if no API)
-- Similarity + answer-collision guardrails (last 60 days)
-- Heuristic solver sanity check; "harden" if too easy
-- Lightweight validation
-- Public API:
-    ensure_daily_room(date_key=None) -> EscapeRoom row (created if missing)
-    verify_puzzle(room_json, puzzle_id, answer) -> bool
-    schedule_daily_generation(app)  # APScheduler cron at local midnight
+- Deterministic daily puzzle generation (seeded RNG)
+- OpenAI theming (title/intro/inventory/difficulty) with strict JSON, safe overlay
+- Algorithmic puzzle archetypes (anagram, caesar, vigenere, numeric lock)
+- Guardrails: novelty window, answer cooldown, validation, "too easy" hardening
+- Robust graph normalization to prevent bad shapes from LLM
+- Guaranteed offline fallback
+
+Public API:
+  ensure_daily_room(date_key=None, force_regen=False) -> EscapeRoom
+  verify_puzzle(room_json, puzzle_id, answer) -> bool
+  schedule_daily_generation(app) -> None
 """
 
 from __future__ import annotations
+
 import os
 import hmac
 import hashlib
@@ -31,13 +33,12 @@ import pytz
 from flask import current_app
 
 # ─────────────────────────────────────────────────────────────────────────────
-# IMPORTANT: do NOT import app.db or models at module import time.
-# We lazy-import them with _get_db_and_models() to avoid circular imports.
+# IMPORTANT: Avoid circular imports. We only import db/models inside helpers.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_db_and_models():
-    """Late import to avoid circulars at module load time."""
-    from app.extensions import db  # provides SQLAlchemy() instance
+    """Late import to avoid circulars at module import time."""
+    from app.extensions import db  # SQLAlchemy() singleton
     from .models import EscapeRoom  # ORM model
     return db, EscapeRoom
 
@@ -50,7 +51,6 @@ MAX_GEN_ATTEMPTS = 3
 DEFAULT_DIFFICULTY = "medium"
 TIMEZONE = os.getenv("ESCAPE_TZ", "America/Boise")
 
-# Common riddle answers to avoid
 COMMON_STOCK_ANSWERS = {
     "piano", "keyboard", "silence", "time", "shadow", "map", "echo", "fire", "ice",
     "darkness", "light", "egg", "door", "wind", "river"
@@ -116,7 +116,6 @@ def jaccard(a: set, b: set) -> float:
 
 
 def recent_rooms(window_days: int = RECENT_WINDOW_DAYS) -> List[Any]:
-    """Pull recent rooms to compare novelty and answers."""
     db, EscapeRoom = _get_db_and_models()
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=window_days)
     return (
@@ -152,7 +151,6 @@ def is_too_similar_to_recent(room_json: Dict[str, Any],
 
 
 def answer_recently_used(answer: str, cooldown_days: int = ANSWER_COOLDOWN_DAYS) -> bool:
-    """Avoid identical answers repeating within a short window."""
     db, EscapeRoom = _get_db_and_models()
     answer_norm = normalize_answer(answer)
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=cooldown_days)
@@ -172,7 +170,7 @@ def normalize_answer(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
 
 
-# ---------- Algorithmic archetypes (deterministic by seed) ----------
+# ---------- Algorithmic archetypes ----------
 
 @dataclass
 class Puzzle:
@@ -217,13 +215,12 @@ def gen_anagram(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         i, j = rng.randrange(len(l2)), rng.randrange(len(l2))
         l2[i], l2[j] = l2[j], l2[i]
         decoys.append("".join(l2))
-
-    prompt = f"The note shows a scrambled word: **{scrambled}**. Unscramble it to form a valid English word."
-    hints = ["Look for common consonant clusters.", "It relates loosely to color/materials or objects."]
+    prompt = f"The note shows a scrambled word: **{scrambled}**. Unscramble it."
+    hints = ["Look for common consonant clusters.", "Think color, material, or object."]
     paraphrases = [
-        f"On the desk is an anagram: {scrambled}. Restore it.",
-        f"You spot letters jumbled into {scrambled}. What is the word?",
-        f"A scrap shows {scrambled}. Unscramble to proceed."
+        f"Desk anagram: {scrambled}. Restore it.",
+        f"Jumbled letters read {scrambled}. What word?",
+        f"A scrap shows {scrambled}. Unscramble to proceed.",
     ]
     return Puzzle(
         id=pid,
@@ -233,7 +230,7 @@ def gen_anagram(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         solution={"answer": word},
         hints=hints,
         decoys=decoys,
-        paraphrases=paraphrases
+        paraphrases=paraphrases,
     )
 
 
@@ -260,9 +257,9 @@ def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
     hints = ["The shift is not 13.", "Try small positive shifts first."]
     decoys = [enc_caesar(answer, (shift + d) % 26) for d in (1, 2)]
     paraphrases = [
-        f"The inscription {ciphertext} looks shifted. What plaintext restores it?",
+        f"The inscription {ciphertext} looks shifted. Restore the plaintext.",
         f"A rotating cipher hides a word: {ciphertext}. Undo the shift.",
-        f"Decode {ciphertext} with a Caesar to reveal the word."
+        f"Decode {ciphertext} with a Caesar to reveal the word.",
     ]
     return Puzzle(
         id=pid,
@@ -272,7 +269,7 @@ def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         solution={"answer": answer, "shift": shift},
         hints=hints,
         decoys=decoys,
-        paraphrases=paraphrases
+        paraphrases=paraphrases,
     )
 
 
@@ -309,12 +306,12 @@ def gen_vigenere(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         f"**{ciphertext}**\n"
         "It looks like a Vigenère cipher. Enter the hidden CODEWORD (letters only)."
     )
-    hints = [f"The key is a material or gem-like word ({len(key)} letters).", "Focus on uppercase words in the plaintext."]
+    hints = [f"The key is a material/gem word ({len(key)} letters).", "Focus on uppercase words in plaintext."]
     decoys = [key.upper(), re.sub(r"[^A-Za-z]", "", plaintext.replace(code.upper(), "TOKEN"))[:len(code)]]
     paraphrases = [
         "A note encodes a sentence with Vigenère; recover the codeword.",
         "Decrypt the strip to find the embedded word you must submit.",
-        "The plaintext hides a specific word—submit that word exactly."
+        "The plaintext hides a specific word—submit that word exactly.",
     ]
     return Puzzle(
         id=pid,
@@ -324,7 +321,7 @@ def gen_vigenere(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
         solution={"answer": code, "key": key, "ciphertext": ciphertext},
         hints=hints,
         decoys=decoys,
-        paraphrases=paraphrases
+        paraphrases=paraphrases,
     )
 
 
@@ -344,7 +341,7 @@ def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
         f"- {c1}\n- {c2}\n- {c3}\n"
         "Enter the full 4-digit code."
     )
-    hints = ["Try writing the constraints as equations.", "Solve for the first digits, then propagate."]
+    hints = ["Write the constraints as equations.", "Solve for the first digits, then propagate."]
     decoys = []
     for delta in (1, -1):
         nd1 = (d1 + delta) % 10
@@ -352,7 +349,7 @@ def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
     paraphrases = [
         "The keypad expects four digits. Use the constraints to solve.",
         "Three numeric clues define the exact code—compute and enter it.",
-        "A logic lock guards the door; derive the 4-digit answer."
+        "A logic lock guards the door; derive the 4-digit answer.",
     ]
     return Puzzle(
         id=pid,
@@ -362,15 +359,15 @@ def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
         solution={"answer": code},
         hints=hints,
         decoys=decoys,
-        paraphrases=paraphrases
+        paraphrases=paraphrases,
     )
 
 
-# ---------- Optional LLM wrapper (architect + critic) ----------
+# ---------- OpenAI integration (title/intro theming) ----------
 
 def _get_openai_client():
-    # Hard switch to disable LLM path entirely while stabilizing
-    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
+    # Allow forcing offline
+    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1", "true", "yes"):
         return None, None
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -388,65 +385,61 @@ def _get_openai_client():
     except Exception:
         return None, None
 
-def _architect_prompt(algo_pack: List[Puzzle], date_key: str) -> str:
-    base = (
-        "You are a puzzle architect. You wrap algorithmic puzzles into a coherent, fair, "
-        "novel daily escape room. Avoid stock riddles like 'piano', 'keyboard', 'silence', 'time', 'shadow', 'map', 'echo'. "
-        "Vary answer formats; include 2 misleading but fair decoys per puzzle and 3 paraphrases of each prompt. "
-        "Ensure a clear dependency DAG with exactly one final gate requiring all puzzles solved. "
-        "Return STRICT JSON with keys: id, title, intro, graph:{nodes[],start[],end}, puzzles[], inventory[], locks[], "
-        "anti_spoiler:{paraphrase_variants,decoys}, difficulty. Include puzzle.solution as provided."
-    )
-    algo_json = json.dumps([p.to_json() for p in algo_pack], ensure_ascii=False)
-    return (
-        f"{base}\n\nDATE_KEY: {date_key}\nALGO_PUZZLES_JSON:\n{algo_json}\n\n"
-        "Rules:\n- Keep language concise and atmospheric.\n"
-        "- Do not reveal solutions in the title/intro.\n"
-        "- Final gate unlocks only when all puzzle ids have been correctly answered.\n"
-    )
 
-
-def _critic_prompt(room_json: Dict[str, Any]) -> str:
+def _architect_prompt_for_theme(algo_pack: List[Puzzle], date_key: str) -> str:
+    """
+    Ask only for title/intro/inventory/difficulty so we never risk mismatched puzzles.
+    """
+    # Summarize archetypes for extra variety without leaking answers
+    archetype_list = [{"id": p.id, "archetype": p.archetype} for p in algo_pack]
     return (
-        "You are a puzzle critic. Inspect the JSON for clichés, repeated patterns, "
-        "and trivial solves. If minor edits can increase novelty/difficulty without compromising fairness, "
-        "output a minimal JSON Patch as a list of operations with 'op', 'path', and 'value'. "
-        "If no changes needed, output [].\n\n"
-        f"ROOM_JSON:\n{json.dumps(room_json, ensure_ascii=False)}"
+        "You design the *atmosphere* for a daily mini escape room.\n"
+        "Return ONLY a single minified JSON object with keys:\n"
+        '{ "title": string, "intro": string, "inventory": [ { "id": string, "desc": string } ] (optional), '
+        '"difficulty": "easy"|"medium"|"hard" (optional) }\n'
+        "Constraints:\n"
+        "- Fresh, non-cliché phrasing (no riddles like piano/time/shadow/etc.).\n"
+        "- Keep it concise (title <= 60 chars; intro 1–3 short sentences).\n"
+        "- DO NOT include any solutions or puzzle data. We'll supply puzzles server-side.\n"
+        f"- DATE_KEY: {date_key}\n"
+        f"- PUZZLE_ARCHETYPES: {json.dumps(archetype_list, ensure_ascii=False)}"
     )
 
 
 def _extract_json_block(text: str) -> Optional[str]:
     if not text or not text.strip():
         return None
-    # Prefer a full JSON object substring
-    i = text.find("{")
-    j = text.rfind("}")
+    # Remove code fences if present
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", t)
+        t = re.sub(r"\s*```$", "", t)
+    i = t.find("{")
+    j = t.rfind("}")
     if i != -1 and j != -1 and j > i:
-        return text[i:j+1]
+        return t[i:j+1]
     return None
 
-def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional[Dict[str, Any]]:
+
+def llm_fetch_theme(algo_pack: List[Puzzle], date_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Ask the LLM ONLY for theme (title/intro/inventory/difficulty). Return None on failure.
+    """
     client, mode = _get_openai_client()
     if not client:
         return None
 
-    # Strong instruction to return JSON only
     sys_msg = (
-        "You are a puzzle architect for a daily mini escape room. "
-        "Return ONLY a single minified JSON object with keys: "
-        "id,title,intro,graph:{nodes[],start[],end},puzzles[],inventory[],locks[],"
-        "anti_spoiler:{paraphrase_variants,decoys},difficulty. "
-        "No markdown, no explanation—JSON only."
+        "You are a concise puzzle theming assistant. "
+        "Return STRICT JSON only—no markdown, no commentary."
     )
-    user_content = _architect_prompt(algo_pack, date_key)
+    user_content = _architect_prompt_for_theme(algo_pack, date_key)
+    model = os.getenv("ESCAPE_MODEL", "gpt-4o-mini")
 
     try:
-        model = os.getenv("ESCAPE_MODEL", "gpt-4o-mini")
         text = ""
-
         if mode == "modern":
-            # Prefer chat.completions for stability; use response_format if available
+            # Prefer chat.completions with response_format (if supported)
             try:
                 resp = client.chat.completions.create(
                     model=model,
@@ -455,11 +448,11 @@ def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional
                         {"role": "user", "content": user_content},
                     ],
                     temperature=0.8,
-                    response_format={"type": "json_object"},  # ignored by older servers
+                    response_format={"type": "json_object"},
                 )
                 text = (resp.choices[0].message.content or "").strip()
             except Exception:
-                # Last-ditch: Responses API (if installed server supports it)
+                # Fallback to Responses API
                 resp = client.responses.create(
                     model=model,
                     input=[{"role": "user", "content": sys_msg + "\n\n" + user_content}],
@@ -467,7 +460,7 @@ def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional
                 )
                 text = (getattr(resp, "output_text", "") or "").strip()
         else:
-            # Legacy openai==0.x
+            # Legacy
             text = client.ChatCompletion.create(  # type: ignore
                 model=model,
                 messages=[
@@ -480,46 +473,79 @@ def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional
         json_block = _extract_json_block(text)
         if not json_block:
             return None
-        return json.loads(json_block)
+        blob = json.loads(json_block)
+
+        # minimal sanity
+        if not isinstance(blob, dict):
+            return None
+        if "title" not in blob or "intro" not in blob:
+            return None
+        return blob
     except Exception as e:
         try:
-            current_app.logger.warning(f"[escape] LLM architect failed: {e}")
+            current_app.logger.warning(f"[escape] LLM theme fetch failed: {e}")
         except Exception:
             pass
         return None
 
 
 def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Optional critic: expects a JSON Patch (list of {op,path,value}). If anything goes wrong, return original.
+    """
     client, mode = _get_openai_client()
     if not client:
         return room_json
-    content = _critic_prompt(room_json)
+
+    content = (
+        "You are a puzzle critic. Inspect the JSON for clichés and very trivial solves. "
+        "If minor edits can improve novelty without harming fairness, output a minimal JSON Patch "
+        "array of operations with keys 'op' (replace/add), 'path' (JSON Pointer), and 'value'. "
+        "If no changes are needed, return [].\n\n"
+        f"ROOM_JSON:\n{json.dumps(room_json, ensure_ascii=False)}"
+    )
     patch_ops: List[Dict[str, Any]] = []
+
     try:
+        model = os.getenv("ESCAPE_MODEL", "gpt-4o-mini")
+        text = ""
         if mode == "modern":
             try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": content}],
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                )
+                text = resp.choices[0].message.content or "[]"
+            except Exception:
                 resp = client.responses.create(
-                    model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
+                    model=model,
                     input=[{"role": "user", "content": content}],
                     temperature=0.0,
                 )
-                text = resp.output_text  # type: ignore
-            except Exception:
-                resp = client.chat.completions.create(
-                    model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
-                    messages=[{"role": "user", "content": content}],
-                    temperature=0.0,
-                )
-                text = resp.choices[0].message.content  # type: ignore
+                text = getattr(resp, "output_text", "[]")
         else:
             text = client.ChatCompletion.create(  # type: ignore
-                model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
+                model=model,
                 messages=[{"role": "user", "content": content}],
                 temperature=0.0,
             )["choices"][0]["message"]["content"]
-        patch_ops = json.loads(text)
+
+        # Allow either a JSON array or a JSON object with "patch": [...]
+        jb = _extract_json_block(text) or text
+        parsed = json.loads(jb)
+        if isinstance(parsed, dict) and "patch" in parsed:
+            patch_ops = parsed["patch"]
+        elif isinstance(parsed, list):
+            patch_ops = parsed
+        else:
+            patch_ops = []
     except Exception as e:
-        current_app.logger.info(f"[escape] LLM critic skipped: {e}")
+        try:
+            current_app.logger.info(f"[escape] LLM critic skipped: {e}")
+        except Exception:
+            pass
         return room_json
 
     try:
@@ -546,7 +572,7 @@ def _json_path_set(blob: Dict[str, Any], parts: List[str], value: Any):
         cur = cur[p]
 
 
-# ---------- Offline story wrapper (if no LLM) ----------
+# ---------- Offline story wrapper (no LLM) ----------
 
 def offline_wrap(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
     title, intro = rng.choice(THEMES)
@@ -555,7 +581,7 @@ def offline_wrap(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> 
     final_gate = "final_door"
     nodes.append({"id": final_gate, "type": "gate", "requires": node_ids})
 
-    room = {
+    return {
         "id": date_key,
         "title": title,
         "intro": intro,
@@ -566,10 +592,9 @@ def offline_wrap(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> 
         "anti_spoiler": {"paraphrase_variants": 3, "decoys": 2},
         "difficulty": DEFAULT_DIFFICULTY,
     }
-    return room
 
 
-# ---------- Validation ----------
+# ---------- Validation & hardening ----------
 
 def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
     required_top = {"id", "title", "intro", "graph", "puzzles", "anti_spoiler", "difficulty"}
@@ -621,16 +646,9 @@ def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
     return room_json
 
 
-# ---------- Heuristic solver & hardening ----------
-
 def _normalize_graph(room: Dict[str, Any], puzzle_ids: List[str]) -> None:
     """
-    Make sure graph structure is well-formed and hashable:
-    - graph exists
-    - nodes is a list
-    - every node.id is a string (coerced), unique
-    - every node.requires is a list[str]
-    - graph.end is a string and there is a corresponding gate node requiring all puzzles
+    Normalize graph shapes to avoid set() crashes and ensure end gate requires all puzzles.
     """
     g = room.setdefault("graph", {})
     nodes = g.get("nodes")
@@ -640,35 +658,27 @@ def _normalize_graph(room: Dict[str, Any], puzzle_ids: List[str]) -> None:
 
     seen: set = set()
     for i, n in enumerate(nodes):
-        # Coerce id to a stable string
         nid = n.get("id")
         if isinstance(nid, (str, int)):
             nid = str(nid)
         else:
             nid = f"auto_{i}"
-        # De-dup if necessary
         if nid in seen:
             nid = f"{nid}_{i}"
         n["id"] = nid
         seen.add(nid)
-
-        # requires must be a list[str]
         req = n.get("requires", [])
         if not isinstance(req, list):
             req = []
         n["requires"] = [str(r) for r in req]
-
-        # type default
         n.setdefault("type", "puzzle")
 
-    # Normalize end id
     end_id = g.get("end")
     if not isinstance(end_id, (str, int)):
         end_id = "final_door"
         g["end"] = end_id
     end_id = str(end_id)
 
-    # Ensure there is an end node and it requires all puzzles
     end_node = None
     for n in nodes:
         if n.get("id") == end_id:
@@ -681,31 +691,28 @@ def _normalize_graph(room: Dict[str, Any], puzzle_ids: List[str]) -> None:
         end_node["type"] = end_node.get("type", "gate")
         end_node["requires"] = list(puzzle_ids)
 
+
 def too_easy(room_json: Dict[str, Any]) -> bool:
     puzzles = room_json.get("puzzles", [])
     if len(puzzles) <= 1:
         return True
-
     easy_count = 0
     for p in puzzles:
         arch = p.get("archetype")
         ans = normalize_answer(p.get("solution", {}).get("answer", ""))
         pattern = (p.get("answer_format") or {}).get("pattern", "")
-
         if arch in {"anagram", "caesar"} and 4 <= len(ans) <= 6:
             easy_count += 1
         if arch == "numeric_lock" and pattern == r"^\d{4}$":
             easy_count += 1
         if ans in {"1234", "1111", "0000", "2580"}:
             easy_count += 1
-
     return easy_count >= len(puzzles)
 
 
 def harden(room_json: Dict[str, Any], rng: Optional[random.Random] = None) -> Dict[str, Any]:
     if rng is None:
         rng = random.Random()
-
     for p in room_json.get("puzzles", []):
         decs = p.get("decoys") or []
         while len(decs) < 3:
@@ -753,6 +760,7 @@ def build_archetype_mix(rng: random.Random) -> List[str]:
     rng.shuffle(pool)
     return pool[:3]
 
+
 def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
     mix = build_archetype_mix(rng)
     pack: List[Puzzle] = []
@@ -766,19 +774,74 @@ def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
             pack.append(gen_vigenere(rng, pid, blacklist))
         elif archetype == "numeric_lock":
             pack.append(gen_numeric_lock(rng, pid))
-    if not pack:  # absolute safety
+    if not pack:
         pack = [gen_numeric_lock(rng, "pz_1")]
     return pack
 
+
 def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
-    blob = llm_wrap_story_and_clues(algo_pack, date_key)
-    if not isinstance(blob, dict) or not isinstance(blob.get("puzzles"), list) or not blob["puzzles"]:
-        return offline_wrap(algo_pack, date_key, rng)
-    # If graph is missing/odd, we'll normalize later
-    return blob
+    """
+    Base offline structure + (optional) LLM theming overlay.
+    We keep puzzles/graph server-authored for correctness and anti-cheat.
+    """
+    room = offline_wrap(algo_pack, date_key, rng)
+    theme = llm_fetch_theme(algo_pack, date_key)
+    if isinstance(theme, dict):
+        # Overlay approved fields only
+        if isinstance(theme.get("title"), str) and theme["title"].strip():
+            room["title"] = theme["title"].strip()[:60]
+        if isinstance(theme.get("intro"), str) and theme["intro"].strip():
+            room["intro"] = re.sub(r"\s+", " ", theme["intro"].strip())
+        if isinstance(theme.get("inventory"), list):
+            room["inventory"] = theme["inventory"][:5]  # keep it short
+        if theme.get("difficulty") in ("easy", "medium", "hard"):
+            room["difficulty"] = theme["difficulty"]
+    return room
+
+
+def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
+    seed = daily_seed(date_key, server_secret)
+    rng = rng_from_seed(seed)
+
+    blacklist = set(COMMON_STOCK_ANSWERS)
+    try:
+        for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
+            for p in (r.json_blob or {}).get("puzzles", []):
+                sol = (p.get("solution") or {}).get("answer")
+                if sol:
+                    blacklist.add(normalize_answer(sol).lower())
+    except Exception:
+        pass
+
+    pack = build_algorithmic_pack(rng, blacklist)
+    room = offline_wrap(pack, date_key, rng)
+
+    puzzle_ids = [str(p.get("id")) for p in room.get("puzzles", []) if p.get("id")]
+    _normalize_graph(room, puzzle_ids)
+
+    room = validate_room(room)
+    if too_easy(room):
+        room = harden(room, rng)
+        room = validate_room(room)
+
+    try:
+        if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
+            t2, i2 = rng.choice(THEMES)
+            room["title"] = t2
+            room["intro"] = i2
+    except Exception:
+        pass
+
+    return room
+
 
 def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
-    # If offline forced, keep your existing short-circuit here…
+    """
+    Primary generator (OpenAI theming if enabled) with robust fallbacks.
+    """
+    # Force offline if requested
+    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1", "true", "yes"):
+        return generate_room_offline(date_key, server_secret)
 
     seed = daily_seed(date_key, server_secret)
     rng = rng_from_seed(seed)
@@ -792,74 +855,30 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
                 blacklist.add(normalize_answer(sol).lower())
 
     pack = build_algorithmic_pack(rng, blacklist)
+
+    # Base room + LLM overlay (safe fields only)
     room = compose_room(pack, date_key, rng)
 
-    # If LLM returned junk, fall back to offline
-    if not isinstance(room, dict) or not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
-        room = offline_wrap(pack, date_key, rng)
-
-    # >>> NEW: sanitize the graph BEFORE making sets
+    # Normalize graph before any set() calls
     puzzle_ids = [str(p.get("id")) for p in room.get("puzzles", []) if p.get("id")]
     _normalize_graph(room, puzzle_ids)
 
-    # Validate; harden if needed; re-validate
-    room = validate_room(room)
+    # Validate; harden if needed
+    try:
+        room = validate_room(room)
+    except Exception as e:
+        try:
+            current_app.logger.error(f"[escape] validate_room failed (primary): {e}; puzzles={len(room.get('puzzles') or [])}")
+        except Exception:
+            pass
+        # Absolute fallback
+        room = generate_room_offline(date_key, server_secret)
+
     if too_easy(room):
         room = harden(room, rng)
         room = validate_room(room)
 
-    # Novelty tweak + critic (best effort)
-    if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
-        t2, i2 = rng.choice(THEMES)
-        room["title"] = t2
-        room["intro"] = i2
-
-    try:
-        room = llm_critic_patch(room)
-        room = validate_room(room)
-    except Exception:
-        pass
-
-    return room
-
-def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
-    """
-    Pure offline generation path (no LLM). Guaranteed non-empty puzzles and a valid graph.
-    Used as a last-chance fallback by ensure_daily_room().
-    """
-    seed = daily_seed(date_key, server_secret)
-    rng = rng_from_seed(seed)
-
-    # Build a small blacklist from recent answers so we don't repeat
-    blacklist = set(COMMON_STOCK_ANSWERS)
-    try:
-        for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
-            for p in (r.json_blob or {}).get("puzzles", []):
-                sol = (p.get("solution") or {}).get("answer")
-                if sol:
-                    blacklist.add(normalize_answer(sol).lower())
-    except Exception:
-        # if DB unavailable for some reason, just proceed
-        pass
-
-    # Always produce at least one puzzle
-    pack = build_algorithmic_pack(rng, blacklist)
-    if not pack:
-        pack = [gen_numeric_lock(rng, "pz_1")]  # ultra-safe fallback
-
-    room = offline_wrap(pack, date_key, rng)
-
-    # Normalize/repair graph before any set() usage
-    puzzle_ids = [str(p.get("id")) for p in room.get("puzzles", []) if p.get("id")]
-    _normalize_graph(room, puzzle_ids)
-
-    # Validate & harden if necessary
-    room = validate_room(room)
-    if too_easy(room):
-        room = harden(room, rng)
-        room = validate_room(room)
-
-    # Light novelty tweak: if the offline text is too close to recent, retheme
+    # Novelty tweak + (optional) critic
     try:
         if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
             t2, i2 = rng.choice(THEMES)
@@ -868,74 +887,14 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # No critic pass in pure offline mode
-    return room
-
-def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
-    # If offline forced, just use the offline generator
-    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
-        return generate_room_offline(date_key, server_secret)
-
-    seed = daily_seed(date_key, server_secret)
-    rng = rng_from_seed(seed)
-
-    blacklist = set(COMMON_STOCK_ANSWERS)
-    for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
-        for p in (r.json_blob or {}).get("puzzles", []):
-            sol = (p.get("solution") or {}).get("answer")
-            if sol:
-                blacklist.add(normalize_answer(sol).lower())
-
-    pack = build_algorithmic_pack(rng, blacklist)
-    room = compose_room(pack, date_key, rng)
-
-    # Final guard before validation
-    if not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
-        room = offline_wrap(pack, date_key, rng)
-
-    # Wire end gate to require all puzzles
-    end_id = room.get("graph", {}).get("end")
-    node_ids = {n.get("id") for n in room.get("graph", {}).get("nodes", [])}
-    puzzle_ids = [p["id"] for p in room.get("puzzles", [])]
-    if end_id not in node_ids:
-        room.setdefault("graph", {}).setdefault("nodes", []).append(
-            {"id": "final_door", "type": "gate", "requires": puzzle_ids}
-        )
-        room["graph"]["end"] = "final_door"
-    else:
-        for n in room["graph"]["nodes"]:
-            if n.get("id") == end_id:
-                n["requires"] = puzzle_ids
-
-    # Validate/harden with recovery
-    try:
-        room = validate_room(room)
-    except Exception as e:
-        try:
-            current_app.logger.error(f"[escape] validate_room failed (primary): {e}; puzzles={len(room.get('puzzles') or [])}")
-        except Exception:
-            pass
-        # Absolute fallback: rebuild purely offline
-        room = generate_room_offline(date_key, server_secret)
-
-    if too_easy(room):
-        room = harden(room, rng)
-        room = validate_room(room)
-
-    # Similarity tweak and critic (best-effort)
-    if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
-        t2, i2 = rng.choice(THEMES)
-        room["title"] = t2
-        room["intro"] = i2
-
     try:
         room = llm_critic_patch(room)
         room = validate_room(room)
     except Exception:
-        # If critic breaks, ignore; the room is already valid
         pass
 
     return room
+
 
 # ---------- Public API: ensure/caching ----------
 
@@ -951,7 +910,6 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
     secret = os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me")
     last_error = None
 
-    # Primary attempts (honor ESCAPE_MODEL=off inside generate_room)
     for attempt in range(1, MAX_GEN_ATTEMPTS + 1):
         try:
             room_blob = generate_room(date_key, secret)
@@ -977,28 +935,26 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
             except Exception:
                 pass
 
-    # Absolute fallback: pure offline once more before giving up
-    try:
-        room_blob = generate_room_offline(date_key, secret)
-        if existing:
-            existing.json_blob = room_blob
-            existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
-            db.session.add(existing)
-            db.session.commit()
-            return existing
-        else:
-            new_room = EscapeRoom(
-                date_key=date_key,
-                json_blob=room_blob,
-                difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY),
-            )
-            db.session.add(new_room)
-            db.session.commit()
-            return new_room
-    except Exception as e2:
-        raise RuntimeError(f"Failed to generate room after offline fallback. Last errors: primary={last_error}; offline={e2}")
+    # Absolute offline fallback
+    room_blob = generate_room_offline(date_key, secret)
+    if existing:
+        existing.json_blob = room_blob
+        existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
+        db.session.add(existing)
+        db.session.commit()
+        return existing
+    else:
+        new_room = EscapeRoom(
+            date_key=date_key,
+            json_blob=room_blob,
+            difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY),
+        )
+        db.session.add(new_room)
+        db.session.commit()
+        return new_room
 
-# ---------- Verify answers (server-side truth) ----------
+
+# ---------- Verify answers ----------
 
 def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool:
     if submitted is None:
@@ -1030,15 +986,12 @@ def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
 
 # ---------- Scheduler hook ----------
 
-# in app/escape/core.py
-
 _scheduler_started = False
 
 def schedule_daily_generation(app) -> None:
     """Start APScheduler to generate the daily room just after local midnight."""
     global _scheduler_started
     if _scheduler_started:
-        # Use app.logger (safe outside app context)
         try:
             app.logger.info("[escape] scheduler already started; skipping.")
         except Exception:
@@ -1059,7 +1012,6 @@ def schedule_daily_generation(app) -> None:
     scheduler = BackgroundScheduler(timezone=tz)
 
     def job():
-        # Push an app context for any DB/current_app usage
         with app.app_context():
             date_key = get_today_key()
             try:
@@ -1068,8 +1020,6 @@ def schedule_daily_generation(app) -> None:
             except Exception as e:
                 app.logger.error(f"[escape] Daily generation failed for {date_key}: {e}")
 
-    # Run at 00:05 local time
     scheduler.add_job(job, "cron", hour=0, minute=5, id="escape_daily_gen", replace_existing=True)
     scheduler.start()
     app.logger.info("[escape] scheduler started (daily 00:05 local).")
-
