@@ -65,20 +65,28 @@ def init_routes(bp):
     # -----------------------------
     @bp.route("/api/today", methods=["GET"])
     def api_today():
-        """
-        Return the JSON for today's room with solutions stripped off.
-        Optional ?date=YYYY-MM-DD to fetch historical day (if exists and you allow archives later).
-        """
         date_q = request.args.get("date")
         if date_q:
-            # Allow fetching an existing day if in DB; otherwise default to today's
             existing = db.session.query(EscapeRoom).filter_by(date_key=date_q).first()
             room = existing or ensure_daily_room(date_q)
         else:
             room = ensure_daily_room()
 
-        payload = _strip_solutions(room.json_blob)
-        # Attach server-enforced timing hints (client may respect, but server-side anti-cheat also checks)
+        payload = _strip_solutions(room.json_blob or {})
+        if not payload.get("puzzles"):
+            current_app.logger.warning("[escape] api_today saw 0 puzzles; regenerating OFFLINE")
+            from .core import generate_room_offline
+            secret = os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me")
+            try:
+                rebuilt = generate_room_offline(room.date_key, secret)
+                room.json_blob = rebuilt
+                room.difficulty = rebuilt.get("difficulty", room.difficulty)
+                db.session.add(room)
+                db.session.commit()
+                payload = _strip_solutions(rebuilt)
+            except Exception as e:
+                current_app.logger.error(f"[escape] offline regen failed inside api_today: {e}")
+
         payload["server_hint_policy"] = {"first_hint_delay_s": 60, "second_hint_delay_s": 120}
         return jsonify(payload)
 
@@ -253,20 +261,20 @@ def init_routes(bp):
 # Helpers
 # ---------------------------------------------------------------------
 
+# app/escape/routes.py
+
 def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Return a copy with solution data removed. Be lenient about weird shapes.
+    Deep-copy the room and remove 'solution' keys only. Do NOT rebuild puzzle dicts.
+    This avoids accidentally dropping puzzles when the LLM returns odd shapes.
     """
-    out = dict(room_json)
-    cleaned: List[Dict[str, Any]] = []
-    for p in (room_json.get("puzzles") or []):
-        if not isinstance(p, dict):
-            # skip anything that isn't a proper puzzle dict
-            continue
-        # shallow copy minus solution
-        pp = {k: v for k, v in p.items() if k != "solution"}
-        cleaned.append(pp)
-    out["puzzles"] = cleaned
+    out = json.loads(json.dumps(room_json))  # deep copy
+    puzzles = out.get("puzzles") or []
+    if isinstance(puzzles, list):
+        for p in puzzles:
+            if isinstance(p, dict):
+                p.pop("solution", None)
+    out["puzzles"] = puzzles
     return out
 
 def _json_body_or_400() -> Dict[str, Any]:
