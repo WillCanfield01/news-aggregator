@@ -1,329 +1,647 @@
-<!-- app/templates/escape/play.html -->
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8" />
-    <title>Mini Escape — {{ date_key }} ({{ difficulty|default('medium')|title }})</title>
+    <title>Mini Escape — {{ date_key }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-        /* keep your existing <style> exactly as-is */
+        :root {
+            --bg: #0f1220;
+            --panel: #151a2f;
+            --panel2: #0f1427;
+            --text: #e6eaf6;
+            --muted: #9aa3c7;
+            --brand: #58bbff;
+            --ok: #55d38e;
+            --err: #ff6b6b;
+            --shadow: rgba(0, 0, 0, .35)
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            height: 100%
+        }
+
+        body {
+            margin: 0;
+            background: radial-gradient(1200px 900px at 10% 0%, #121735 0%, #0f1220 50%, #0b0f1c 100%);
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif
+        }
+
+        .wrap {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 20px 16px 80px
+        }
+
+        header {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px
+        }
+
+        .title {
+            font-size: 22px;
+            font-weight: 800
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #172042, #121a38);
+            border: 1px solid #26325f;
+            color: #b6c4ff
+        }
+
+        .timer {
+            margin-left: auto;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            background: linear-gradient(180deg, #172042, #121a38);
+            border: 1px solid #26325f;
+            border-radius: 10px;
+            padding: 6px 10px
+        }
+
+        .intro,
+        .panel {
+            background: linear-gradient(180deg, #151a2f, #0f1427);
+            border: 1px solid #24305b;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px var(--shadow)
+        }
+
+        .intro {
+            padding: 14px;
+            margin: 10px 0 14px
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        button,
+        .btn {
+            background: linear-gradient(180deg, #1c2a4e, #152244);
+            border: 1px solid #2a3c73;
+            color: #cfe3ff;
+            border-radius: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            text-decoration: none
+        }
+
+        button:hover,
+        .btn:hover {
+            filter: brightness(1.06)
+        }
+
+        input[type=text] {
+            flex: 1;
+            min-width: 200px;
+            background: #0b1226;
+            border: 1px solid #24305b;
+            color: var(--text);
+            border-radius: 10px;
+            padding: 10px 12px
+        }
+
+        .scene {
+            padding: 12px;
+            margin: 10px 0;
+            display: none
+        }
+
+        .scene.active {
+            display: block
+        }
+
+        .scene h3 {
+            margin: 4px 0 6px
+        }
+
+        .route-btns {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap
+        }
+
+        .p-card {
+            margin-top: 8px;
+            padding: 10px;
+            background: #0f1427;
+            border: 1px solid #22305d;
+            border-radius: 12px
+        }
+
+        .status {
+            font-size: 13px;
+            color: var(--muted)
+        }
+
+        .status.ok {
+            color: var(--ok)
+        }
+
+        .status.err {
+            color: var(--err)
+        }
+
+        .hint-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 6px
+        }
+
+        .hint-pill {
+            background: #0f1730;
+            border: 1px dashed #2a3769;
+            color: #a9b4e6;
+            border-radius: 999px;
+            padding: 6px 10px;
+            cursor: pointer
+        }
+
+        .hint-text {
+            margin-top: 4px;
+            background: #0c1428;
+            border: 1px solid #25305a;
+            border-radius: 8px;
+            padding: 8px 10px;
+            display: none
+        }
+
+        .footer {
+            margin-top: 16px;
+            padding: 12px
+        }
+
+        .final {
+            display: none
+        }
+
+        .notes {
+            position: sticky;
+            top: 10px
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 160px;
+            background: #0b1226;
+            border: 1px solid #24305b;
+            color: var(--text);
+            border-radius: 10px;
+            padding: 8px
+        }
+
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 14px
+        }
+
+        @media (max-width:900px) {
+            .two-col {
+                grid-template-columns: 1fr
+            }
+        }
+
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(7, 10, 18, .6);
+            backdrop-filter: blur(6px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50
+        }
+
+        .start {
+            width: min(680px, 92vw);
+            background: linear-gradient(180deg, #141a30, #0f1427);
+            border: 1px solid #24305b;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 20px 60px var(--shadow);
+            text-align: center
+        }
+
+        .hidden {
+            display: none !important
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #0e182e;
+            color: #dce4ff;
+            border: 1px solid #2c3a69;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px var(--shadow);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: .2s;
+            z-index: 60
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0)
+        }
+
+        .chip-flash {
+            animation: chipflash .4s ease
+        }
+
+        @keyframes chipflash {
+            0% {
+                filter: brightness(1.3)
+            }
+
+            100% {
+                filter: brightness(1)
+            }
+        }
+
+        .tiny {
+            font-size: 12px;
+            color: #9aa3c7
+        }
     </style>
 </head>
 
 <body>
+    <!-- Start overlay -->
     <div id="overlay" class="overlay">
-        <div class="start-card">
-            <div class="start-title">Mini Escape — Daily Trail</div>
-            <div class="start-sub">
-                Three scenes. At each scene, choose a route and solve its puzzle to collect a fragment.
-                After all three, enter the Final Code to escape.
-                Hints unlock after <span class="kbd">60s</span> and <span class="kbd">120s</span>.
+        <div class="start">
+            <div style="font-size:22px;font-weight:800;margin-bottom:6px;">Mini Escape — Daily Trail</div>
+            <div style="color:#b6c4ff">
+                Three scenes, one final lock. Pick a route each scene, solve, collect fragments, then unlock the door.
             </div>
-            <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-                <button id="startBtn" class="start-btn">Start Today’s Escape</button>
-                <a class="badge" href="/escape/leaderboard" target="_blank" rel="noopener">View Leaderboard</a>
+            <div class="row" style="justify-content:center;margin-top:10px;">
+                <button id="startBtn" style="background:#1b7bc0;border-color:#2f8bd5">Start Today’s Escape</button>
+                <a class="badge" href="/escape/leaderboard?date={{ date_key }}" target="_blank" rel="noopener">View
+                    Leaderboard</a>
             </div>
-            <div class="start-sub" style="font-size:12px; opacity:.8;">Date: <span id="startDate">{{ date_key }}</span>
-                • Difficulty: {{ difficulty|default('medium')|title }}</div>
+            <div style="color:#9aa3c7;font-size:12px;margin-top:6px;">
+                Date: <b>{{ date_key }}</b> • Difficulty: {{ difficulty|default('medium')|title }}
+            </div>
+            <div class="tiny" style="margin-top:10px;">
+                Hints cost chips. “Move quickly” doubles hint costs and delays hints by +30s.
+            </div>
         </div>
     </div>
 
     <div class="wrap">
         <header>
             <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
-            <div class="meta">
-                <span class="badge">Difficulty: <strong id="difficulty">{{ difficulty|default('medium')|title
-                        }}</strong></span>
-                <span class="badge" id="progressBadge">Fragments: 0 / 3</span>
-            </div>
-            <div class="timer" id="timer">00:00.000</div>
+            <span class="badge">Difficulty: <b id="difficulty">{{ difficulty|default('medium')|title }}</b></span>
+            <span class="badge" id="sceneBadge">Scene 1 of 3</span>
+            <span class="badge" id="chipsBadge">Chips: —</span>
+            <div id="timer" class="timer">00:00.000</div>
         </header>
 
-        <section class="intro">
-            <div id="roomTitle" style="font-weight:800; margin-bottom:6px;">Loading…</div>
-            <div id="roomIntro" style="color:#c8d4ff;">Please wait…</div>
-        </section>
+        <div class="two-col">
+            <main>
+                <section class="intro panel">
+                    <div id="roomTitle" style="font-weight:800;margin-bottom:6px;">Loading…</div>
+                    <div id="roomIntro" style="color:#c8d4ff">Please wait…</div>
+                </section>
 
-        <section class="pane">
-            <div id="trail" class="puzzles" style="padding:12px;"></div>
-        </section>
+                <!-- Scenes injected here -->
+                <section id="scenes"></section>
 
-        <section class="footer">
-            <div id="finalGate" class="final-gate hidden">
-                <div id="finalPrompt"><strong>Final Code</strong> — Combine the three fragments.</div>
-                <div class="input-row">
-                    <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
-                    <button id="finishBtn">Finish & Submit Time</button>
+                <!-- Final gate -->
+                <section class="footer panel final" id="finalGate">
+                    <div><strong>Final Code</strong> — Combine what you’ve learned.</div>
+                    <div class="row" style="margin-top:6px;">
+                        <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
+                        <button id="finishBtn">Finish & Submit Time</button>
+                    </div>
+                    <div id="finalStatus" class="status"></div>
+
+                    <div id="share"
+                        style="display:none;margin-top:10px;border:1px dashed #2a3769;border-radius:12px;padding:10px;color:#b6c4ff">
+                        <div id="shareText">Share your time!</div>
+                        <div class="row" style="margin-top:8px;">
+                            <button id="copyBtn">Copy Result</button>
+                            <a class="btn" href="/escape/leaderboard?date={{ date_key }}" target="_blank"
+                                rel="noopener">View Leaderboard</a>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <!-- Notes -->
+            <aside class="notes">
+                <div class="panel" style="padding:12px;">
+                    <div style="font-weight:700;margin-bottom:6px;">Notes</div>
+                    <textarea id="notesBox" placeholder="Jot down letters, codes, fragments…"></textarea>
+                    <div class="row" style="margin-top:8px;">
+                        <button id="clearNotes">Clear</button>
+                        <span id="saveStamp" class="status" style="margin-left:auto;">Autosaved</span>
+                    </div>
+                    <div class="tiny" style="margin-top:6px;">Notes are saved locally per day.</div>
                 </div>
-                <div id="finalStatus" class="status"></div>
-            </div>
-
-            <div id="share" class="share">
-                <div id="shareText">Share your time!</div>
-                <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-                    <button class="copy-btn" id="copyBtn">Copy Result</button>
-                    <a id="tweetLink" target="_blank" rel="noopener"><button>Post on X</button></a>
-                    <a href="/escape/leaderboard" target="_blank" rel="noopener"><button>View Leaderboard</button></a>
-                </div>
-            </div>
-        </section>
+            </aside>
+        </div>
     </div>
 
     <div id="toast" class="toast">Saved</div>
 
     <script>
+        // ---------- Config (client) ----------
+        const CHIPS_START = 100;
+        const HINT_COST = {
+            cautious: { h1: 5, h2: 10 },
+            brisk: { h1: 10, h2: 20 }  // doubled cost
+        };
+        const HINT_DELAY_BONUS = { cautious: 0, brisk: 30 }; // +seconds to both hints if brisk
+        const CHIPS_TO_MS = 50; // time bonus: 1 chip = 50 ms (server should mirror)
+
         // ---------- State ----------
         const state = {
             dateKey: "{{ date_key }}",
-            difficulty: "{{ difficulty|default('medium') }}",
             startedMs: null,
             tickHandle: null,
             room: null,
-            trail: null,           // {rooms:[{id,title,text,routes:[{id,label,puzzle}],fragment_rule}]}
-            solvedScenes: 0,
-            chosenRouteByRoom: {}, // room_id -> "cautious" | "brisk"
+            currentScene: 0,
+            solvedScenes: [false, false, false],
+            chosenRoutes: [null, null, null], // "cautious"|"brisk"
             hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
-            finished: false,
+            chips: CHIPS_START,
+            spent: 0,
+            hintsUsed: [{ h1: false, h2: false }, { h1: false, h2: false }, { h1: false, h2: false }],
         };
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const paramDate = urlParams.get("date");
-        if (paramDate) state.dateKey = paramDate;
-
         // ---------- Helpers ----------
-        const $ = (id) => document.getElementById(id);
-        function fmtTime(ms) { const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0"); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`; }
-        function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1800); }
-        function randomPick(arr, f = "") { return (!arr || !arr.length) ? f : arr[Math.floor(Math.random() * arr.length)]; }
+        const $ = id => document.getElementById(id);
+        const fmtTime = ms => {
+            const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
+            return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
+        };
+        function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1600); }
+        function updateChipsBadge() { const b = $("chipsBadge"); b.textContent = `Chips: ${state.chips}`; b.classList.add("chip-flash"); setTimeout(() => b.classList.remove("chip-flash"), 300); }
 
-        // ---------- Fetch ----------
+        // ---------- Notes (localStorage per day) ----------
+        const NOTES_KEY = d => `trail-notes-${d}`;
+        function loadNotes() { $("notesBox").value = localStorage.getItem(NOTES_KEY(state.dateKey)) || ""; }
+        function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 900); }
+        $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
+        $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
+
+        // ---------- Start / Timer ----------
+        $("startBtn").addEventListener("click", async () => {
+            $("overlay").classList.add("hidden");
+            await fetchRoom();
+            startTimer();
+            loadNotes();
+            updateChipsBadge();
+        });
+        function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
+        function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
+
+        // ---------- Fetch room ----------
         async function fetchRoom() {
-            const qs = state.dateKey ? `?date=${encodeURIComponent(state.dateKey)}` : "";
-            const res = await fetch(`/escape/api/today${qs}`, { cache: "no-store" });
-            if (!res.ok) throw new Error("Failed to load room");
+            const res = await fetch(`/escape/api/today?date=${encodeURIComponent(state.dateKey)}`, { cache: "no-store" });
             const room = await res.json();
-
-            $("dateKey").textContent = state.dateKey;
-            $("difficulty").textContent = (room.difficulty || state.difficulty || "medium").toString().replace(/^./, c => c.toUpperCase());
-            state.hintPolicy = room.server_hint_policy || state.hintPolicy;
-
+            state.room = room;
             $("roomTitle").textContent = room.title || "Today's Trail";
             $("roomIntro").textContent = room.intro || "";
-
-            state.room = room;
-            state.trail = room.trail || { rooms: [] };
-
-            // Final lock prompt (if author supplied one)
-            if (room.final && room.final.prompt) {
-                $("finalPrompt").innerHTML = `<strong>Final Code</strong> — ${room.final.prompt}`;
-            }
-
-            renderTrail();
+            state.hintPolicy = room.server_hint_policy || state.hintPolicy;
+            renderScenes(room);
+            updateSceneBadge();
         }
 
-        // ---------- Render ----------
-        function renderTrail() {
-            const holder = $("trail");
-            holder.innerHTML = "";
-            const rooms = state.trail.rooms || [];
+        // ---------- Render scenes ----------
+        function renderScenes(room) {
+            const holder = $("scenes"); holder.innerHTML = "";
+            const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
+
             rooms.forEach((rm, idx) => {
-                const card = document.createElement("div");
-                card.className = "puzzle";
-                card.id = `room-${rm.id}`;
+                const wrap = document.createElement("section");
+                wrap.className = "scene panel" + (idx === 0 ? " active" : "");
+                wrap.id = `scene-${idx}`;
+                wrap.innerHTML = `
+          <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
+          <div style="color:#c8d4ff">${rm.text || ""}</div>
 
-                const head = document.createElement("div");
-                head.className = "puzzle-head";
-                const t = document.createElement("div");
-                t.className = "p-title";
-                t.textContent = `Scene ${idx + 1}: ${rm.title || "Trail"}`;
-                const badge = document.createElement("div");
-                badge.className = "p-arch";
-                badge.textContent = "choose a route";
-                head.appendChild(t); head.appendChild(badge);
-                card.appendChild(head);
+          <div class="tiny" style="margin-top:6px;">Choose a route:</div>
+          <div class="route-btns" style="margin-top:4px;">
+            <button data-route="cautious" title="Normal hint cost / normal hint timing">Proceed carefully (1×)</button>
+            <button data-route="brisk" title="Hints cost 2× chips and unlock +30s later">Move quickly (2×)</button>
+          </div>
 
-                const text = document.createElement("div");
-                text.className = "p-prompt";
-                text.textContent = rm.text || "";
-                card.appendChild(text);
+          <div class="p-card" id="pzwrap-${idx}" style="display:none;">
+            <div class="tiny" id="routeLabel-${idx}" style="margin-bottom:6px;"></div>
+            <div id="pzp-${idx}" style="white-space:pre-wrap;"></div>
+            <div class="row" style="margin-top:6px;">
+              <input id="pzin-${idx}" type="text" placeholder="Type your answer…"/>
+              <button id="pzbtn-${idx}">Submit</button>
+            </div>
+            <div id="pzstatus-${idx}" class="status">Awaiting answer…</div>
 
-                // Route buttons
-                const routesRow = document.createElement("div");
-                routesRow.style.display = "flex";
-                routesRow.style.gap = "8px";
-                (rm.routes || []).forEach(rt => {
-                    const b = document.createElement("button");
-                    b.textContent = rt.label || (rt.id === "cautious" ? "Cautious" : "Brisk");
-                    b.addEventListener("click", () => chooseRoute(rm, rt, card, routesRow, badge));
-                    routesRow.appendChild(b);
+            <div class="hint-row">
+              <button class="hint-pill" id="h1btn-${idx}">Reveal Hint 1</button>
+              <button class="hint-pill" id="h2btn-${idx}">Reveal Hint 2</button>
+            </div>
+            <div class="hint-text" id="h1txt-${idx}"></div>
+            <div class="hint-text" id="h2txt-${idx}"></div>
+            <div class="tiny" id="hintCost-${idx}" style="margin-top:6px;"></div>
+          </div>
+
+          <div class="row" style="margin-top:8px;">
+            <button class="btn" id="next-${idx}" style="display:none;">Next scene →</button>
+          </div>
+        `;
+                holder.appendChild(wrap);
+
+                // Route selection
+                wrap.querySelectorAll(".route-btns button").forEach(b => {
+                    b.addEventListener("click", () => {
+                        const route = b.getAttribute("data-route");
+                        state.chosenRoutes[idx] = route;
+                        showPuzzle(idx, rm, route);
+                        wrap.querySelectorAll(".route-btns button").forEach(x => x.disabled = true);
+                    });
                 });
-                card.appendChild(routesRow);
-
-                // Placeholder for the puzzle UI
-                const pzWrap = document.createElement("div");
-                pzWrap.style.marginTop = "8px";
-                card.appendChild(pzWrap);
-
-                holder.appendChild(card);
             });
 
-            updateProgress();
+            $("finalGate").style.display = "none";
         }
 
-        function updateProgress() {
-            $("progressBadge").textContent = `Fragments: ${state.solvedScenes} / 3`;
-            if (state.solvedScenes >= 3) {
-                $("finalGate").classList.remove("hidden");
+        function showPuzzle(idx, rm, routeId) {
+            const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
+            const p = route.puzzle || {};
+            const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
+            $(`pzp-${idx}`).textContent = p.prompt || "Puzzle";
+            $(`routeLabel-${idx}`).textContent = `Route: ${routeId} (Hint costs — H1: ${HINT_COST[routeId].h1} chips, H2: ${HINT_COST[routeId].h2} chips)`;
+            $(`hintCost-${idx}`).textContent = `Your chips: ${state.chips}. Using hints will deduct chips permanently.`;
+
+            const input = $(`pzin-${idx}`), btn = $(`pzbtn-${idx}`), status = $(`pzstatus-${idx}`);
+            const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
+
+            // Hint timers include route delay modifier
+            function updateHints() {
+                if (!state.startedMs) return;
+                const elapsed = Date.now() - state.startedMs;
+                const boost = HINT_DELAY_BONUS[routeId] || 0;
+                const d1 = ((state.hintPolicy.first_hint_delay_s ?? 60) + boost) * 1000;
+                const d2 = ((state.hintPolicy.second_hint_delay_s ?? 120) + boost) * 1000;
+                h1btn.disabled = elapsed < d1;
+                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : `Reveal Hint 1 (-${HINT_COST[routeId].h1})`;
+                h2btn.disabled = elapsed < d2;
+                h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : `Reveal Hint 2 (-${HINT_COST[routeId].h2})`;
             }
-        }
+            updateHints(); const iv = setInterval(updateHints, 250);
 
-        function chooseRoute(room, route, card, routesRow, badge) {
-            if (state.chosenRouteByRoom[room.id]) return; // already chosen
-            state.chosenRouteByRoom[room.id] = route.id;
-            // disable both buttons
-            [...routesRow.querySelectorAll("button")].forEach(b => b.disabled = true);
-            badge.textContent = `route: ${route.id}`;
-            renderPuzzleInto(card, room, route);
-        }
-
-        function renderPuzzleInto(container, room, route) {
-            const pz = route.puzzle || {};
-            const box = document.createElement("div");
-            box.style.marginTop = "8px";
-
-            const prompt = document.createElement("div");
-            prompt.className = "p-paraphrase";
-            prompt.textContent = pz.prompt || "";
-            box.appendChild(prompt);
-
-            const inputRow = document.createElement("div");
-            inputRow.className = "input-row";
-            const input = document.createElement("input");
-            input.type = "text"; input.placeholder = "Type your answer…"; input.autocomplete = "off";
-            const btn = document.createElement("button");
-            btn.textContent = "Submit";
-            inputRow.appendChild(input); inputRow.appendChild(btn);
-            box.appendChild(inputRow);
-
-            const status = document.createElement("div");
-            status.className = "status";
-            status.textContent = "Awaiting answer…";
-            box.appendChild(status);
-
-            // Hints
-            const hints = pz.hints || [];
-            if (hints.length) {
-                const hintsWrap = document.createElement("div");
-                hintsWrap.className = "p-hints";
-                const h1btn = document.createElement("button"); h1btn.className = "hint-pill"; h1btn.textContent = "Reveal Hint 1 (60s)";
-                const h1text = document.createElement("div"); h1text.className = "hint-text hidden";
-                const h2btn = document.createElement("button"); h2btn.className = "hint-pill"; h2btn.textContent = "Reveal Hint 2 (120s)";
-                const h2text = document.createElement("div"); h2text.className = "hint-text hidden";
-                hintsWrap.appendChild(h1btn); hintsWrap.appendChild(h1text); hintsWrap.appendChild(h2btn); hintsWrap.appendChild(h2text);
-                box.appendChild(hintsWrap);
-
-                const updateHints = () => {
-                    if (!state.startedMs) return;
-                    const elapsed = Date.now() - state.startedMs;
-                    const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000;
-                    const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000;
-                    h1btn.disabled = elapsed < d1;
-                    h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.ceil((d1 - elapsed) / 1000)}s` : "Reveal Hint 1";
-                    h2btn.disabled = elapsed < d2;
-                    h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.ceil((d2 - elapsed) / 1000)}s` : "Reveal Hint 2";
-                };
-                setInterval(updateHints, 250);
-                h1btn.addEventListener("click", () => { if (!h1btn.disabled) { h1text.textContent = hints[0] || "No hint provided."; h1text.classList.remove("hidden"); } });
-                h2btn.addEventListener("click", () => { if (!h2btn.disabled) { h2text.textContent = hints[1] || "No additional hint."; h2text.classList.remove("hidden"); } });
+            function spend(cost) {
+                if (state.chips < cost) { toast("Not enough chips for that hint."); return false; }
+                state.chips -= cost; state.spent += cost; updateChipsBadge();
+                return true;
             }
 
-            container.appendChild(box);
+            h1btn.onclick = () => {
+                if (h1btn.disabled) return;
+                if (!state.hintsUsed[idx].h1) {
+                    if (!spend(HINT_COST[routeId].h1)) return;
+                    state.hintsUsed[idx].h1 = true;
+                }
+                h1txt.textContent = (p.hints || [])[0] || "No hint provided.";
+                h1txt.style.display = "block";
+            };
 
-            async function submit() {
-                if (state.finished) return;
+            h2btn.onclick = () => {
+                if (h2btn.disabled) return;
+                if (!state.hintsUsed[idx].h2) {
+                    if (!spend(HINT_COST[routeId].h2)) return;
+                    state.hintsUsed[idx].h2 = true;
+                }
+                h2txt.textContent = (p.hints || [])[1] || "No additional hint.";
+                h2txt.style.display = "block";
+            };
+
+            btn.onclick = async () => {
                 const answer = (input.value || "").trim();
                 if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
                 status.textContent = "Checking…"; status.className = "status";
                 try {
                     const res = await fetch(`/escape/api/submit`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ date_key: state.dateKey, puzzle_id: pz.id, answer })
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ date_key: state.dateKey, puzzle_id: p.id, answer })
                     });
                     const data = await res.json();
                     if (data && data.correct) {
-                        input.disabled = true; btn.disabled = true;
                         status.textContent = "Correct! Fragment secured."; status.className = "status ok";
-                        state.solvedScenes = Math.min(3, state.solvedScenes + 1);
-                        updateProgress();
+                        input.disabled = true; btn.disabled = true; clearInterval(iv);
+                        state.solvedScenes[idx] = true;
+                        const nextBtn = $(`next-${idx}`);
+                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); }
+                        else { revealFinal(); }
                     } else {
                         status.textContent = "Not yet. Try another angle."; status.className = "status err";
                     }
-                } catch {
+                } catch (e) {
                     status.textContent = "Network error — try again."; status.className = "status err";
                 }
-            }
+            };
 
-            btn.addEventListener("click", submit);
-            input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+            input.addEventListener("keydown", e => { if (e.key === "Enter") btn.click(); });
         }
 
-        // ---------- Finish flow ----------
+        function goToScene(idx) {
+            document.querySelectorAll(".scene").forEach(s => s.classList.remove("active"));
+            $(`scene-${idx}`).classList.add("active");
+            state.currentScene = idx;
+            updateSceneBadge();
+        }
+        function updateSceneBadge() { $("sceneBadge").textContent = `Scene ${state.currentScene + 1} of 3`; }
+
+        function revealFinal() {
+            if (state.solvedScenes.every(Boolean)) {
+                $("finalGate").style.display = "block";
+                goToScene(2);
+            }
+        }
+
+        // ---------- Finish ----------
         $("finishBtn").addEventListener("click", async () => {
-            if (state.solvedScenes < 3) { toast("Solve all three scenes first."); return; }
+            if (!state.solvedScenes.every(Boolean)) { toast("Solve all scenes first."); return; }
             const finalVal = ($("finalInput").value || "").trim();
             if (!finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
-            await doFinish(true, finalVal);
-        });
 
-        async function doFinish(success, finalCode = null) {
-            if (state.finished) return;
             try {
                 const res = await fetch(`/escape/api/finish`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         date_key: state.dateKey,
                         started_ms: state.startedMs,
-                        success: !!success,
-                        final_code: finalCode,
+                        success: true,
+                        final_code: finalVal,
                         meta: {
-                            ua: navigator.userAgent, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                            width: window.innerWidth, height: window.innerHeight
+                            ua: navigator.userAgent,
+                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                            width: window.innerWidth, height: window.innerHeight,
+                            chips_start: CHIPS_START,
+                            chips_spent: state.spent,
+                            chips_remaining: state.chips,
+                            chips_to_ms: CHIPS_TO_MS,
+                            routes: state.chosenRoutes,
+                            hints_used: state.hintsUsed
                         }
                     })
                 });
                 const data = await res.json();
                 if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
-                if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check the code."; $("finalStatus").className = "status err"; return; }
-                state.finished = true; stopTimer(); revealShare(data.time_ms || (Date.now() - state.startedMs)); toast("Time submitted!");
-            } catch { $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err"; }
-        }
+                if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check your fragments."; $("finalStatus").className = "status err"; return; }
 
-        function revealShare(timeMs) {
-            const share = $("share");
-            const txt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
-            $("shareText").textContent = txt;
-            $("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText(txt + " /escape/today"); toast("Copied!"); } catch { toast("Copy failed"); } };
-            const tweet = new URL("https://twitter.com/intent/tweet"); tweet.searchParams.set("text", txt + " "); tweet.searchParams.set("url", window.location.origin + "/escape/today"); $("tweetLink").href = tweet.toString();
-            share.classList.add("show");
-        }
+                stopTimer();
 
-        // ---------- Timer ----------
-        function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
-        function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
+                // Show time + chip bonus locally (server should mirror)
+                const rawMs = data.time_ms || (Date.now() - state.startedMs);
+                const bonusMs = Math.max(0, state.chips * CHIPS_TO_MS);
+                const effMs = Math.max(0, rawMs - bonusMs);
 
-        // ---------- Start ----------
-        $("startBtn").addEventListener("click", async () => { $("overlay").classList.add("hidden"); await fetchRoom(); startTimer(); });
+                $("finalStatus").innerHTML = `
+          <div class="status ok">Escaped! Time submitted.</div>
+          <div class="tiny">Raw: <b>${fmtTime(rawMs)}</b> • Chip bonus: <b>-${fmtTime(bonusMs)}</b> (${state.chips} chips × ${CHIPS_TO_MS}ms)
+            • Effective: <b>${fmtTime(effMs)}</b></div>
+        `;
+                const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(effMs)} (chip bonus applied). Can you beat me?`;
+                $("shareText").textContent = shareTxt;
+                $("copyBtn").onclick = async () => {
+                    try {
+                        await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`);
+                        toast("Copied!");
+                    } catch (e) { toast("Copy failed"); }
+                };
+                $("share").style.display = "block";
+            } catch (e) {
+                $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err";
+            }
+        });
 
-        // Cmd/Ctrl+Enter submits focused input
+        // ---------- Keyboard shortcut ----------
         document.addEventListener("keydown", (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                const active = document.activeElement;
-                if (active && active.tagName === "INPUT") {
-                    active.closest(".puzzle")?.querySelector("button:not([disabled])")?.click();
-                }
+                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`);
+                if (btn && !btn.disabled) btn.click();
             }
         });
     </script>

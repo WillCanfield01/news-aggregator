@@ -30,6 +30,13 @@ from .core import (
     get_today_key,
 )
 
+# ---- Daily Trail chips (non-monetary) ----
+CHIPS_START = 100  # starting pool
+ROUTE_COST = {"cautious": 0, "brisk": 10}  # "move quickly" costs chips
+HINT_COST1 = 10
+HINT_COST2 = 20
+TIME_BONUS_PER_CHIP_MS = 50  # subtract 50 ms per remaining chip at finish
+
 # ---------------------------------------------------------------------
 # Blueprint initializer
 # ---------------------------------------------------------------------
@@ -102,66 +109,97 @@ def init_routes(bp: Blueprint):
     # -----------------------------
     # API: Finish a run (for leaderboards)
     # -----------------------------
-    @bp.route("/api/finish", methods=["POST"])
-    def api_finish():
-        """
-        Body:
-        {
-          "date_key": "...",
-          "started_ms": 1693584000000,    # epoch ms
-          "success": true,
-          "final_code": "AB12",           # required if room has a final lock
-          "meta": {...}                   # optional
-        }
-        """
-        data = _json_body_or_400()
-        date_key = data.get("date_key")
-        started_ms = data.get("started_ms")
-        success = bool(data.get("success"))
-        meta = data.get("meta") or {}
+@bp.route("/api/finish", methods=["POST"])
+def api_finish():
+    data = _json_body_or_400()
+    date_key = data.get("date_key")
+    started_ms = data.get("started_ms")
+    success = bool(data.get("success"))
+    meta_client = data.get("meta") or {}
 
-        if not date_key or started_ms is None:
-            return _bad("Missing required fields: date_key, started_ms")
+    if not date_key or started_ms is None:
+        return _bad("Missing required fields: date_key, started_ms")
 
-        room = _get_or_404(date_key)
+    room = _get_or_404(date_key)
 
-        # Compute server-side duration
-        now = dt.datetime.utcnow()
-        try:
-            started_dt = dt.datetime.utcfromtimestamp(int(started_ms) / 1000.0)
-        except Exception:
-            return _bad("started_ms must be epoch milliseconds")
+    # Duration (server computed)
+    now = dt.datetime.utcnow()
+    try:
+        started_dt = dt.datetime.utcfromtimestamp(int(started_ms) / 1000.0)
+    except Exception:
+        return _bad("started_ms must be epoch milliseconds")
+    dur_ms = int((now - started_dt).total_seconds() * 1000)
+    if dur_ms < 3000:
+        current_app.logger.info("[escape] suspicious finish: duration < 3s")
+        success = False
 
-        dur_ms = int((now - started_dt).total_seconds() * 1000)
-        if dur_ms < 3000:
-            current_app.logger.info("[escape] suspicious finish: duration < 3s")
+    # Final-code check (if required)
+    if success and room.json_blob.get("final_code") or (room.json_blob.get("final") or {}).get("solution"):
+        submitted_final = (data.get("final_code") or "").strip()
+        if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
             success = False
 
-        # Require and verify the final lock if the room has one
-        has_final = bool((room.json_blob or {}).get("final") or (room.json_blob or {}).get("final_code"))
-        if success and has_final:
-            submitted_final = (data.get("final_code") or "").strip()
-            if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
-                success = False
+    # ---- Chip math (server-authoritative) ----
+    # Client sends which routes they chose and which hints they used per scene.
+    # We recompute chips_remaining from the cost table above.
+    routes = meta_client.get("routes") or []         # e.g. ["cautious","brisk","cautious"]
+    hints_used = meta_client.get("hints") or []      # e.g. [{"h1":true,"h2":false}, ... x3]
 
-        attempt = EscapeAttempt(
-            user_id=None,
-            date_key=date_key,
-            started_at=started_dt,
-            finished_at=now,
-            time_ms=dur_ms if success else None,
-            success=success,
-            meta=meta,
-        )
-        db.session.add(attempt)
-        db.session.commit()
+    # Coerce shapes
+    try:
+        routes = [str(x) for x in routes][:3]
+    except Exception:
+        routes = []
+    norm_hints = []
+    for h in hints_used[:3]:
+        h1 = bool((h or {}).get("h1"))
+        h2 = bool((h or {}).get("h2"))
+        norm_hints.append({"h1": h1, "h2": h2})
+    while len(norm_hints) < 3:
+        norm_hints.append({"h1": False, "h2": False})
 
-        return jsonify({
-            "ok": True,
-            "success": success,
-            "time_ms": attempt.time_ms,
-            "attempt_id": attempt.id,
-        })
+    # Compute spend
+    chips_spent = 0
+    for rid in routes[:3]:
+        chips_spent += int(ROUTE_COST.get(rid, 0))
+    for h in norm_hints[:3]:
+        if h.get("h1"): chips_spent += HINT_COST1
+        if h.get("h2"): chips_spent += HINT_COST2
+
+    chips_remaining = max(0, min(CHIPS_START - chips_spent, CHIPS_START))
+    bonus_ms = chips_remaining * TIME_BONUS_PER_CHIP_MS
+    adjusted_ms = max(0, dur_ms - bonus_ms) if success else None
+
+    attempt = EscapeAttempt(
+        user_id=None,
+        date_key=date_key,
+        started_at=started_dt,
+        finished_at=now,
+        time_ms=adjusted_ms,
+        success=success,
+        meta={
+            **meta_client,
+            "chips_start": CHIPS_START,
+            "chips_spent": chips_spent,
+            "chips_remaining": chips_remaining,
+            "bonus_ms": bonus_ms,
+            "raw_time_ms": dur_ms,
+            "routes": routes,
+            "hints": norm_hints,
+        },
+    )
+    db.session.add(attempt)
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "success": success,
+        "time_ms": attempt.time_ms,          # adjusted time (shown on leaderboard)
+        "raw_time_ms": dur_ms,
+        "bonus_ms": bonus_ms,
+        "chips_remaining": chips_remaining,
+        "attempt_id": attempt.id,
+    })
 
     # -----------------------------
     # Admin: force regenerate

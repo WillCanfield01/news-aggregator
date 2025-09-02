@@ -119,10 +119,6 @@ class DailyLeaderboardView:
 
     @staticmethod
     def top_for_day(date_key: str, limit: int = 50):
-        """
-        Return a list of {rank, attempt} for the given day, ordered by best time.
-        Success-only, non-null time_ms.
-        """
         q = (
             db.session.query(EscapeAttempt)
             .filter(
@@ -130,12 +126,17 @@ class DailyLeaderboardView:
                 EscapeAttempt.success.is_(True),
                 EscapeAttempt.time_ms.isnot(None),
             )
-            .order_by(EscapeAttempt.time_ms.asc(), EscapeAttempt.id.asc())
-            .limit(limit)
         )
         rows = q.all()
+        # Sort by adjusted time ASC, then chips_remaining DESC
+        rows.sort(
+            key=lambda a: (
+                a.time_ms if a.time_ms is not None else 10 ** 12,
+                -int((a.meta or {}).get("chips_remaining", 0)),
+            )
+        )
         out = []
-        for idx, row in enumerate(rows, start=1):
+        for idx, row in enumerate(rows[:limit], start=1):
             out.append({"rank": idx, "attempt": row})
         return out
 
