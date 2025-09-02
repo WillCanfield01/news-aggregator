@@ -234,7 +234,7 @@ def gen_vigenere(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
                      "A Vigenère line conceals the token."]
     )
 
-def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
+def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = None) -> Puzzle:
     d1,d2,d3,d4 = (rng.randrange(0,10) for _ in range(4))
     c1=f"The first two digits sum to {d1+d2}."
     c2=f"The third digit is the first digit plus {d3-d1}."
@@ -468,14 +468,61 @@ def validate_trailroom(room: Dict[str,Any]) -> Dict[str,Any]:
 
 # Backward-compatible validator: if old shape, do minimal checks;
 # if new shape, use validate_trailroom.
-def validate_room(room: Dict[str,Any]) -> Dict[str,Any]:
-    if "trail" in room:
-        return validate_trailroom(room)
-    # OLD shape fallback (kept for safety with legacy DB rows)
-    if not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
+def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
+    required_top = {"id", "title", "intro", "graph", "puzzles", "anti_spoiler", "difficulty"}
+    missing = [k for k in required_top if k not in room_json]
+    if missing:
+        raise ValueError(f"Room missing keys: {missing}")
+
+    # --- NEW: coerce puzzles to dicts only ---
+    raw_puzzles = room_json.get("puzzles", [])
+    if not isinstance(raw_puzzles, list):
+        raise ValueError("Room puzzles must be a list")
+    puzzles: List[Dict[str, Any]] = [p for p in raw_puzzles if isinstance(p, dict)]
+    if not puzzles:
         raise ValueError("Room must contain at least one puzzle")
-    for p in room["puzzles"]: _validate_puzzle(p)
-    return room
+    room_json["puzzles"] = puzzles
+    # ------------------------------------------
+
+    seen_ids = set()
+    for p in puzzles:
+        for key in ("id", "archetype", "prompt", "answer_format", "solution"):
+            if key not in p:
+                raise ValueError(f"Puzzle missing '{key}'")
+        pid = p["id"]
+        if pid in seen_ids:
+            raise ValueError("Duplicate puzzle id")
+        seen_ids.add(pid)
+
+        sol = p.get("solution", {}) or {}
+        ans = sol.get("answer")
+        if not ans or len(normalize_answer(ans)) == 0:
+            raise ValueError("Puzzle has empty solution answer")
+
+        if normalize_answer(ans).lower() in {s.upper() for s in COMMON_STOCK_ANSWERS}:
+            raise ValueError("Puzzle uses stock/cliché answer")
+
+        if answer_recently_used(str(ans)):
+            raise ValueError("Answer recently used in the cooldown window")
+
+        pattern = (p.get("answer_format") or {}).get("pattern")
+        if pattern:
+            if not re.match(r"^\^.*\$$", pattern):
+                raise ValueError("answer_format.pattern must be anchored ^...$")
+            if not re.match(pattern, str(ans)):
+                if not re.match(pattern, normalize_answer(str(ans))):
+                    raise ValueError("Solution does not match its declared pattern")
+
+    graph = room_json.get("graph", {}) or {}
+    if "end" not in graph:
+        raise ValueError("Graph must define an 'end' gate id")
+
+    fc = room_json.get("final_code")
+    if fc:
+        if not (FINAL_CODE_MIN_LEN <= len(normalize_answer(fc)) <= FINAL_CODE_MAX_LEN):
+            raise ValueError("final_code length out of bounds")
+
+    return room_json
 
 def too_easy(room: Dict[str,Any]) -> bool:
     puzzles = room.get("puzzles") or []
