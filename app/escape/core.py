@@ -550,14 +550,26 @@ def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         blob = json.loads(json.dumps(room_json))  # deep copy
+
+        # ⛔ Do not allow patches that touch core structures
+        def _allowed(parts: List[str]) -> bool:
+            if not parts:
+                return False
+            if parts[0] in {"puzzles", "graph", "final_code"}:
+                return False
+            return True
+
         for op in patch_ops:
             path = op.get("path", "")
             parts = [p for p in path.split("/") if p]
+            if not _allowed(parts):
+                continue
             if op.get("op") in ("replace", "add"):
                 _json_path_set(blob, parts, op.get("value"))
         return blob
     except Exception:
         return room_json
+
 
 
 def _json_path_set(blob: Dict[str, Any], parts: List[str], value: Any):
@@ -823,14 +835,19 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     if too_easy(room):
         room = harden(room, rng)
         room = validate_room(room)
-
+        
+    # Apply critic safely; revert on any validation failure
+    pre_critic = json.loads(json.dumps(room))  # deep copy
     try:
-        if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
-            t2, i2 = rng.choice(THEMES)
-            room["title"] = t2
-            room["intro"] = i2
-    except Exception:
-        pass
+        patched = llm_critic_patch(pre_critic)
+        validate_room(patched)
+        room = patched
+    except Exception as e:
+        try:
+            current_app.logger.info(f"[escape] critic patch rejected; keeping pre-critic room: {e}")
+        except Exception:
+            pass
+        room = pre_critic
 
     return room
 

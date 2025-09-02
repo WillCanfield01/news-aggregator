@@ -255,21 +255,19 @@ def init_routes(bp):
 
 def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Return a deep copy with solution data removed so we never leak answers to the client.
+    Return a copy with solution data removed. Be lenient about weird shapes.
     """
-    # Shallow copy of top-level
     out = dict(room_json)
-    # Deep-ish copy for puzzles stripping solution
-    puzzles = []
-    for p in room_json.get("puzzles", []):
-        pp = dict(p)
-        pp.pop("solution", None)
-        puzzles.append(pp)
-    out["puzzles"] = puzzles
-    # Do not remove final_code existence; client may need to know a meta gate exists,
-    # but we do not expose its value (only existence). The server verifies it on finish.
+    cleaned: List[Dict[str, Any]] = []
+    for p in (room_json.get("puzzles") or []):
+        if not isinstance(p, dict):
+            # skip anything that isn't a proper puzzle dict
+            continue
+        # shallow copy minus solution
+        pp = {k: v for k, v in p.items() if k != "solution"}
+        cleaned.append(pp)
+    out["puzzles"] = cleaned
     return out
-
 
 def _json_body_or_400() -> Dict[str, Any]:
     """
