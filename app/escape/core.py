@@ -80,6 +80,10 @@ def get_today_key(tz: Optional[str] = None) -> str:
 def normalize_answer(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
 
+def _as_dict_list(seq) -> List[Dict[str, Any]]:
+    """Filter any sequence down to dicts only."""
+    return [x for x in (seq or []) if isinstance(x, dict)]
+
 def _shingles(text: str, k: int = 5) -> set:
     t = re.sub(r"\s+", " ", text.lower()).strip()
     if len(t) < k: return {t}
@@ -102,20 +106,19 @@ def is_too_similar_to_recent(room_json: Dict[str, Any],
                              window_days: int = RECENT_WINDOW_DAYS,
                              sim_threshold: float = 0.35) -> bool:
     text = f"{room_json.get('title','')} {room_json.get('intro','')}"
-    # include trail prompts
-    for rm in (room_json.get("trail", {}).get("rooms") or []):
+    for rm in _as_dict_list(room_json.get("trail", {}).get("rooms")):
         text += " " + rm.get("title","") + " " + rm.get("text","")
-        for r in (rm.get("routes") or []):
-            p = r.get("puzzle") or {}
+        for r in _as_dict_list(rm.get("routes")):
+            p = r.get("puzzle") if isinstance(r.get("puzzle"), dict) else {}
             text += " " + (p.get("prompt") or "")
     S = _shingles(text, k=7)
     for r in recent_rooms(window_days):
         blob = r.json_blob or {}
         t2 = f"{blob.get('title','')} {blob.get('intro','')}"
-        for rm in (blob.get("trail", {}).get("rooms") or []):
+        for rm in _as_dict_list(blob.get("trail", {}).get("rooms")):
             t2 += " " + rm.get("title","") + " " + rm.get("text","")
-            for rr in (rm.get("routes") or []):
-                pp = rr.get("puzzle") or {}
+            for rr in _as_dict_list(rm.get("routes")):
+                pp = rr.get("puzzle") if isinstance(rr.get("puzzle"), dict) else {}
                 t2 += " " + (pp.get("prompt") or "")
         if jaccard(S, _shingles(t2, k=7)) >= sim_threshold:
             return True
@@ -128,15 +131,13 @@ def answer_recently_used(answer: str, cooldown_days: int = ANSWER_COOLDOWN_DAYS)
     rs = db.session.query(EscapeRoom).filter(EscapeRoom.created_at >= cutoff).all()
     for r in rs:
         blob = r.json_blob or {}
-        # search top-level puzzles if present
-        for p in (blob.get("puzzles") or []):
+        for p in _as_dict_list(blob.get("puzzles")):
             sol = (p.get("solution") or {}).get("answer")
             if sol and normalize_answer(sol) == ans_norm:
                 return True
-        # search trail routes
-        for rm in (blob.get("trail", {}).get("rooms") or []):
-            for route in (rm.get("routes") or []):
-                p = route.get("puzzle") or {}
+        for rm in _as_dict_list(blob.get("trail", {}).get("rooms")):
+            for route in _as_dict_list(rm.get("routes")):
+                p = route.get("puzzle") if isinstance(route.get("puzzle"), dict) else {}
                 sol = (p.get("solution") or {}).get("answer")
                 if sol and normalize_answer(sol) == ans_norm:
                     return True
@@ -253,8 +254,6 @@ def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = No
     )
 
 # ───────────────────────── Fragment rules ─────────────────────────
-# Whitelist simple, deterministic rules so the final can be built universally.
-# We also support CONST:AB to force equality across routes when LLM slips.
 
 def apply_fragment_rule(answer: str, rule: str) -> str:
     ans = normalize_answer(answer)
@@ -268,7 +267,6 @@ def apply_fragment_rule(answer: str, rule: str) -> str:
     if rule == "LAST2":   return ans[-2:]
     if rule == "LAST3":   return ans[-3:]
 
-    # CAESAR:+K;FIRST2
     m = re.match(r"CAESAR:\+?(-?\d+);(FIRST2|FIRST3|LAST2|LAST3)$", rule)
     if m:
         k = int(m.group(1)) % 26
@@ -277,19 +275,16 @@ def apply_fragment_rule(answer: str, rule: str) -> str:
         sub = m.group(2)
         return apply_fragment_rule(shifted, sub)
 
-    # IDX:0,2  (0-based; up to 4 indices)
     m = re.match(r"IDX:([0-9,]+)$", rule)
     if m:
         idxs = [int(x) for x in m.group(1).split(",") if x.isdigit()]
         out = "".join(ans[i] for i in idxs if 0 <= i < len(ans))
         return out[:4]
 
-    # NUM:LAST2  (for numeric answers)
     if rule == "NUM:LAST2":
         digits = re.sub(r"\D","",answer)
         return (digits[-2:] if digits else "00")
 
-    # default safe
     return ans[:2]
 
 def is_valid_fragment_rule(rule: str) -> bool:
@@ -318,7 +313,6 @@ def _get_openai_client():
         return None, None
 
 def _trail_prompt(date_key: str) -> str:
-    # Ask the model for story + puzzles in *our* schema. We still verify.
     return (
         "Design a tiny Oregon-Trail-flavored escape room with 3 locations then a final lock.\n"
         "STRICT JSON ONLY (no markdown). Schema:\n"
@@ -382,10 +376,89 @@ def llm_generate_trailroom(date_key: str) -> Optional[Dict[str, Any]]:
         except Exception: pass
         return None
 
+# ───────────────────────── Critic (safe patch) ─────────────────────────
+
+def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Optional critic that can only tweak flavor text (title/intro/npc_lines, final.prompt).
+    Never touches puzzles, trail structure, or final answer.
+    """
+    client, mode = _get_openai_client()
+    if not client:
+        return room_json
+
+    content = (
+        "You are a flavor-only editor. Improve novelty and tone of 'title', 'intro', "
+        "'npc_lines' (if present), and 'final.prompt'. Return a JSON Patch array with "
+        "operations touching only those paths. If no changes needed, return [].\n\n"
+        f"ROOM_JSON:\n{json.dumps(room_json, ensure_ascii=False)}"
+    )
+
+    patch_ops: List[Dict[str, Any]] = []
+    try:
+        model = os.getenv("ESCAPE_MODEL", "gpt-4o-mini")
+        if mode == "modern":
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": content}],
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                )
+                text = resp.choices[0].message.content or "[]"
+            except Exception:
+                resp = client.responses.create(
+                    model=model, input=[{"role":"user","content":content}], temperature=0.0
+                )
+                text = getattr(resp, "output_text", "[]")
+        else:
+            text = client.ChatCompletion.create(  # type: ignore
+                model=model, messages=[{"role":"user","content":content}], temperature=0.0
+            )["choices"][0]["message"]["content"]
+        jb = _extract_json_block(text) or text
+        parsed = json.loads(jb)
+        if isinstance(parsed, dict) and "patch" in parsed:
+            patch_ops = parsed["patch"]
+        elif isinstance(parsed, list):
+            patch_ops = parsed
+        else:
+            patch_ops = []
+    except Exception:
+        return room_json
+
+    def _allowed(parts: List[str]) -> bool:
+        if not parts: return False
+        # disallow structural/puzzle changes
+        if parts[0] in {"trail","puzzles","final_code"}: return False
+        # allow title/intro/npc_lines and final.prompt
+        if parts[0] in {"title","intro","npc_lines"}: return True
+        if parts[0]=="final" and (len(parts)>1 and parts[1]=="prompt"): return True
+        return False
+
+    try:
+        blob = json.loads(json.dumps(room_json))  # deep copy
+        for op in patch_ops:
+            path = op.get("path","")
+            parts = [p for p in path.split("/") if p]
+            if not _allowed(parts): continue
+            if op.get("op") in ("replace","add"):
+                cur = blob
+                for i,p in enumerate(parts):
+                    is_last = i == len(parts)-1
+                    if is_last:
+                        cur[p] = op.get("value")
+                    else:
+                        if p not in cur or not isinstance(cur[p], dict):
+                            cur[p] = {}
+                        cur = cur[p]
+        return blob
+    except Exception:
+        return room_json
+
 # ───────────────────────── Validation / assembly ─────────────────────────
 
 def _validate_puzzle(p: Dict[str, Any]) -> None:
-    for k in ("id","prompt","answer_format","solution"): 
+    for k in ("id","prompt","answer_format","solution"):
         if k not in p: raise ValueError(f"Puzzle missing '{k}'")
     if p.get("type") not in ALLOWED_TYPES:
         raise ValueError("Puzzle type not allowed")
@@ -403,7 +476,6 @@ def _validate_puzzle(p: Dict[str, Any]) -> None:
         raise ValueError("Answer recently used")
 
 def _coerce_same_fragment_or_const(rule: str, p1: Dict[str,Any], p2: Dict[str,Any]) -> Tuple[str,str]:
-    """Ensure both routes produce the same fragment. If not, convert to CONST with p1 as source."""
     if not is_valid_fragment_rule(rule):
         rule = "FIRST2"
     a1 = (p1.get("solution") or {}).get("answer","")
@@ -413,13 +485,13 @@ def _coerce_same_fragment_or_const(rule: str, p1: Dict[str,Any], p2: Dict[str,An
     if f1 != f2:
         rule = f"CONST:{f1}"
         f2 = f1
-    return rule, f1  # f1 is the canonical fragment for the room
+    return rule, f1
 
 def _flatten_puzzles(trail: Dict[str,Any]) -> List[Dict[str,Any]]:
     out=[]
-    for rm in (trail.get("rooms") or []):
-        for rt in (rm.get("routes") or []):
-            p = rt.get("puzzle") or {}
+    for rm in _as_dict_list(trail.get("rooms")):
+        for rt in _as_dict_list(rm.get("routes")):
+            p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
             if p:
                 pj = json.loads(json.dumps(p))
                 pj.setdefault("archetype", pj.get("type"))
@@ -432,49 +504,58 @@ def validate_trailroom(room: Dict[str,Any]) -> Dict[str,Any]:
     # required top-level
     for k in ("id","title","intro","trail","final","difficulty"):
         if k not in room: raise ValueError(f"Room missing '{k}'")
-    trail = room["trail"]
-    if not isinstance(trail.get("rooms"), list) or len(trail["rooms"]) != 3:
+
+    # sanitize trail structure
+    trail = room["trail"] if isinstance(room["trail"], dict) else {}
+    rooms = _as_dict_list(trail.get("rooms"))
+    if len(rooms) != 3:
         raise ValueError("Trail must contain 3 rooms")
+    trail["rooms"] = rooms
+    room["trail"] = trail
+
     # puzzles validation + consistent fragment per room
     fragments=[]
-    for rm in trail["rooms"]:
-        routes = rm.get("routes") or []
+    for rm in rooms:
+        routes = _as_dict_list(rm.get("routes"))
         if len(routes) != 2:
             raise ValueError("Each room must have exactly 2 routes")
-        p1 = routes[0].get("puzzle") or {}
-        p2 = routes[1].get("puzzle") or {}
+        p1 = routes[0].get("puzzle") if isinstance(routes[0].get("puzzle"), dict) else {}
+        p2 = routes[1].get("puzzle") if isinstance(routes[1].get("puzzle"), dict) else {}
         _validate_puzzle(p1); _validate_puzzle(p2)
         fr_rule = rm.get("fragment_rule") or "FIRST2"
         fr_rule, frag = _coerce_same_fragment_or_const(fr_rule, p1, p2)
+        rm["routes"] = routes
         rm["fragment_rule"] = fr_rule  # may be hardened to CONST
         fragments.append(frag)
 
     # final answer: must equal concat of fragments (trim to bounds)
-    final = room["final"]; expect = (final.get("solution") or {}).get("answer","")
+    final = room["final"] if isinstance(room["final"], dict) else {}
+    expect = (final.get("solution") or {}).get("answer","")
     concat = "".join(fragments)
     concat_norm = normalize_answer(concat)[:FINAL_CODE_MAX_LEN]
     if len(concat_norm) < FINAL_CODE_MIN_LEN:
         concat_norm = (concat_norm + "X"*FINAL_CODE_MIN_LEN)[:FINAL_CODE_MAX_LEN]
-    # overwrite final answer if mismatch
     if normalize_answer(expect) != concat_norm:
         final.setdefault("solution", {})["answer"] = concat_norm
+    room["final"] = final
 
     # attach flat puzzles for legacy UI/logic
     room["puzzles"] = _flatten_puzzles(room["trail"])
+
+    # expose final_code for UI compatibility
+    room["final_code"] = (room.get("final", {}).get("solution", {}) or {}).get("answer")
 
     # anti_spoiler (defaults)
     room.setdefault("anti_spoiler", {"paraphrase_variants": 3, "decoys": 2})
     return room
 
-# Backward-compatible validator: if old shape, do minimal checks;
-# if new shape, use validate_trailroom.
+# Old-shape validator kept for backwards compatibility (not used in trail flow)
 def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
     required_top = {"id", "title", "intro", "graph", "puzzles", "anti_spoiler", "difficulty"}
     missing = [k for k in required_top if k not in room_json]
     if missing:
         raise ValueError(f"Room missing keys: {missing}")
 
-    # --- NEW: coerce puzzles to dicts only ---
     raw_puzzles = room_json.get("puzzles", [])
     if not isinstance(raw_puzzles, list):
         raise ValueError("Room puzzles must be a list")
@@ -482,7 +563,6 @@ def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
     if not puzzles:
         raise ValueError("Room must contain at least one puzzle")
     room_json["puzzles"] = puzzles
-    # ------------------------------------------
 
     seen_ids = set()
     for p in puzzles:
@@ -557,10 +637,11 @@ def harden(room: Dict[str,Any], rng: Optional[random.Random]=None) -> Dict[str,A
 def _offline_trail(date_key: str, rng: random.Random) -> Dict[str,Any]:
     title,intro = rng.choice(THEMES)
     blacklist = set(COMMON_STOCK_ANSWERS)
-    # create three pairs of puzzles
     def pair(idx: int):
         pid1=f"r{idx}_caut_pz"; pid2=f"r{idx}_brisk_pz"
-        p1 = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid1, blacklist) if idx!=2 else gen_numeric_lock(rng, pid1)
+        # keep variety; ensure at least one numeric example
+        p1 = (rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid1, blacklist)
+              if idx!=2 else gen_numeric_lock(rng, pid1))
         p2 = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid2, blacklist)
         return p1.to_json(), p2.to_json()
 
@@ -613,7 +694,6 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
 
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     """Try LLM; validate; fallback to offline; add novelty guard + critic."""
-    # Force offline?
     if os.getenv("ESCAPE_MODEL","").lower()=="off" or os.getenv("ESCAPE_FORCE_OFFLINE","").lower() in ("1","true","yes"):
         return generate_room_offline(date_key, server_secret)
 
@@ -654,10 +734,10 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     except Exception:
         pass
 
-    # Optional critic (safe fields only)
+    # Optional critic (safe fields only) — revalidate with *trail* validator
     try:
         room2 = llm_critic_patch(room)
-        room = validate_room(room2)
+        room = validate_trailroom(room2)
     except Exception:
         pass
     return room
@@ -709,12 +789,11 @@ def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool
     return normalize_answer(s) == normalize_answer(e)
 
 def _iter_all_puzzles(room_json: Dict[str,Any]):
-    # Prefer new trail shape; fallback to flat list for safety.
-    for rm in (room_json.get("trail", {}).get("rooms") or []):
-        for rt in (rm.get("routes") or []):
-            p = rt.get("puzzle") or {}
+    for rm in _as_dict_list(room_json.get("trail", {}).get("rooms")):
+        for rt in _as_dict_list(rm.get("routes")):
+            p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
             if p: yield p
-    for p in (room_json.get("puzzles") or []):
+    for p in _as_dict_list(room_json.get("puzzles")):
         yield p
 
 def verify_puzzle(room_json: Dict[str, Any], puzzle_id: str, answer: str) -> bool:
@@ -726,7 +805,6 @@ def verify_puzzle(room_json: Dict[str, Any], puzzle_id: str, answer: str) -> boo
     return False
 
 def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
-    # New trail final
     final = (room_json.get("final") or {}).get("solution", {})
     expect = final.get("answer") or room_json.get("final_code")
     if not expect: return False
