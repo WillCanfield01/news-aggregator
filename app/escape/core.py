@@ -416,39 +416,76 @@ def _critic_prompt(room_json: Dict[str, Any]) -> str:
     )
 
 
+def _extract_json_block(text: str) -> Optional[str]:
+    if not text or not text.strip():
+        return None
+    # Prefer a full JSON object substring
+    i = text.find("{")
+    j = text.rfind("}")
+    if i != -1 and j != -1 and j > i:
+        return text[i:j+1]
+    return None
+
 def llm_wrap_story_and_clues(algo_pack: List[Puzzle], date_key: str) -> Optional[Dict[str, Any]]:
     client, mode = _get_openai_client()
     if not client:
         return None
-    content = _architect_prompt(algo_pack, date_key)
+
+    # Strong instruction to return JSON only
+    sys_msg = (
+        "You are a puzzle architect for a daily mini escape room. "
+        "Return ONLY a single minified JSON object with keys: "
+        "id,title,intro,graph:{nodes[],start[],end},puzzles[],inventory[],locks[],"
+        "anti_spoiler:{paraphrase_variants,decoys},difficulty. "
+        "No markdown, no explanation—JSON only."
+    )
+    user_content = _architect_prompt(algo_pack, date_key)
+
     try:
+        model = os.getenv("ESCAPE_MODEL", "gpt-4o-mini")
+        text = ""
+
         if mode == "modern":
+            # Prefer chat.completions for stability; use response_format if available
             try:
-                resp = client.responses.create(
-                    model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
-                    input=[{"role": "user", "content": content}],
-                    temperature=0.8,
-                )
-                text = resp.output_text  # type: ignore
-            except Exception:
                 resp = client.chat.completions.create(
-                    model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
-                    messages=[{"role": "user", "content": content}],
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": user_content},
+                    ],
+                    temperature=0.8,
+                    response_format={"type": "json_object"},  # ignored by older servers
+                )
+                text = (resp.choices[0].message.content or "").strip()
+            except Exception:
+                # Last-ditch: Responses API (if installed server supports it)
+                resp = client.responses.create(
+                    model=model,
+                    input=[{"role": "user", "content": sys_msg + "\n\n" + user_content}],
                     temperature=0.8,
                 )
-                text = resp.choices[0].message.content  # type: ignore
+                text = (getattr(resp, "output_text", "") or "").strip()
         else:
+            # Legacy openai==0.x
             text = client.ChatCompletion.create(  # type: ignore
-                model=os.getenv("ESCAPE_MODEL", "gpt-4.1-mini"),
-                messages=[{"role": "user", "content": content}],
+                model=model,
+                messages=[
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_content},
+                ],
                 temperature=0.8,
-            )["choices"][0]["message"]["content"]
-        text = text.strip()
-        match = re.search(r"\{.*\}\s*$", text, re.S)
-        blob = json.loads(match.group(0) if match else text)
-        return blob
+            )["choices"][0]["message"]["content"].strip()
+
+        json_block = _extract_json_block(text)
+        if not json_block:
+            return None
+        return json.loads(json_block)
     except Exception as e:
-        current_app.logger.warning(f"[escape] LLM architect failed: {e}")
+        try:
+            current_app.logger.warning(f"[escape] LLM architect failed: {e}")
+        except Exception:
+            pass
         return None
 
 
@@ -676,16 +713,8 @@ def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
     return pack
 
 def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
-    # If offline forced, skip LLM path entirely
-    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
-        return offline_wrap(algo_pack, date_key, rng)
-
     blob = llm_wrap_story_and_clues(algo_pack, date_key)
-    # Fallback if LLM absent or returned malformed/empty
-    if not isinstance(blob, dict):
-        return offline_wrap(algo_pack, date_key, rng)
-    puzzles = blob.get("puzzles")
-    if not isinstance(puzzles, list) or not puzzles:
+    if not isinstance(blob, dict) or not isinstance(blob.get("puzzles"), list) or not blob["puzzles"]:
         return offline_wrap(algo_pack, date_key, rng)
     return blob
 
