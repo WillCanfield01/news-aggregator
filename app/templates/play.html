@@ -50,7 +50,7 @@
         .wrap {
             max-width: 960px;
             margin: 0 auto;
-            padding: 24px 16px 80px;
+            padding: 24px 16px 80px
         }
 
         header {
@@ -58,13 +58,13 @@
             align-items: center;
             gap: 16px;
             flex-wrap: wrap;
-            margin-bottom: 16px;
+            margin-bottom: 16px
         }
 
         .title {
             font-size: clamp(20px, 3.2vw, 28px);
             font-weight: 800;
-            letter-spacing: .2px;
+            letter-spacing: .2px
         }
 
         .meta {
@@ -73,7 +73,7 @@
             align-items: center;
             flex-wrap: wrap;
             color: var(--muted);
-            font-size: 14px;
+            font-size: 14px
         }
 
         .badge {
@@ -81,7 +81,7 @@
             border-radius: 999px;
             background: linear-gradient(180deg, #172042, #121a38);
             border: 1px solid #26325f;
-            color: #b6c4ff;
+            color: #b6c4ff
         }
 
         .timer {
@@ -92,7 +92,7 @@
             background: linear-gradient(180deg, #172042, #121a38);
             border: 1px solid #26325f;
             border-radius: 12px;
-            padding: 8px 12px;
+            padding: 8px 12px
         }
 
         .intro {
@@ -100,8 +100,32 @@
             border: 1px solid #24305b;
             border-radius: var(--radius);
             box-shadow: 0 10px 30px var(--shadow);
-            padding: 16px 16px;
-            margin: 12px 0 18px;
+            padding: 16px;
+            margin: 12px 0 18px
+        }
+
+        .inventory {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px
+        }
+
+        .inv-chip {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+            background: #0f1730;
+            border: 1px solid #2a3769;
+            border-radius: 999px;
+            padding: 6px 10px;
+            color: #b6c4ff;
+            font-size: 13px
+        }
+
+        .inv-id {
+            opacity: .8;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace
         }
 
         .pane {
@@ -109,13 +133,13 @@
             border: 1px solid #232e57;
             border-radius: var(--radius);
             box-shadow: 0 10px 30px var(--shadow);
-            overflow: hidden;
+            overflow: hidden
         }
 
         .puzzles {
             padding: 8px;
             display: grid;
-            gap: 12px;
+            gap: 12px
         }
 
         .puzzle {
@@ -125,7 +149,7 @@
             padding: 12px;
             display: grid;
             gap: 8px;
-            position: relative;
+            position: relative
         }
 
         .puzzle.solved {
@@ -137,7 +161,7 @@
             display: flex;
             gap: 10px;
             align-items: center;
-            justify-content: space-between;
+            justify-content: space-between
         }
 
         .p-title {
@@ -165,7 +189,7 @@
             color: #bfc7e6;
             font-size: 13px;
             display: grid;
-            gap: 6px;
+            gap: 6px
         }
 
         .hint-pill {
@@ -179,26 +203,26 @@
             padding: 6px 10px;
             border-radius: 999px;
             cursor: pointer;
-            width: max-content;
+            width: max-content
         }
 
         .hint-pill[disabled] {
             opacity: .5;
-            cursor: not-allowed;
+            cursor: not-allowed
         }
 
         .hint-text {
             background: #0c1428;
             border: 1px solid #25305a;
             padding: 8px 10px;
-            border-radius: 10px;
+            border-radius: 10px
         }
 
         .input-row {
             display: flex;
             gap: 8px;
             align-items: center;
-            flex-wrap: wrap;
+            flex-wrap: wrap
         }
 
         input[type="text"] {
@@ -209,7 +233,7 @@
             color: var(--text);
             border-radius: 10px;
             padding: 10px 12px;
-            outline: none;
+            outline: none
         }
 
         input[type="text"]:focus {
@@ -225,7 +249,7 @@
             letter-spacing: .2px;
             border-radius: 10px;
             padding: 10px 14px;
-            cursor: pointer;
+            cursor: pointer
         }
 
         button:hover {
@@ -238,7 +262,7 @@
 
         .status {
             font-size: 13px;
-            color: var(--muted);
+            color: var(--muted)
         }
 
         .status.ok {
@@ -258,13 +282,13 @@
             flex-wrap: wrap;
             background: linear-gradient(180deg, #161d36, #11182d);
             border: 1px solid #25305b;
-            border-radius: var(--radius);
+            border-radius: var(--radius)
         }
 
         .final-gate {
             display: grid;
             gap: 8px;
-            width: 100%;
+            width: 100%
         }
 
         .share {
@@ -273,7 +297,7 @@
             border: 1px dashed #2a3769;
             border-radius: 12px;
             color: #b6c4ff;
-            display: none;
+            display: none
         }
 
         .share.show {
@@ -293,7 +317,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 50;
+            z-index: 50
         }
 
         .start-card {
@@ -305,7 +329,7 @@
             box-shadow: 0 20px 60px var(--shadow);
             display: grid;
             gap: 12px;
-            text-align: center;
+            text-align: center
         }
 
         .start-title {
@@ -342,7 +366,7 @@
             opacity: 0;
             transform: translateY(10px);
             transition: .2s ease;
-            z-index: 60;
+            z-index: 60
         }
 
         .toast.show {
@@ -355,7 +379,7 @@
             background: #0b1226;
             border: 1px solid #26325f;
             padding: 2px 6px;
-            border-radius: 6px;
+            border-radius: 6px
         }
     </style>
 </head>
@@ -364,15 +388,18 @@
     <div id="overlay" class="overlay">
         <div class="start-card">
             <div class="start-title">Mini Escape — Daily Room</div>
-            <div class="start-sub">Solve the puzzles as fast as you can. Hints unlock after <span class="kbd">60s</span>
-                and <span class="kbd">120s</span>. Submit correct answers to progress. When all puzzles are solved,
-                enter the Final Code (if present) and finish to post your time.</div>
+            <div class="start-sub">
+                Solve the puzzles as fast as you can. Hints unlock after
+                <span class="kbd">60s</span> and <span class="kbd">120s</span>.
+                When all puzzles are solved, enter the Final Code (if present) to post your time.
+            </div>
             <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                 <button id="startBtn" class="start-btn">Start Today’s Escape</button>
                 <a class="badge" href="/escape/leaderboard" target="_blank" rel="noopener">View Leaderboard</a>
             </div>
-            <div class="start-sub" style="font-size:12px; opacity:.8;">Date: <span id="startDate">{{ date_key }}</span>
-                • Difficulty: {{ difficulty|default('medium')|title }}</div>
+            <div class="start-sub" style="font-size:12px; opacity:.8;">
+                Date: <span id="startDate">{{ date_key }}</span> • Difficulty: {{ difficulty|default('medium')|title }}
+            </div>
         </div>
     </div>
 
@@ -390,6 +417,7 @@
         <section class="intro">
             <div id="roomTitle" style="font-weight:800; margin-bottom:6px;">Loading…</div>
             <div id="roomIntro" style="color:#c8d4ff;">Please wait…</div>
+            <div id="inventory" class="inventory"></div>
         </section>
 
         <section class="pane">
@@ -410,12 +438,8 @@
                 <div id="shareText">Share your time!</div>
                 <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
                     <button class="copy-btn" id="copyBtn">Copy Result</button>
-                    <a id="tweetLink" target="_blank" rel="noopener">
-                        <button>Post on X</button>
-                    </a>
-                    <a href="/escape/leaderboard" target="_blank" rel="noopener">
-                        <button>View Leaderboard</button>
-                    </a>
+                    <a id="tweetLink" target="_blank" rel="noopener"><button>Post on X</button></a>
+                    <a href="/escape/leaderboard" target="_blank" rel="noopener"><button>View Leaderboard</button></a>
                 </div>
             </div>
         </section>
@@ -431,7 +455,7 @@
             startedMs: null,
             tickHandle: null,
             room: null,
-            puzzles: [], // {id, archetype, prompt, paraphrases, hints, solved, inputEl, statusEl}
+            puzzles: [],
             solvedCount: 0,
             hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
             finalRequired: false,
@@ -439,28 +463,48 @@
             finished: false,
         };
 
-        // Allow ?date=YYYY-MM-DD to preview a specific day (if exists)
         const urlParams = new URLSearchParams(window.location.search);
         const paramDate = urlParams.get("date");
         if (paramDate) state.dateKey = paramDate;
 
         // ----------- Helpers -----------
         const $ = (id) => document.getElementById(id);
+        const cap = (s) => (s || "").toString().slice(0, 1).toUpperCase() + (s || "").toString().slice(1);
         function fmtTime(ms) {
-            const m = Math.floor(ms / 60000);
-            const s = Math.floor((ms % 60000) / 1000);
-            const ms3 = String(ms % 1000).padStart(3, "0");
+            const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
             return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
         }
-        function toast(msg) {
-            const t = $("toast");
-            t.textContent = msg;
-            t.classList.add("show");
-            setTimeout(() => t.classList.remove("show"), 1800);
+        function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1800); }
+        function randomPick(arr, fallback = "") { return Array.isArray(arr) && arr.length ? arr[Math.floor(Math.random() * arr.length)] : fallback; }
+
+        // Extract puzzles even if nested (future trail shape)
+        function extractPuzzles(room) {
+            if (Array.isArray(room.puzzles)) return room.puzzles;
+            const found = [];
+            (function walk(obj) {
+                if (!obj || typeof obj !== "object") return;
+                if (obj.puzzle && typeof obj.puzzle === "object") found.push(obj.puzzle);
+                if (Array.isArray(obj)) obj.forEach(walk); else Object.values(obj).forEach(walk);
+            })(room);
+            return found;
         }
-        function randomPick(arr, fallback = "") {
-            if (!arr || !arr.length) return fallback;
-            return arr[Math.floor(Math.random() * arr.length)];
+
+        function renderInventory(items) {
+            const wrap = $("inventory");
+            wrap.innerHTML = "";
+            if (!Array.isArray(items) || !items.length) { wrap.style.display = "none"; return; }
+            wrap.style.display = "flex";
+            items.slice(0, 8).forEach(it => {
+                const chip = document.createElement("div");
+                chip.className = "inv-chip";
+                const id = document.createElement("span");
+                id.className = "inv-id";
+                id.textContent = it.id || "item";
+                const sep = document.createElement("span"); sep.textContent = "—";
+                const desc = document.createElement("span"); desc.textContent = it.desc || "";
+                chip.appendChild(id); chip.appendChild(sep); chip.appendChild(desc);
+                wrap.appendChild(chip);
+            });
         }
 
         // ----------- Fetch room -----------
@@ -470,28 +514,23 @@
             if (!res.ok) throw new Error("Failed to load room");
             const room = await res.json();
 
-            // Update UI header
             $("dateKey").textContent = state.dateKey;
-            $("difficulty").textContent = (room.difficulty || state.difficulty || "medium").toString().toUpperCase().slice(0, 1) + (room.difficulty || state.difficulty || "medium").toString().slice(1);
+            const diff = room.difficulty || state.difficulty || "medium";
+            $("difficulty").textContent = cap(diff);
             state.hintPolicy = room.server_hint_policy || state.hintPolicy;
 
-            // Set intro
             $("roomTitle").textContent = room.title || "Today's Room";
             $("roomIntro").textContent = room.intro || "";
 
-            // Prepare puzzles
-            const list = room.puzzles || [];
-            state.puzzles = list.map((p, idx) => {
-                return {
-                    id: p.id,
-                    archetype: p.archetype,
-                    prompt: p.prompt,
-                    paraphrases: p.paraphrases || [],
-                    hints: p.hints || [],
-                    solved: false,
-                    idx,
-                };
-            });
+            renderInventory(room.inventory);
+
+            const list = extractPuzzles(room);
+            state.puzzles = list.map((p, idx) => ({
+                id: p.id, archetype: p.archetype, prompt: p.prompt,
+                paraphrases: p.paraphrases || [], hints: p.hints || [],
+                solved: false, idx
+            }));
+
             state.room = room;
             state.finalRequired = !!(room.meta_gate || room.final_code);
 
@@ -506,103 +545,63 @@
             holder.innerHTML = "";
             state.puzzles.forEach((pz, i) => {
                 const box = document.createElement("div");
-                box.className = "puzzle";
-                box.id = `pz-${pz.id}`;
+                box.className = "puzzle"; box.id = `pz-${pz.id}`;
 
-                const head = document.createElement("div");
-                head.className = "puzzle-head";
-                const title = document.createElement("div");
-                title.className = "p-title";
-                title.textContent = `Puzzle ${i + 1}`;
-                const arch = document.createElement("div");
-                arch.className = "p-arch";
-                arch.textContent = pz.archetype.replace(/_/g, " ");
+                const head = document.createElement("div"); head.className = "puzzle-head";
+                const title = document.createElement("div"); title.className = "p-title"; title.textContent = `Puzzle ${i + 1}`;
+                const arch = document.createElement("div"); arch.className = "p-arch"; arch.textContent = (pz.archetype || "").replace(/_/g, " ");
                 head.appendChild(title); head.appendChild(arch);
 
-                const prompt = document.createElement("div");
-                prompt.className = "p-prompt";
-                prompt.textContent = pz.prompt || "";
+                const prompt = document.createElement("div"); prompt.className = "p-prompt"; prompt.textContent = pz.prompt || "";
 
-                const paraphrase = document.createElement("div");
-                paraphrase.className = "p-paraphrase";
-                paraphrase.textContent = randomPick(pz.paraphrases, "");
+                const paraphrase = document.createElement("div"); paraphrase.className = "p-paraphrase"; paraphrase.textContent = randomPick(pz.paraphrases, "");
 
-                const inputRow = document.createElement("div");
-                inputRow.className = "input-row";
-                const input = document.createElement("input");
-                input.type = "text";
-                input.placeholder = "Type your answer…";
-                input.autocomplete = "off";
-                const btn = document.createElement("button");
-                btn.textContent = "Submit";
+                const inputRow = document.createElement("div"); inputRow.className = "input-row";
+                const input = document.createElement("input"); input.type = "text"; input.placeholder = "Type your answer…"; input.autocomplete = "off";
+                const btn = document.createElement("button"); btn.textContent = "Submit";
                 inputRow.appendChild(input); inputRow.appendChild(btn);
 
-                const status = document.createElement("div");
-                status.className = "status";
-                status.textContent = "Awaiting answer…";
+                const status = document.createElement("div"); status.className = "status"; status.textContent = "Awaiting answer…";
 
-                // Hints
-                const hintsWrap = document.createElement("div");
-                hintsWrap.className = "p-hints";
-                const h1btn = document.createElement("button");
-                h1btn.className = "hint-pill";
-                h1btn.textContent = "Reveal Hint 1 (60s)";
-                const h1text = document.createElement("div");
-                h1text.className = "hint-text hidden";
-                const h2btn = document.createElement("button");
-                h2btn.className = "hint-pill";
-                h2btn.textContent = "Reveal Hint 2 (120s)";
-                const h2text = document.createElement("div");
-                h2text.className = "hint-text hidden";
-                hintsWrap.appendChild(h1btn);
-                hintsWrap.appendChild(h1text);
-                hintsWrap.appendChild(h2btn);
-                hintsWrap.appendChild(h2text);
+                const hintsWrap = document.createElement("div"); hintsWrap.className = "p-hints";
+                if ((pz.hints || []).length) {
+                    const h1btn = document.createElement("button"); h1btn.className = "hint-pill"; h1btn.textContent = "Reveal Hint 1 (60s)";
+                    const h1text = document.createElement("div"); h1text.className = "hint-text hidden";
+                    const h2btn = document.createElement("button"); h2btn.className = "hint-pill"; h2btn.textContent = "Reveal Hint 2 (120s)";
+                    const h2text = document.createElement("div"); h2text.className = "hint-text hidden";
+                    hintsWrap.appendChild(h1btn); hintsWrap.appendChild(h1text); hintsWrap.appendChild(h2btn); hintsWrap.appendChild(h2text);
+                    // timers
+                    const updateHints = () => {
+                        if (!state.startedMs) return;
+                        const elapsed = Date.now() - state.startedMs;
+                        const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000;
+                        const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000;
+                        h1btn.disabled = elapsed < d1;
+                        h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
+                        h2btn.disabled = elapsed < d2;
+                        h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
+                    };
+                    const hintInterval = setInterval(updateHints, 250);
+                    // reveal actions
+                    h1btn.addEventListener("click", () => { if (h1btn.disabled) return; h1text.textContent = pz.hints[0] || "No hint provided."; h1text.classList.remove("hidden"); });
+                    h2btn.addEventListener("click", () => { if (h2btn.disabled) return; h2text.textContent = pz.hints[1] || "No additional hint."; h2text.classList.remove("hidden"); });
+                    // Stop intervals when solved/finished to save CPU
+                    box.addEventListener("cleanupHints", () => clearInterval(hintInterval));
+                }
 
-                // Attach
                 box.appendChild(head);
                 box.appendChild(prompt);
                 if (paraphrase.textContent) box.appendChild(paraphrase);
                 box.appendChild(inputRow);
                 box.appendChild(status);
-                if ((pz.hints || []).length) {
-                    box.appendChild(hintsWrap);
-                }
+                if (hintsWrap.childElementCount) box.appendChild(hintsWrap);
                 holder.appendChild(box);
 
-                // Save refs
-                pz.inputEl = input;
-                pz.statusEl = status;
-                pz.boxEl = box;
-                pz.h1btn = h1btn; pz.h1text = h1text;
-                pz.h2btn = h2btn; pz.h2text = h2text;
+                pz.inputEl = input; pz.statusEl = status; pz.boxEl = box;
 
-                // Wire events
-                btn.addEventListener("click", () => submitAnswer(pz));
-                input.addEventListener("keydown", (e) => { if (e.key === "Enter") { submitAnswer(pz); } });
-
-                // Hint unlock timers follow global timer (based on startedMs)
-                const updateHints = () => {
-                    if (!state.startedMs) return;
-                    const elapsed = Date.now() - state.startedMs;
-                    const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000;
-                    const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000;
-                    h1btn.disabled = elapsed < d1;
-                    h1btn.textContent = h1btn.disabled ? `Hint 1 in ${(Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
-                    h2btn.disabled = elapsed < d2;
-                    h2btn.textContent = h2btn.disabled ? `Hint 2 in ${(Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
-                };
-                setInterval(updateHints, 250);
-                h1btn.addEventListener("click", () => {
-                    if (h1btn.disabled) return;
-                    pz.h1text.textContent = pz.hints[0] || "No hint provided.";
-                    pz.h1text.classList.remove("hidden");
-                });
-                h2btn.addEventListener("click", () => {
-                    if (h2btn.disabled) return;
-                    pz.h2text.textContent = pz.hints[1] || "No additional hint.";
-                    pz.h2text.classList.remove("hidden");
-                });
+                const submit = () => submitAnswer(pz);
+                btn.addEventListener("click", submit);
+                input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
             });
         }
 
@@ -610,51 +609,36 @@
         async function submitAnswer(pz) {
             if (state.finished) return;
             const answer = (pz.inputEl.value || "").trim();
-            if (!answer) {
-                pz.statusEl.textContent = "Enter an answer."; pz.statusEl.className = "status";
-                return;
-            }
-            pz.statusEl.textContent = "Checking…";
-            pz.statusEl.className = "status";
+            if (!answer) { pz.statusEl.textContent = "Enter an answer."; pz.statusEl.className = "status"; return; }
+            pz.statusEl.textContent = "Checking…"; pz.statusEl.className = "status";
             try {
                 const res = await fetch(`/escape/api/submit`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        date_key: state.dateKey,
-                        puzzle_id: pz.id,
-                        answer
-                    })
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ date_key: state.dateKey, puzzle_id: pz.id, answer })
                 });
                 const data = await res.json();
                 if (data && data.correct) {
                     pz.solved = true;
                     pz.boxEl.classList.add("solved");
-                    pz.statusEl.textContent = "Correct!";
-                    pz.statusEl.className = "status ok";
+                    pz.statusEl.textContent = "Correct!"; pz.statusEl.className = "status ok";
                     pz.inputEl.disabled = true;
+                    pz.boxEl.dispatchEvent(new Event("cleanupHints")); // stop hint timer for this card
                     state.solvedCount = state.puzzles.filter(x => x.solved).length;
                     maybeShowFinalGate();
-                    if (state.solvedCount === state.puzzles.length && !state.finalRequired) {
-                        // Finish immediately if no meta gate
-                        doFinish(true);
-                    }
+                    if (state.solvedCount === state.puzzles.length && !state.finalRequired) doFinish(true);
                 } else {
                     pz.statusEl.textContent = "Not yet. Try another angle.";
                     pz.statusEl.className = "status err";
                 }
             } catch (e) {
-                pz.statusEl.textContent = "Network error — try again.";
-                pz.statusEl.className = "status err";
+                pz.statusEl.textContent = "Network error — try again."; pz.statusEl.className = "status err";
             }
         }
 
         function maybeShowFinalGate() {
             if (state.solvedCount >= state.puzzles.length) {
                 state.finalUnlocked = true;
-                if (state.finalRequired) {
-                    $("finalGate").classList.remove("hidden");
-                }
+                if (state.finalRequired) $("finalGate").classList.remove("hidden");
             }
         }
 
@@ -663,10 +647,7 @@
             if (!state.finalUnlocked) { toast("Solve all puzzles first."); return; }
             const finalVal = ($("finalInput").value || "").trim();
             const needsFinal = !!(state.room && (state.room.meta_gate || state.room.final_code));
-            if (needsFinal && !finalVal) {
-                $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err";
-                return;
-            }
+            if (needsFinal && !finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
             await doFinish(true, finalVal);
         });
 
@@ -674,50 +655,27 @@
             if (state.finished) return;
             try {
                 const res = await fetch(`/escape/api/finish`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        date_key: state.dateKey,
-                        started_ms: state.startedMs,
-                        success: !!success,
+                        date_key: state.dateKey, started_ms: state.startedMs, success: !!success,
                         final_code: finalCode,
-                        meta: {
-                            ua: navigator.userAgent,
-                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                            width: window.innerWidth, height: window.innerHeight
-                        }
+                        meta: { ua: navigator.userAgent, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null, width: innerWidth, height: innerHeight }
                     })
                 });
                 const data = await res.json();
-                if (!res.ok || !data.ok) {
-                    $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err";
-                    return;
-                }
-                if (!data.success) {
-                    $("finalStatus").textContent = "Final check failed. Re-check the code or puzzle answers.";
-                    $("finalStatus").className = "status err";
-                    return;
-                }
-                state.finished = true;
-                stopTimer();
-                revealShare(data.time_ms || (Date.now() - state.startedMs));
-                toast("Time submitted!");
-            } catch (e) {
-                $("finalStatus").textContent = "Network error — try again.";
-                $("finalStatus").className = "status err";
-            }
+                if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
+                if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check the code or puzzle answers."; $("finalStatus").className = "status err"; return; }
+                state.finished = true; stopTimer(); revealShare(data.time_ms || (Date.now() - state.startedMs)); toast("Time submitted!");
+            } catch (e) { $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err"; }
         }
 
         function revealShare(timeMs) {
             const share = $("share");
             const txt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
             $("shareText").textContent = txt;
-            $("copyBtn").onclick = async () => {
-                try { await navigator.clipboard.writeText(txt + " /escape/today"); toast("Copied!"); } catch (e) { toast("Copy failed"); }
-            };
+            $("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText(txt + " /escape/today"); toast("Copied!"); } catch { toast("Copy failed"); } };
             const tweet = new URL("https://twitter.com/intent/tweet");
-            tweet.searchParams.set("text", txt + " ");
-            tweet.searchParams.set("url", window.location.origin + "/escape/today");
+            tweet.searchParams.set("text", txt + " "); tweet.searchParams.set("url", location.origin + "/escape/today");
             $("tweetLink").href = tweet.toString();
             share.classList.add("show");
         }
@@ -726,13 +684,9 @@
         function startTimer() {
             state.startedMs = Date.now();
             const tEl = $("timer");
-            state.tickHandle = setInterval(() => {
-                tEl.textContent = fmtTime(Date.now() - state.startedMs);
-            }, 33);
+            state.tickHandle = setInterval(() => { tEl.textContent = fmtTime(Date.now() - state.startedMs); }, 33);
         }
-        function stopTimer() {
-            if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; }
-        }
+        function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
 
         // ----------- Start flow -----------
         $("startBtn").addEventListener("click", async () => {
@@ -741,7 +695,7 @@
             startTimer();
         });
 
-        // Keyboard: Ctrl/Cmd+Enter = submit focused puzzle if any
+        // Ctrl/Cmd+Enter submits focused puzzle
         document.addEventListener("keydown", (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                 const active = document.activeElement;
@@ -751,13 +705,6 @@
                 }
             }
         });
-
-        // Optional: Auto-start if user reloads after starting
-        // (Comment this out if you want strict manual start)
-        // window.addEventListener("load", ()=>{
-        //   $("overlay").classList.add("hidden");
-        //   fetchRoom().then(startTimer);
-        // });
     </script>
 </body>
 

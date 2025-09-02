@@ -1,36 +1,28 @@
 # app/escape/routes.py
 # -*- coding: utf-8 -*-
 """
-Mini Escape Rooms - Routes (Blueprint endpoints)
+Trailroom Routes (backward-compatible)
 
 Endpoints
-- GET  /escape/today                 -> HTML page to play
-- GET  /escape/api/today             -> JSON room (solutions stripped)
-- POST /escape/api/submit            -> {date_key, puzzle_id, answer} -> {correct: bool}
-- POST /escape/api/finish            -> {date_key, started_ms, success, meta?, final_code?} -> leaderboard save
-- GET  /escape/leaderboard           -> HTML page with today's top times
-- GET  /escape/api/leaderboard       -> JSON leaderboard {date_key?, limit?}
-
-Notes
-- Keep routes thin; generation/validation lives in core.py, DB in models.py.
-- Solutions are *never* sent to the client. Only server verifies answers.
+- GET  /escape/today
+- GET  /escape/api/today
+- POST /escape/api/submit
+- POST /escape/api/finish
+- GET  /escape/leaderboard
+- GET  /escape/api/leaderboard
+- GET  /escape/admin/regen
 """
 
 from __future__ import annotations
 
-import time
-import json
-import math
-import datetime as dt
-from typing import Any, Dict, List, Optional
-# app/escape/routes.py (top of file)
 import os
+import json
+import datetime as dt
+from typing import Any, Dict
 from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
 from app.extensions import db
-from .models import EscapeAttempt
-from .models import EscapeRoom
-from .models import DailyLeaderboardView
+from .models import EscapeAttempt, EscapeRoom, DailyLeaderboardView
 from .core import (
     ensure_daily_room,
     verify_puzzle,
@@ -42,7 +34,7 @@ from .core import (
 # Blueprint initializer
 # ---------------------------------------------------------------------
 
-def init_routes(bp):
+def init_routes(bp: Blueprint):
     """
     Attach all route handlers to the provided blueprint.
     """
@@ -52,14 +44,8 @@ def init_routes(bp):
     # -----------------------------
     @bp.route("/today", methods=["GET"])
     def play_today():
-        """
-        Render the single-page UI. The template fetches the room via /api/today.
-        """
-        # Ensure today's room exists (generation is idempotent).
         room = ensure_daily_room()
-        # Pass only minimal info to template; the JS will fetch /api/today
         return render_template("play.html", date_key=room.date_key, difficulty=room.difficulty)
-
 
     # -----------------------------
     # API: Fetch today's room JSON (solutions stripped)
@@ -74,8 +60,10 @@ def init_routes(bp):
             room = ensure_daily_room()
 
         payload = _strip_solutions(room.json_blob or {})
-        if not payload.get("puzzles"):
-            current_app.logger.warning("[escape] api_today saw 0 puzzles; regenerating OFFLINE")
+
+        # Safety: if something odd produced zero puzzles, rebuild offline once
+        if not (payload.get("puzzles") or (payload.get("trail") or {}).get("rooms")):
+            current_app.logger.warning("[escape] api_today saw empty content; attempting offline rebuild")
             from .core import generate_room_offline
             secret = os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me")
             try:
@@ -97,7 +85,6 @@ def init_routes(bp):
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
         """
-        Validate a single puzzle answer.
         Body: { "date_key": "...", "puzzle_id": "pz_1", "answer": "..." }
         """
         data = _json_body_or_400()
@@ -118,14 +105,13 @@ def init_routes(bp):
     @bp.route("/api/finish", methods=["POST"])
     def api_finish():
         """
-        Record a player's run. Minimal anti-cheat: duration sanity + optional final_code check (if enabled).
         Body:
         {
           "date_key": "...",
           "started_ms": 1693584000000,    # epoch ms
           "success": true,
-          "final_code": "AB12"            # required if room has meta final_code
-          "meta": { "ua": "...", "coarse_region": "US", ... }  # optional client hints
+          "final_code": "AB12",           # required if room has a final lock
+          "meta": {...}                   # optional
         }
         """
         data = _json_body_or_400()
@@ -137,28 +123,25 @@ def init_routes(bp):
         if not date_key or started_ms is None:
             return _bad("Missing required fields: date_key, started_ms")
 
-        # Look up the room; generate if needed (idempotent)
         room = _get_or_404(date_key)
 
-        # Server computes duration; client-sent finished time is ignored
+        # Compute server-side duration
         now = dt.datetime.utcnow()
         try:
             started_dt = dt.datetime.utcfromtimestamp(int(started_ms) / 1000.0)
         except Exception:
             return _bad("started_ms must be epoch milliseconds")
 
-        # Anti-cheat: minimum time sanity (e.g., at least 3 seconds)
         dur_ms = int((now - started_dt).total_seconds() * 1000)
         if dur_ms < 3000:
             current_app.logger.info("[escape] suspicious finish: duration < 3s")
-            # Treat as non-successful
             success = False
 
-        # If meta final_code is required, verify (when 'success' claims true)
-        if success and room.json_blob.get("final_code"):
+        # Require and verify the final lock if the room has one
+        has_final = bool((room.json_blob or {}).get("final") or (room.json_blob or {}).get("final_code"))
+        if success and has_final:
             submitted_final = (data.get("final_code") or "").strip()
             if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
-                # Final lock not satisfied; do not count as success
                 success = False
 
         attempt = EscapeAttempt(
@@ -180,9 +163,11 @@ def init_routes(bp):
             "attempt_id": attempt.id,
         })
 
+    # -----------------------------
+    # Admin: force regenerate
+    # -----------------------------
     @bp.route("/admin/regen", methods=["GET", "POST"])
     def admin_regen():
-        # lazy import to avoid circulars
         from .core import ensure_daily_room, get_today_key
 
         token = request.args.get("token") or request.headers.get("X-Escape-Admin")
@@ -207,13 +192,8 @@ def init_routes(bp):
     # -----------------------------
     @bp.route("/leaderboard", methods=["GET"])
     def leaderboard_html():
-        """
-        Super simple leaderboard page for today's top times.
-        (Your template can iterate the rows; this is just a helper route.)
-        """
         date_q = request.args.get("date") or get_today_key()
         rows = DailyLeaderboardView.top_for_day(date_q, limit=50)
-        # Convert attempts to dicts for rendering convenience
         top = []
         for r in rows:
             a = r["attempt"]
@@ -230,11 +210,6 @@ def init_routes(bp):
     # -----------------------------
     @bp.route("/api/leaderboard", methods=["GET"])
     def leaderboard_api():
-        """
-        Query string:
-          - date (optional): YYYY-MM-DD; defaults to today's date
-          - limit (optional): default 50
-        """
         date_q = request.args.get("date") or get_today_key()
         try:
             limit = int(request.args.get("limit", "50"))
@@ -254,6 +229,7 @@ def init_routes(bp):
             })
         return jsonify({"date_key": date_q, "top": out})
 
+    # Root -> /today
     @bp.route("/", methods=["GET"])
     def root():
         return redirect(url_for("escape.play_today"), code=302)
@@ -262,25 +238,47 @@ def init_routes(bp):
 # Helpers
 # ---------------------------------------------------------------------
 
-# app/escape/routes.py
-
-def _strip_solutions(room_json):
+def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deep-copy and remove any server-side solution data:
+      - top-level puzzles[*].solution
+      - trail.rooms[*].routes[*].puzzle.solution
+      - final.solution
+    """
     if not isinstance(room_json, dict):
         return {}
-    # deep copy so we never mutate the DB blob
-    out = json.loads(json.dumps(room_json))
+
+    out = json.loads(json.dumps(room_json))  # deep copy
+
+    # Legacy flat puzzles
     cleaned = []
-    for p in out.get("puzzles", []):
+    for p in (out.get("puzzles") or []):
         if isinstance(p, dict):
             p.pop("solution", None)
             cleaned.append(p)
-    out["puzzles"] = cleaned
+    if "puzzles" in out:
+        out["puzzles"] = cleaned
+
+    # Trail structure
+    trail = out.get("trail") or {}
+    rooms = trail.get("rooms") or []
+    for rm in rooms:
+        for rt in (rm.get("routes") or []):
+            p = rt.get("puzzle")
+            if isinstance(p, dict):
+                p.pop("solution", None)
+                # extra safety: remove helper fields that might leak solves
+                if isinstance(p.get("answer_format"), dict):
+                    # keep pattern; it doesn't leak
+                    pass
+
+    # Final lock: keep prompt and pattern, drop solution
+    if isinstance(out.get("final"), dict):
+        out["final"].pop("solution", None)
+
     return out
 
 def _json_body_or_400() -> Dict[str, Any]:
-    """
-    Parse JSON or return a 400 response.
-    """
     if not request.data:
         abort(_abort_json(400, "Request body required"))
     try:
@@ -291,31 +289,19 @@ def _json_body_or_400() -> Dict[str, Any]:
         abort(_abort_json(400, "Request body required"))
     return data
 
-
 def _abort_json(status: int, message: str):
-    """
-    Return an error JSON with the provided status code.
-    """
     resp = jsonify({"ok": False, "error": message})
     resp.status_code = status
     return resp
 
-
 def _bad(message: str):
-    """
-    Shortcut for 400 errors.
-    """
-    abort(_abort_json(404, "Room not found"))
-
+    return _abort_json(400, message)
 
 def _get_or_404(date_key: str) -> EscapeRoom:
-    """
-    Fetch an EscapeRoom by date_key or generate it. If generation fails, return 404.
-    """
     try:
-        # If it exists in DB, use it; otherwise ensure generation
         existing = db.session.query(EscapeRoom).filter_by(date_key=date_key).first()
-        return existing or ensure_daily_room(date_key)
+        room = existing or ensure_daily_room(date_key)
+        return room
     except Exception as e:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
-        return _abort_json(404, "Room not found")
+        abort(_abort_json(404, "Room not found"))

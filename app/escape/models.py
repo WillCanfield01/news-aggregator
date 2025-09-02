@@ -8,32 +8,39 @@ Tables:
 - EscapeAttempt: one row per player's run (anonymous-friendly), for leaderboards & analytics
 
 Notes:
-- Keep models lean: let business logic live in app/escape/core.py and routes.py.
-- If you introduce authentication later, you can link user_id to your existing User model.
+- Room JSON can be either the legacy flat shape (top-level puzzles[]) or the new
+  Trailroom shape (trail.rooms[].routes[].puzzle + final). We store it as a single blob.
+- Keep models lean: business logic stays in core.py and routes.py.
 """
 
 from __future__ import annotations
+
 from typing import Any, Dict, Optional
 from datetime import datetime
-from sqlalchemy.dialects.postgresql import JSONB
+
 from sqlalchemy import Index
+from sqlalchemy.dialects.postgresql import JSONB
+
 from app.extensions import db
-from app.extensions import db   # << change
+
 
 class EscapeRoom(db.Model):
     __tablename__ = "escape_rooms"
 
     id = db.Column(db.Integer, primary_key=True)
-    # e.g., "2025-09-01" (ISO date). We keep it as string for portability/readability.
+
+    # ISO date string, e.g. "2025-09-01"
     date_key = db.Column(db.String(16), unique=True, index=True, nullable=False)
 
-    # Validated room JSON blob (see core.validate_room); stored as JSONB on Postgres if available.
+    # Validated room JSON (flat or trail). JSONB on Postgres, JSON on SQLite.
     json_blob = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=False)
 
     difficulty = db.Column(db.String(16), index=True, default="medium", nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
-    # Optional: track versioning/regen counts if you ever force_regen
+    # Used by "recent_rooms" queries; make it indexed for speed.
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    # Optional: increments when you force-regenerate a day
     regen_count = db.Column(db.Integer, default=0, nullable=False)
 
     def __repr__(self) -> str:
@@ -55,27 +62,27 @@ class EscapeAttempt(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # Link to a user if you have auth; keep nullable to support anonymous play.
+    # If/when you add auth, you can link users. Keep nullable to allow anonymous play.
     user_id = db.Column(db.Integer, index=True, nullable=True)
 
-    # Which daily room this attempt corresponds to (ISO date string)
+    # ISO date of the room this attempt belongs to
     date_key = db.Column(db.String(16), index=True, nullable=False)
 
     started_at = db.Column(db.DateTime, nullable=False)
     finished_at = db.Column(db.DateTime, nullable=True)
 
-    # Milliseconds to finish; null if not finished
+    # Milliseconds to finish; null if not finished or unsuccessful
     time_ms = db.Column(db.Integer, index=True, nullable=True)
 
     # Whether the player escaped successfully
     success = db.Column(db.Boolean, index=True, default=False, nullable=False)
 
-    # Extra metadata (UA hashes, coarse region, device hints, client version, etc.)
+    # Extra metadata (UA hash, coarse region, device hints, client version, etc.)
     meta = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=False, default=dict)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
-    # Composite index to accelerate leaderboards: (date_key, success, time_ms ASC)
+    # Leaderboard accelerator: (date_key, success, time_ms ASC)
     __table_args__ = (
         Index("ix_attempts_daily_lb", "date_key", "success", "time_ms"),
     )
@@ -86,9 +93,7 @@ class EscapeAttempt(db.Model):
 
     @property
     def duration_seconds(self) -> Optional[float]:
-        if self.time_ms is None:
-            return None
-        return self.time_ms / 1000.0
+        return None if self.time_ms is None else self.time_ms / 1000.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -104,7 +109,7 @@ class EscapeAttempt(db.Model):
         }
 
 
-# ---------- Convenience query helpers (optional, not tables) ----------
+# ---------- Convenience query helpers (not tables) ----------
 
 class DailyLeaderboardView:
     """
@@ -115,7 +120,7 @@ class DailyLeaderboardView:
     @staticmethod
     def top_for_day(date_key: str, limit: int = 50):
         """
-        Return a list of (attempt, rank) for the given day, ordered by best time.
+        Return a list of {rank, attempt} for the given day, ordered by best time.
         Success-only, non-null time_ms.
         """
         q = (
