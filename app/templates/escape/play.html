@@ -29,7 +29,7 @@
 
         body {
             margin: 0;
-            background: radial-gradient(1200px 900px at 10% 0%, #121735 0%, #0f1220 50%, #0b0f1c 100%);
+            background: var(--bg);
             color: var(--text);
             font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif
         }
@@ -56,7 +56,7 @@
         .badge {
             padding: 4px 10px;
             border-radius: 999px;
-            background: linear-gradient(180deg, #172042, #121a38);
+            background: #172042;
             border: 1px solid #26325f;
             color: #b6c4ff
         }
@@ -65,7 +65,7 @@
             margin-left: auto;
             font-variant-numeric: tabular-nums;
             font-weight: 700;
-            background: linear-gradient(180deg, #172042, #121a38);
+            background: #172042;
             border: 1px solid #26325f;
             border-radius: 10px;
             padding: 6px 10px
@@ -93,7 +93,7 @@
 
         button,
         .btn {
-            background: linear-gradient(180deg, #1c2a4e, #152244);
+            background: #1c2a4e;
             border: 1px solid #2a3c73;
             color: #cfe3ff;
             border-radius: 10px;
@@ -199,7 +199,7 @@
 
         textarea {
             width: 100%;
-            min-height: 160px;
+            min-height: 140px;
             background: #0b1226;
             border: 1px solid #24305b;
             color: var(--text);
@@ -231,13 +231,12 @@
         }
 
         .start {
-            width: min(680px, 92vw);
+            width: min(780px, 92vw);
             background: linear-gradient(180deg, #141a30, #0f1427);
             border: 1px solid #24305b;
             border-radius: 20px;
-            padding: 20px;
-            box-shadow: 0 20px 60px var(--shadow);
-            text-align: center
+            padding: 22px;
+            box-shadow: 0 20px 60px var(--shadow)
         }
 
         .hidden {
@@ -265,46 +264,86 @@
             transform: translateY(0)
         }
 
-        .chip-flash {
-            animation: chipflash .4s ease
+        .rules {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px
         }
 
-        @keyframes chipflash {
-            0% {
-                filter: brightness(1.3)
-            }
-
-            100% {
-                filter: brightness(1)
+        @media (max-width:700px) {
+            .rules {
+                grid-template-columns: 1fr
             }
         }
 
-        .tiny {
-            font-size: 12px;
-            color: #9aa3c7
+        .rule {
+            background: #0f162d;
+            border: 1px solid #24305b;
+            border-radius: 12px;
+            padding: 10px
+        }
+
+        .muted {
+            color: #9aa3c7;
+            font-size: 13px
+        }
+
+        .gloss {
+            margin-top: 8px;
+            background: #0b1327;
+            border: 1px solid #243463;
+            border-radius: 10px;
+            padding: 8px
+        }
+
+        .gloss summary {
+            cursor: pointer;
+            color: #b6c4ff
         }
     </style>
 </head>
 
 <body>
-    <!-- Start overlay -->
+    <!-- Intro modal: scenario + rules. Timer starts only after click -->
     <div id="overlay" class="overlay">
         <div class="start">
             <div style="font-size:22px;font-weight:800;margin-bottom:6px;">Mini Escape — Daily Trail</div>
-            <div style="color:#b6c4ff">
-                Three scenes, one final lock. Pick a route each scene, solve, collect fragments, then unlock the door.
+            <div id="ovTitle" style="font-weight:700;margin-top:2px;">Loading…</div>
+            <div id="ovIntro" class="muted" style="margin-top:6px;">Please wait…</div>
+
+            <div class="rules">
+                <div class="rule">
+                    <div style="font-weight:700;margin-bottom:4px;">How it works</div>
+                    <div class="muted">Solve 3 scenes to collect fragments, then unlock the final code.</div>
+                </div>
+                <div class="rule">
+                    <div style="font-weight:700;margin-bottom:4px;">Routes</div>
+                    <div class="muted"><b>Proceed carefully</b> (safer) or <b>Move quickly</b> (risk/reward). “Move
+                        quickly” delays hints by <b>+30s</b> and costs more chips, but finishing a brisk scene on your
+                        <b>first try with no hints</b> gives a <b>−2s</b> time bonus; stumbling (≥3 tries) adds
+                        <b>+1.5s</b> penalty.
+                    </div>
+                </div>
+                <div class="rule">
+                    <div style="font-weight:700;margin-bottom:4px;">Hints & chips</div>
+                    <div class="muted">Hints cost chips. Leftover chips convert to time bonus automatically at the end.
+                    </div>
+                </div>
+                <div class="rule">
+                    <div style="font-weight:700;margin-bottom:4px;">Tips</div>
+                    <div class="muted">Notes save locally per day. You can press <b>Cmd/Ctrl+Enter</b> to submit the
+                        current answer.</div>
+                </div>
             </div>
-            <div class="row" style="justify-content:center;margin-top:10px;">
+
+            <div class="row" style="justify-content:center;margin-top:12px;">
                 <button id="startBtn" style="background:#1b7bc0;border-color:#2f8bd5">Start Today’s Escape</button>
                 <a class="badge" href="/escape/leaderboard?date={{ date_key }}" target="_blank" rel="noopener">View
                     Leaderboard</a>
             </div>
-            <div style="color:#9aa3c7;font-size:12px;margin-top:6px;">
-                Date: <b>{{ date_key }}</b> • Difficulty: {{ difficulty|default('medium')|title }}
-            </div>
-            <div class="tiny" style="margin-top:10px;">
-                Hints cost chips. “Move quickly” doubles hint costs and delays hints by +30s.
-            </div>
+            <div class="muted" style="margin-top:6px;">Date: <b id="ovDate">{{ date_key }}</b> • Difficulty: <b
+                    id="ovDiff">{{ difficulty|default('medium')|title }}</b></div>
         </div>
     </div>
 
@@ -313,7 +352,6 @@
             <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
             <span class="badge">Difficulty: <b id="difficulty">{{ difficulty|default('medium')|title }}</b></span>
             <span class="badge" id="sceneBadge">Scene 1 of 3</span>
-            <span class="badge" id="chipsBadge">Chips: —</span>
             <div id="timer" class="timer">00:00.000</div>
         </header>
 
@@ -324,7 +362,7 @@
                     <div id="roomIntro" style="color:#c8d4ff">Please wait…</div>
                 </section>
 
-                <!-- Scenes injected here -->
+                <!-- Scenes (sequential reveal) -->
                 <section id="scenes"></section>
 
                 <!-- Final gate -->
@@ -348,7 +386,7 @@
                 </section>
             </main>
 
-            <!-- Notes -->
+            <!-- Notes panel -->
             <aside class="notes">
                 <div class="panel" style="padding:12px;">
                     <div style="font-weight:700;margin-bottom:6px;">Notes</div>
@@ -357,7 +395,6 @@
                         <button id="clearNotes">Clear</button>
                         <span id="saveStamp" class="status" style="margin-left:auto;">Autosaved</span>
                     </div>
-                    <div class="tiny" style="margin-top:6px;">Notes are saved locally per day.</div>
                 </div>
             </aside>
         </div>
@@ -366,74 +403,85 @@
     <div id="toast" class="toast">Saved</div>
 
     <script>
-        // ---------- Config (client) ----------
-        const CHIPS_START = 100;
-        const HINT_COST = {
-            cautious: { h1: 5, h2: 10 },
-            brisk: { h1: 10, h2: 20 }  // doubled cost
+        // ------- Glossary (shown under hints) -------
+        const GLOSSARY = {
+            anagram: {
+                label: "What’s an anagram?",
+                text: "Rearrange all the given letters to form a single valid word (use every letter exactly once)."
+            },
+            caesar: {
+                label: "What’s a Caesar shift?",
+                text: "Each letter was shifted forward a fixed amount in the alphabet (A→B is +1). Try small shifts until a word appears."
+            },
+            vigenere: {
+                label: "What’s Vigenère?",
+                text: "A repeating word key shifts letters by varying amounts. Decrypt to reveal the hidden uppercase word."
+            },
+            numeric_lock: {
+                label: "What’s a numeric lock?",
+                text: "A 4-digit code defined by arithmetic constraints. Solve the digits with simple equations."
+            }
         };
-        const HINT_DELAY_BONUS = { cautious: 0, brisk: 30 }; // +seconds to both hints if brisk
-        const CHIPS_TO_MS = 50; // time bonus: 1 chip = 50 ms (server should mirror)
 
-        // ---------- State ----------
+        // ------- State -------
         const state = {
             dateKey: "{{ date_key }}",
             startedMs: null,
             tickHandle: null,
             room: null,
-            currentScene: 0,
+            currentScene: 0, // 0..2
             solvedScenes: [false, false, false],
-            chosenRoutes: [null, null, null], // "cautious"|"brisk"
-            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
-            chips: CHIPS_START,
-            spent: 0,
-            hintsUsed: [{ h1: false, h2: false }, { h1: false, h2: false }, { h1: false, h2: false }],
+            chosenRoutes: [null, null, null], // "cautious" | "brisk"
+            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 }
         };
-
-        // ---------- Helpers ----------
         const $ = id => document.getElementById(id);
         const fmtTime = ms => {
             const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
             return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
         };
         function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1600); }
-        function updateChipsBadge() { const b = $("chipsBadge"); b.textContent = `Chips: ${state.chips}`; b.classList.add("chip-flash"); setTimeout(() => b.classList.remove("chip-flash"), 300); }
 
-        // ---------- Notes (localStorage per day) ----------
+        // ------- Notes (localStorage per day) -------
         const NOTES_KEY = d => `trail-notes-${d}`;
         function loadNotes() { $("notesBox").value = localStorage.getItem(NOTES_KEY(state.dateKey)) || ""; }
-        function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 900); }
-        $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
-        $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
+        function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 1000); }
 
-        // ---------- Start / Timer ----------
+        // ------- Prefetch room for intro modal -------
+        window.addEventListener("DOMContentLoaded", async () => {
+            await prefetchRoom();
+            loadNotes();
+        });
+
+        async function prefetchRoom() {
+            try {
+                const res = await fetch(`/escape/api/today?date=${encodeURIComponent(state.dateKey)}`, { cache: "no-store" });
+                const room = await res.json();
+                state.room = room;
+                state.hintPolicy = room.server_hint_policy || state.hintPolicy;
+                $("ovTitle").textContent = room.title || "Today's Trail";
+                $("ovIntro").textContent = room.intro || "";
+                $("roomTitle").textContent = room.title || "Today's Trail";
+                $("roomIntro").textContent = room.intro || "";
+            } catch (e) {
+                $("ovTitle").textContent = "Mini Escape — Daily Trail";
+                $("ovIntro").textContent = "Three scenes, one final lock. Pick routes and solve.";
+            }
+        }
+
+        // ------- Start / Timer -------
         $("startBtn").addEventListener("click", async () => {
             $("overlay").classList.add("hidden");
-            await fetchRoom();
+            if (!state.room) { await prefetchRoom(); }
+            renderScenes(state.room);
             startTimer();
-            loadNotes();
-            updateChipsBadge();
         });
         function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
         function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
 
-        // ---------- Fetch room ----------
-        async function fetchRoom() {
-            const res = await fetch(`/escape/api/today?date=${encodeURIComponent(state.dateKey)}`, { cache: "no-store" });
-            const room = await res.json();
-            state.room = room;
-            $("roomTitle").textContent = room.title || "Today's Trail";
-            $("roomIntro").textContent = room.intro || "";
-            state.hintPolicy = room.server_hint_policy || state.hintPolicy;
-            renderScenes(room);
-            updateSceneBadge();
-        }
-
-        // ---------- Render scenes ----------
+        // ------- Render scenes (one-at-a-time) -------
         function renderScenes(room) {
             const holder = $("scenes"); holder.innerHTML = "";
             const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
-
             rooms.forEach((rm, idx) => {
                 const wrap = document.createElement("section");
                 wrap.className = "scene panel" + (idx === 0 ? " active" : "");
@@ -441,38 +489,31 @@
                 wrap.innerHTML = `
           <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
           <div style="color:#c8d4ff">${rm.text || ""}</div>
-
-          <div class="tiny" style="margin-top:6px;">Choose a route:</div>
-          <div class="route-btns" style="margin-top:4px;">
-            <button data-route="cautious" title="Normal hint cost / normal hint timing">Proceed carefully (1×)</button>
-            <button data-route="brisk" title="Hints cost 2× chips and unlock +30s later">Move quickly (2×)</button>
+          <div class="route-btns" style="margin-top:8px;">
+            <button data-route="cautious">Proceed carefully (1×)</button>
+            <button data-route="brisk">Move quickly (2×)</button>
           </div>
-
           <div class="p-card" id="pzwrap-${idx}" style="display:none;">
-            <div class="tiny" id="routeLabel-${idx}" style="margin-bottom:6px;"></div>
             <div id="pzp-${idx}" style="white-space:pre-wrap;"></div>
             <div class="row" style="margin-top:6px;">
               <input id="pzin-${idx}" type="text" placeholder="Type your answer…"/>
               <button id="pzbtn-${idx}">Submit</button>
             </div>
             <div id="pzstatus-${idx}" class="status">Awaiting answer…</div>
-
             <div class="hint-row">
-              <button class="hint-pill" id="h1btn-${idx}">Reveal Hint 1</button>
-              <button class="hint-pill" id="h2btn-${idx}">Reveal Hint 2</button>
+              <button class="hint-pill" id="h1btn-${idx}">Hint 1 in …</button>
+              <button class="hint-pill" id="h2btn-${idx}">Hint 2 in …</button>
             </div>
             <div class="hint-text" id="h1txt-${idx}"></div>
             <div class="hint-text" id="h2txt-${idx}"></div>
-            <div class="tiny" id="hintCost-${idx}" style="margin-top:6px;"></div>
+            <div class="gloss" id="gloss-${idx}" style="display:none;"></div>
           </div>
-
           <div class="row" style="margin-top:8px;">
             <button class="btn" id="next-${idx}" style="display:none;">Next scene →</button>
           </div>
         `;
                 holder.appendChild(wrap);
 
-                // Route selection
                 wrap.querySelectorAll(".route-btns button").forEach(b => {
                     b.addEventListener("click", () => {
                         const route = b.getAttribute("data-route");
@@ -482,8 +523,8 @@
                     });
                 });
             });
-
             $("finalGate").style.display = "none";
+            updateSceneBadge();
         }
 
         function showPuzzle(idx, rm, routeId) {
@@ -491,51 +532,34 @@
             const p = route.puzzle || {};
             const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
             $(`pzp-${idx}`).textContent = p.prompt || "Puzzle";
-            $(`routeLabel-${idx}`).textContent = `Route: ${routeId} (Hint costs — H1: ${HINT_COST[routeId].h1} chips, H2: ${HINT_COST[routeId].h2} chips)`;
-            $(`hintCost-${idx}`).textContent = `Your chips: ${state.chips}. Using hints will deduct chips permanently.`;
-
-            const input = $(`pzin-${idx}`), btn = $(`pzbtn-${idx}`), status = $(`pzstatus-${idx}`);
+            const input = $(`pzin-${idx}`); const btn = $(`pzbtn-${idx}`); const status = $(`pzstatus-${idx}`);
             const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
+            const glossBox = $(`gloss-${idx}`);
 
-            // Hint timers include route delay modifier
+            // Glossary (per type)
+            const typ = (p.type || p.archetype || "").toLowerCase();
+            const G = GLOSSARY[typ];
+            if (G) {
+                glossBox.style.display = "block";
+                glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`;
+            }
+
+            // Hint timers based on global start (+30s if brisk)
+            const extraDelay = (routeId === "brisk") ? 30000 : 0;
             function updateHints() {
                 if (!state.startedMs) return;
                 const elapsed = Date.now() - state.startedMs;
-                const boost = HINT_DELAY_BONUS[routeId] || 0;
-                const d1 = ((state.hintPolicy.first_hint_delay_s ?? 60) + boost) * 1000;
-                const d2 = ((state.hintPolicy.second_hint_delay_s ?? 120) + boost) * 1000;
+                const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000 + extraDelay;
+                const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000 + extraDelay;
                 h1btn.disabled = elapsed < d1;
-                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : `Reveal Hint 1 (-${HINT_COST[routeId].h1})`;
+                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
                 h2btn.disabled = elapsed < d2;
-                h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : `Reveal Hint 2 (-${HINT_COST[routeId].h2})`;
+                h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
             }
             updateHints(); const iv = setInterval(updateHints, 250);
 
-            function spend(cost) {
-                if (state.chips < cost) { toast("Not enough chips for that hint."); return false; }
-                state.chips -= cost; state.spent += cost; updateChipsBadge();
-                return true;
-            }
-
-            h1btn.onclick = () => {
-                if (h1btn.disabled) return;
-                if (!state.hintsUsed[idx].h1) {
-                    if (!spend(HINT_COST[routeId].h1)) return;
-                    state.hintsUsed[idx].h1 = true;
-                }
-                h1txt.textContent = (p.hints || [])[0] || "No hint provided.";
-                h1txt.style.display = "block";
-            };
-
-            h2btn.onclick = () => {
-                if (h2btn.disabled) return;
-                if (!state.hintsUsed[idx].h2) {
-                    if (!spend(HINT_COST[routeId].h2)) return;
-                    state.hintsUsed[idx].h2 = true;
-                }
-                h2txt.textContent = (p.hints || [])[1] || "No additional hint.";
-                h2txt.style.display = "block";
-            };
+            h1btn.onclick = () => { if (h1btn.disabled) return; h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
+            h2btn.onclick = () => { if (h2btn.disabled) return; h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
 
             btn.onclick = async () => {
                 const answer = (input.value || "").trim();
@@ -548,12 +572,10 @@
                     });
                     const data = await res.json();
                     if (data && data.correct) {
-                        status.textContent = "Correct! Fragment secured."; status.className = "status ok";
-                        input.disabled = true; btn.disabled = true; clearInterval(iv);
+                        status.textContent = "Correct! Fragment secured."; status.className = "status ok"; input.disabled = true; btn.disabled = true;
+                        clearInterval(iv);
                         state.solvedScenes[idx] = true;
-                        const nextBtn = $(`next-${idx}`);
-                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); }
-                        else { revealFinal(); }
+                        const nextBtn = $(`next-${idx}`); if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); } else { revealFinal(); }
                     } else {
                         status.textContent = "Not yet. Try another angle."; status.className = "status err";
                     }
@@ -561,7 +583,6 @@
                     status.textContent = "Network error — try again."; status.className = "status err";
                 }
             };
-
             input.addEventListener("keydown", e => { if (e.key === "Enter") btn.click(); });
         }
 
@@ -572,76 +593,49 @@
             updateSceneBadge();
         }
         function updateSceneBadge() { $("sceneBadge").textContent = `Scene ${state.currentScene + 1} of 3`; }
+        function revealFinal() { if (state.solvedScenes.every(Boolean)) { $("finalGate").style.display = "block"; goToScene(2); } }
 
-        function revealFinal() {
-            if (state.solvedScenes.every(Boolean)) {
-                $("finalGate").style.display = "block";
-                goToScene(2);
-            }
-        }
-
-        // ---------- Finish ----------
+        // ------- Finish flow -------
         $("finishBtn").addEventListener("click", async () => {
             if (!state.solvedScenes.every(Boolean)) { toast("Solve all scenes first."); return; }
             const finalVal = ($("finalInput").value || "").trim();
             if (!finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
-
             try {
                 const res = await fetch(`/escape/api/finish`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        date_key: state.dateKey,
-                        started_ms: state.startedMs,
-                        success: true,
-                        final_code: finalVal,
+                        date_key: state.dateKey, started_ms: state.startedMs, success: true, final_code: finalVal,
                         meta: {
-                            ua: navigator.userAgent,
-                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                            ua: navigator.userAgent, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
                             width: window.innerWidth, height: window.innerHeight,
-                            chips_start: CHIPS_START,
-                            chips_spent: state.spent,
-                            chips_remaining: state.chips,
-                            chips_to_ms: CHIPS_TO_MS,
-                            routes: state.chosenRoutes,
-                            hints_used: state.hintsUsed
+                            // optional gameplay meta for server risk/reward:
+                            routes: state.chosenRoutes, hints_used_scene: [], submissions_scene: []
                         }
                     })
                 });
                 const data = await res.json();
                 if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
                 if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check your fragments."; $("finalStatus").className = "status err"; return; }
-
                 stopTimer();
-
-                // Show time + chip bonus locally (server should mirror)
-                const rawMs = data.time_ms || (Date.now() - state.startedMs);
-                const bonusMs = Math.max(0, state.chips * CHIPS_TO_MS);
-                const effMs = Math.max(0, rawMs - bonusMs);
-
-                $("finalStatus").innerHTML = `
-          <div class="status ok">Escaped! Time submitted.</div>
-          <div class="tiny">Raw: <b>${fmtTime(rawMs)}</b> • Chip bonus: <b>-${fmtTime(bonusMs)}</b> (${state.chips} chips × ${CHIPS_TO_MS}ms)
-            • Effective: <b>${fmtTime(effMs)}</b></div>
-        `;
-                const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(effMs)} (chip bonus applied). Can you beat me?`;
+                $("finalStatus").textContent = "Escaped! Time submitted."; $("finalStatus").className = "status ok";
+                const timeMs = data.time_ms || (Date.now() - state.startedMs);
+                const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
                 $("shareText").textContent = shareTxt;
-                $("copyBtn").onclick = async () => {
-                    try {
-                        await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`);
-                        toast("Copied!");
-                    } catch (e) { toast("Copy failed"); }
-                };
+                $("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`); toast("Copied!"); } catch (e) { toast("Copy failed"); } };
                 $("share").style.display = "block";
             } catch (e) {
                 $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err";
             }
         });
 
-        // ---------- Keyboard shortcut ----------
+        // Notes events
+        $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
+        $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
+
+        // (Optional) Cmd/Ctrl+Enter submits active scene’s puzzle
         document.addEventListener("keydown", (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`);
-                if (btn && !btn.disabled) btn.click();
+                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`); if (btn && !btn.disabled) btn.click();
             }
         });
     </script>
