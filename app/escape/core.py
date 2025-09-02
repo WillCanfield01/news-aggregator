@@ -127,28 +127,27 @@ def recent_rooms(window_days: int = RECENT_WINDOW_DAYS) -> List[Any]:
     )
 
 
-def is_too_similar_to_recent(room_json: Dict[str, Any],
-                             window_days: int = RECENT_WINDOW_DAYS,
-                             sim_threshold: float = 0.35) -> bool:
+def is_too_similar_to_recent(room_json: Dict[str, Any], window_days: int = RECENT_WINDOW_DAYS, sim_threshold: float = 0.35) -> bool:
     text = f"{room_json.get('title','')} {room_json.get('intro','')}"
     for p in room_json.get("puzzles", []):
-        text += " " + p.get("prompt", "")
-        for pv in p.get("paraphrases", []):
-            text += " " + pv
+        if isinstance(p, dict):
+            text += " " + (p.get("prompt") or "")
+            for pv in (p.get("paraphrases") or []):
+                text += " " + pv
     S = _shingles(text, k=7)
-
     for r in recent_rooms(window_days):
         blob = r.json_blob or {}
         t2 = f"{blob.get('title','')} {blob.get('intro','')}"
         for pp in (blob.get("puzzles") or []):
-            t2 += " " + pp.get("prompt", "")
-            for pv in pp.get("paraphrases", []):
+            if not isinstance(pp, dict):
+                continue
+            t2 += " " + (pp.get("prompt") or "")
+            for pv in (pp.get("paraphrases") or []):
                 t2 += " " + pv
         S2 = _shingles(t2, k=7)
         if jaccard(S, S2) >= sim_threshold:
             return True
     return False
-
 
 def answer_recently_used(answer: str, cooldown_days: int = ANSWER_COOLDOWN_DAYS) -> bool:
     db, EscapeRoom = _get_db_and_models()
@@ -157,12 +156,13 @@ def answer_recently_used(answer: str, cooldown_days: int = ANSWER_COOLDOWN_DAYS)
     rs = db.session.query(EscapeRoom).filter(EscapeRoom.created_at >= cutoff).all()
     for r in rs:
         blob = r.json_blob or {}
-        for p in blob.get("puzzles", []):
+        for p in (blob.get("puzzles") or []):
+            if not isinstance(p, dict):
+                continue  # tolerate corrupt historical rows
             sol = (p.get("solution") or {}).get("answer")
             if sol and normalize_answer(sol) == answer_norm:
                 return True
     return False
-
 
 # ---------- Normalization ----------
 
@@ -835,7 +835,7 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     if too_easy(room):
         room = harden(room, rng)
         room = validate_room(room)
-        
+
     # Apply critic safely; revert on any validation failure
     pre_critic = json.loads(json.dumps(room))  # deep copy
     try:
@@ -866,7 +866,9 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
     # Build blacklist from recent answers
     blacklist = set(COMMON_STOCK_ANSWERS)
     for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
-        for p in (r.json_blob or {}).get("puzzles", []):
+        for p in ((r.json_blob or {}).get("puzzles") or []):
+            if not isinstance(p, dict):
+                continue
             sol = (p.get("solution") or {}).get("answer")
             if sol:
                 blacklist.add(normalize_answer(sol).lower())
