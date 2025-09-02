@@ -169,12 +169,14 @@ def init_routes(bp: Blueprint):
                 success = False
 
         # Apply server-side chip bonus (only with sane meta)
+        # Apply server-side chip + route risk/reward (only with sane meta)
         eff_ms = dur_ms
-        chip_bonus_ms = 0
         if success:
-            eff_ms, chip_bonus_ms = _apply_chip_bonus(dur_ms, meta)
+            # This mutates `meta` to include a breakdown:
+            # chip_bonus_ms, route_bonus_ms, route_penalty_ms, effective_time_ms
+            eff_ms, _ = _apply_chip_bonus(dur_ms, meta)
 
-        # Save attempt
+        # Save attempt (persist the breakdown populated by _apply_chip_bonus)
         attempt = EscapeAttempt(
             user_id=None,
             date_key=date_key,
@@ -185,10 +187,19 @@ def init_routes(bp: Blueprint):
             meta={
                 **(meta or {}),
                 "raw_time_ms": dur_ms,
-                "chip_bonus_ms": chip_bonus_ms,
+                # Normalize numbers in case meta is missing anything
+                "chip_bonus_ms": int((meta or {}).get("chip_bonus_ms", 0)),
+                "route_bonus_ms": int((meta or {}).get("route_bonus_ms", 0)),
+                "route_penalty_ms": int((meta or {}).get("route_penalty_ms", 0)),
+                "total_bonus_ms": (
+                    int((meta or {}).get("chip_bonus_ms", 0))
+                    + int((meta or {}).get("route_bonus_ms", 0))
+                    - int((meta or {}).get("route_penalty_ms", 0))
+                ),
                 "effective_time_ms": eff_ms if success else None,
             },
         )
+
         db.session.add(attempt)
         db.session.commit()
 
@@ -322,23 +333,68 @@ def _get_or_404(date_key: str) -> EscapeRoom:
 
 def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
     """
-    Convert leftover chips into a time bonus, with sanity checks.
-    Client sends: chips_start, chips_spent, chips_remaining, chips_to_ms.
-    We validate simple invariants; if broken, ignore bonus.
+    Risk/Reward with routes + chips -> time conversion.
+
+    - Chips: server-enforced conversion at 40 ms per leftover chip.
+    - Reward: for each BRISK scene solved on FIRST TRY with NO HINTS, -2000 ms.
+    - Risk: for each BRISK scene with 3+ submissions, +1500 ms penalty.
+
+    Expected meta keys (all optional — we fall back safely):
+      chips_start, chips_spent, chips_remaining
+      routes: ["cautious"|"brisk", ...] length 3
+      hints_used_scene: [int,int,int]  (0,1,2…)
+      submissions_scene: [int,int,int] (how many attempts each scene)
     """
+    # --- Chips sanity & server-side conversion ---
+    PER_CHIP_MS = 40  # fixed; ignore any client-provided chips_to_ms
     try:
-        start = int(meta.get("chips_start", 0))
-        spent = int(meta.get("chips_spent", 0))
+        start  = int(meta.get("chips_start", 0))
+        spent  = int(meta.get("chips_spent", 0))
         remain = int(meta.get("chips_remaining", 0))
-        per = int(meta.get("chips_to_ms", 0))
     except Exception:
-        return dur_ms, 0
+        start = spent = remain = 0
 
-    if start < 0 or spent < 0 or remain < 0 or per < 0:
-        return dur_ms, 0
-    if remain > start or spent > start or (remain + spent) > start:
-        return dur_ms, 0
+    if (start < 0 or spent < 0 or remain < 0 or
+        remain > start or spent > start or (remain + spent) > start):
+        # Bad accounting -> no chip bonus
+        remain = 0
 
-    bonus = remain * per
-    eff = max(0, dur_ms - bonus)
-    return eff, bonus
+    chip_bonus_ms = remain * PER_CHIP_MS
+
+    # --- Route risk/reward ---
+    routes = meta.get("routes") or []
+    hints  = meta.get("hints_used_scene") or []
+    tries  = meta.get("submissions_scene") or []
+
+    BRISK_FIRST_TRY_NO_HINT_BONUS = 2000  # ms
+    BRISK_STUMBLE_PENALTY        = 1500   # ms (3+ attempts)
+
+    route_bonus_ms = 0
+    route_penalty_ms = 0
+
+    for i, r in enumerate(routes[:3]):
+        if isinstance(r, str) and r.lower() == "brisk":
+            h = 0
+            t = 0
+            if i < len(hints):
+                try: h = int(hints[i])
+                except Exception: h = 0
+            if i < len(tries):
+                try: t = int(tries[i])
+                except Exception: t = 0
+
+            if h == 0 and t == 1:
+                route_bonus_ms += BRISK_FIRST_TRY_NO_HINT_BONUS
+            elif t >= 3:
+                route_penalty_ms += BRISK_STUMBLE_PENALTY
+
+    total_bonus_ms = chip_bonus_ms + route_bonus_ms - route_penalty_ms
+    effective_ms = max(0, dur_ms - chip_bonus_ms - route_bonus_ms + route_penalty_ms)
+
+    # Optionally stash breakdown back onto meta (caller persists it)
+    meta["chip_bonus_ms"]   = chip_bonus_ms
+    meta["route_bonus_ms"]  = route_bonus_ms
+    meta["route_penalty_ms"] = route_penalty_ms
+    meta["effective_time_ms"] = effective_ms
+
+    return effective_ms, total_bonus_ms
