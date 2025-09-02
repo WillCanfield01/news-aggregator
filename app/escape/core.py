@@ -822,6 +822,55 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
 
     return room
 
+def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
+    """
+    Pure offline generation path (no LLM). Guaranteed non-empty puzzles and a valid graph.
+    Used as a last-chance fallback by ensure_daily_room().
+    """
+    seed = daily_seed(date_key, server_secret)
+    rng = rng_from_seed(seed)
+
+    # Build a small blacklist from recent answers so we don't repeat
+    blacklist = set(COMMON_STOCK_ANSWERS)
+    try:
+        for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
+            for p in (r.json_blob or {}).get("puzzles", []):
+                sol = (p.get("solution") or {}).get("answer")
+                if sol:
+                    blacklist.add(normalize_answer(sol).lower())
+    except Exception:
+        # if DB unavailable for some reason, just proceed
+        pass
+
+    # Always produce at least one puzzle
+    pack = build_algorithmic_pack(rng, blacklist)
+    if not pack:
+        pack = [gen_numeric_lock(rng, "pz_1")]  # ultra-safe fallback
+
+    room = offline_wrap(pack, date_key, rng)
+
+    # Normalize/repair graph before any set() usage
+    puzzle_ids = [str(p.get("id")) for p in room.get("puzzles", []) if p.get("id")]
+    _normalize_graph(room, puzzle_ids)
+
+    # Validate & harden if necessary
+    room = validate_room(room)
+    if too_easy(room):
+        room = harden(room, rng)
+        room = validate_room(room)
+
+    # Light novelty tweak: if the offline text is too close to recent, retheme
+    try:
+        if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
+            t2, i2 = rng.choice(THEMES)
+            room["title"] = t2
+            room["intro"] = i2
+    except Exception:
+        pass
+
+    # No critic pass in pure offline mode
+    return room
+
 def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
     # If offline forced, just use the offline generator
     if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
