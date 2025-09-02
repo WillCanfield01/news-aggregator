@@ -236,18 +236,28 @@ def gen_vigenere(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
     )
 
 def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = None) -> Puzzle:
-    d1,d2,d3,d4 = (rng.randrange(0,10) for _ in range(4))
-    c1=f"The first two digits sum to {d1+d2}."
-    c2=f"The third digit is the first digit plus {d3-d1}."
-    c3=f"The last digit equals the second digit plus {d4-d2}."
-    code=f"{d1}{d2}{d3}{d4}"
+    # Normalize blacklist to lowercase/normalized tokens (works for digits too)
+    bl = { (s if isinstance(s, str) else str(s)) for s in (blacklist or set()) }
+    bl_norm = { normalize_answer(s) for s in bl }
+
+    # Try a few times to avoid recently used codes
+    for _ in range(25):
+        d1, d2, d3, d4 = (rng.randrange(0, 10) for _ in range(4))
+        code = f"{d1}{d2}{d3}{d4}"
+        if normalize_answer(code) not in bl_norm:
+            break
+
+    c1 = f"The first two digits sum to {d1 + d2}."
+    c2 = f"The third digit is the first digit plus {d3 - d1}."
+    c3 = f"The last digit equals the second digit plus {d4 - d2}."
+
     return Puzzle(
         id=pid, archetype="numeric_lock",
         prompt=("A keypad blinks awaiting a 4-digit code.\n"
                 f"- {c1}\n- {c2}\n- {c3}\nEnter the full code."),
         answer_format={"pattern": r"^\d{4}$"},
         solution={"answer": code},
-        hints=["Write the constraints as equations.","Solve first digits, then propagate."],
+        hints=["Write the constraints as equations.", "Solve first digits, then propagate."],
         decoys=[f"{(d1+1)%10}{d2}{d3}{d4}", f"{(d1-1)%10}{d2}{d3}{d4}"],
         paraphrases=["Compute the exact 4 digits.", "Three arithmetic clues define the code.",
                      "Derive the lock sequence."]
@@ -321,9 +331,58 @@ def _default_pattern_for_type(p_type: str, answer: str) -> str:
     # general alpha (riddle/anagram/caesar/vigenere/wordpath/math textual)
     return r"^[A-Za-z]{3,12}$"
 
-def _synth_puzzle(rng: random.Random, pid: str) -> Dict[str, Any]:
-    gen = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])
-    return gen(rng, pid, set()).to_json()
+def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: set) -> Dict[str, Any]:
+    gens = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock]
+    g = rng.choice(gens)
+    return g(rng, pid, blacklist_lower).to_json()
+
+def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
+    """Walk all LLM puzzles; if a puzzle's answer is recently used, replace it with a fresh offline one.
+       Keeps the original puzzle id; re-coerces each room's fragment rule afterwards.
+    """
+    recent_norm = _recent_answer_set()
+    recent_lower = { s.lower() for s in recent_norm }  # our word lists are lowercase
+    def _needs_replace(p: Dict[str, Any]) -> bool:
+        ans = (p.get("solution") or {}).get("answer", "")
+        return normalize_answer(ans) in recent_norm
+
+    type_map = {
+        "anagram": gen_anagram,
+        "caesar": gen_caesar,
+        "vigenere": gen_vigenere,
+        "numeric_lock": gen_numeric_lock,
+    }
+
+    trail = blob.get("trail") or {}
+    rooms = (trail.get("rooms") or [])
+    for i, rm in enumerate(rooms, start=1):
+        routes = (rm.get("routes") or [])
+        for j, rt in enumerate(routes, start=1):
+            p = (rt.get("puzzle") or {})
+            if not isinstance(p, dict): 
+                # broken puzzle -> synth new
+                rt["puzzle"] = _synth_puzzle(rng, f"r{i}_{'caut' if j==1 else 'brisk'}_auto", recent_lower)
+                continue
+            if _needs_replace(p):
+                pid = p.get("id") or f"r{i}_{'caut' if j==1 else 'brisk'}_auto"
+                ptype = (p.get("type") or p.get("archetype") or "").lower()
+                gen = type_map.get(ptype, None)
+                new_p = (gen(rng, pid, recent_lower).to_json() if gen 
+                         else _synth_puzzle(rng, pid, recent_lower))
+                # preserve the original id to keep stability in UI/refs
+                new_p["id"] = pid
+                rt["puzzle"] = new_p
+
+        # After any replacements, re-coerce fragment equality across the two routes
+        if len(routes) >= 2:
+            p1 = (routes[0].get("puzzle") or {})
+            p2 = (routes[1].get("puzzle") or {})
+            fr0 = rm.get("fragment_rule") or "FIRST2"
+            fr_ok, _frag = _coerce_same_fragment_or_const(fr0, p1, p2)
+            rm["fragment_rule"] = fr_ok
+
+    blob["trail"] = { **trail, "rooms": rooms }
+    return blob
 
 def _ensure_two_routes(rm: Dict[str, Any], r_index: int, rng: random.Random) -> Dict[str, Any]:
     routes_raw = _as_dict_list(rm.get("routes"))
@@ -593,6 +652,27 @@ def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
 
 # ───────────────────────── Validation / assembly ─────────────────────────
 
+def _recent_answer_set(days: int = ANSWER_COOLDOWN_DAYS) -> set:
+    """Collect normalized answers seen in the cooldown window (both flat and trail shapes)."""
+    db, EscapeRoom = _get_db_and_models()
+    cutoff = dt.datetime.utcnow() - dt.timedelta(days=days)
+    S = set()
+    rows = db.session.query(EscapeRoom).filter(EscapeRoom.created_at >= cutoff).all()
+    for r in rows:
+        blob = r.json_blob or {}
+        # flat shape
+        for p in (blob.get("puzzles") or []):
+            if isinstance(p, dict):
+                sol = (p.get("solution") or {}).get("answer")
+                if sol: S.add(normalize_answer(sol))
+        # trail shape
+        for rm in (blob.get("trail", {}).get("rooms") or []):
+            for rt in (rm.get("routes") or []):
+                pp = (rt.get("puzzle") or {})
+                sol = (pp.get("solution") or {}).get("answer")
+                if sol: S.add(normalize_answer(sol))
+    return S
+
 def _validate_puzzle(p: Dict[str, Any]) -> None:
     for k in ("id","prompt","answer_format","solution"):
         if k not in p: raise ValueError(f"Puzzle missing '{k}'")
@@ -771,13 +851,16 @@ def harden(room: Dict[str,Any], rng: Optional[random.Random]=None) -> Dict[str,A
 # ───────────────────────── Offline fallback ─────────────────────────
 
 def _offline_trail(date_key: str, rng: random.Random) -> Dict[str,Any]:
-    title,intro = rng.choice(THEMES)
-    blacklist = set(COMMON_STOCK_ANSWERS)
+    title, intro = rng.choice(THEMES)
+
+    # Build blacklist: stock words + recently used (normalized to lowercase)
+    recent_norm = _recent_answer_set()
+    blacklist = { s.lower() for s in recent_norm } | { s.lower() for s in COMMON_STOCK_ANSWERS }
+
+    # create three pairs of puzzles
     def pair(idx: int):
-        pid1=f"r{idx}_caut_pz"; pid2=f"r{idx}_brisk_pz"
-        # keep variety; ensure at least one numeric example
-        p1 = (rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid1, blacklist)
-              if idx!=2 else gen_numeric_lock(rng, pid1))
+        pid1 = f"r{idx}_caut_pz"; pid2 = f"r{idx}_brisk_pz"
+        p1 = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid1, blacklist)
         p2 = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid2, blacklist)
         return p1.to_json(), p2.to_json()
 
@@ -852,6 +935,7 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
 
     # 🔧 NEW: sanitize to 3 rooms / 2 routes per room
     blob = _sanitize_llm_blob(blob, rng, date_key)
+    blob = _replace_recent_answers(blob, rng)  # <-- add this
 
     try:
         room = validate_trailroom(blob)
