@@ -263,6 +263,74 @@ def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = No
                      "Derive the lock sequence."]
     )
 
+# --- Sanitizer helpers -------------------------------------------------
+
+def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set) -> Dict[str, Any]:
+    if archetype == "anagram":
+        return gen_anagram(rng, pid, blacklist).to_json()
+    if archetype == "caesar":
+        return gen_caesar(rng, pid, blacklist).to_json()
+    if archetype == "vigenere":
+        return gen_vigenere(rng, pid, blacklist).to_json()
+    if archetype == "numeric_lock":
+        return gen_numeric_lock(rng, pid, blacklist).to_json()  # ← pass blacklist
+    return gen_numeric_lock(rng, pid, blacklist).to_json()
+
+_ANAGRAM_TOKEN_RE = re.compile(r"(?:'|\*\*)([A-Za-z]{3,12})(?:'|\*\*)")
+
+def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist: set) -> None:
+    """Make LLM puzzles safe/deterministic. Mutates the room in place."""
+    trail = room.get("trail") or {}
+    rooms = trail.get("rooms") or []
+    for ridx, rm in enumerate(rooms, start=1):
+        routes = rm.get("routes") or []
+        for rt in routes:
+            p = rt.get("puzzle")
+            if not isinstance(p, dict):
+                # If it's not a dict, drop in a safe numeric lock
+                pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
+                rt["puzzle"] = _regen_puzzle("numeric_lock", rng, pid, blacklist)
+                continue
+
+            # Normalize ids/types
+            pid = p.get("id") or f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
+            p["id"] = pid
+            typ = (p.get("type") or p.get("archetype") or "").lower()
+
+            # Guard for missing structures
+            if not typ:
+                rt["puzzle"] = _regen_puzzle("numeric_lock", rng, pid, blacklist)
+                continue
+
+            # --- Strict handling per type ---
+            if typ == "anagram":
+                # Validate that prompt contains a single jumbled token whose multiset equals solution letters
+                sol = (p.get("solution") or {}).get("answer")
+                token = None
+                m = _ANAGRAM_TOKEN_RE.search(p.get("prompt") or "")
+                if m:
+                    token = m.group(1).upper()
+                ok = bool(
+                    sol and token and
+                    "".join(sorted(normalize_answer(sol))) == "".join(sorted(token))
+                )
+                if not ok:
+                    rt["puzzle"] = _regen_puzzle("anagram", rng, pid, blacklist)
+                    continue
+                p.setdefault("answer_format", {"pattern": r"^[A-Za-z]{3,12}$"})
+                p.setdefault("hints", [])
+                p.setdefault("paraphrases", [])
+
+            elif typ in {"caesar", "vigenere", "numeric_lock"}:
+                # LLM frequently drifts here; replace with our deterministic, checkable versions.
+                rt["puzzle"] = _regen_puzzle(typ, rng, pid, blacklist)
+
+            else:
+                # Unknown/custom types: keep but enforce a safe generic pattern
+                p.setdefault("answer_format", {"pattern": r"^[A-Za-z0-9]{2,16}$"})
+                p.setdefault("hints", [])
+                p.setdefault("paraphrases", [])
+
 # ───────────────────────── Fragment rules ─────────────────────────
 
 def apply_fragment_rule(answer: str, rule: str) -> str:
@@ -331,10 +399,11 @@ def _default_pattern_for_type(p_type: str, answer: str) -> str:
     # general alpha (riddle/anagram/caesar/vigenere/wordpath/math textual)
     return r"^[A-Za-z]{3,12}$"
 
-def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: set) -> Dict[str, Any]:
+def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None) -> Dict[str, Any]:
+    bl = blacklist_lower or set()
     gens = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock]
     g = rng.choice(gens)
-    return g(rng, pid, blacklist_lower).to_json()
+    return g(rng, pid, bl).to_json()
 
 def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
     """Walk all LLM puzzles; if a puzzle's answer is recently used, replace it with a fresh offline one.
@@ -937,8 +1006,32 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     blob = _sanitize_llm_blob(blob, rng, date_key)
     blob = _replace_recent_answers(blob, rng)  # <-- add this
 
+    # Build a blacklist (for regen) from recent answers + stock
+    blacklist = set(COMMON_STOCK_ANSWERS)
+    try:
+        for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
+            for rm in (r.json_blob or {}).get("trail", {}).get("rooms", []) or []:
+                for rt in (rm.get("routes") or []):
+                    sol = ((rt.get("puzzle") or {}).get("solution") or {}).get("answer")
+                    if sol:
+                        blacklist.add(normalize_answer(sol).lower())
+            for p in (r.json_blob or {}).get("puzzles") or []:
+                sol = (p.get("solution") or {}).get("answer")
+                if sol:
+                    blacklist.add(normalize_answer(sol).lower())
+    except Exception:
+        pass
+
+    # Sanitize/repair LLM puzzles in-place (or regenerate deterministically)
+    _sanitize_trail_puzzles(blob, rng, blacklist)
+
+    try: current_app.logger.info(f"[escape] replaced invalid {typ} with offline {pid}")
+    except Exception: pass
+
+    # Validate & standardize; if broken, fallback offline
     try:
         room = validate_trailroom(blob)
+
     except Exception as e:
         try: current_app.logger.error(f"[escape] validate_trailroom failed: {e}")
         except Exception: pass
