@@ -6,91 +6,51 @@
     <title>Mini Escape — Leaderboard ({{ date_key }})</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-        :root {
-            --bg: #0f1220;
-            --panel: #141a30;
-            --text: #e6eaf6;
-            --muted: #9aa3c7;
-            --brand: #58bbff;
-            --shadow: rgba(0, 0, 0, .35)
-        }
-
-        * {
-            box-sizing: border-box
-        }
-
         body {
-            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto;
             background: #0f1220;
-            color: var(--text);
-            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif
+            color: #e6eaf6;
+            margin: 0
         }
 
         .wrap {
-            max-width: 840px;
+            max-width: 760px;
             margin: 0 auto;
-            padding: 24px 16px
+            padding: 20px 16px
         }
 
         h1 {
             font-size: 22px;
-            margin: 0 0 12px
-        }
-
-        .sub {
-            color: var(--muted);
-            margin-bottom: 16px
-        }
-
-        .card {
-            background: linear-gradient(180deg, #151a2f, #0f1427);
-            border: 1px solid #24305b;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px var(--shadow);
-            padding: 12px
+            margin: 0 0 10px
         }
 
         table {
             width: 100%;
-            border-collapse: collapse
+            border-collapse: collapse;
+            background: #0f1427;
+            border: 1px solid #24305b;
+            border-radius: 10px;
+            overflow: hidden
         }
 
         th,
         td {
-            padding: 10px 8px;
+            padding: 10px;
+            border-bottom: 1px solid #1f284b;
             text-align: left
         }
 
-        th {
-            color: #b6c4ff;
-            font-weight: 700;
-            border-bottom: 1px solid #2a3769
+        tr:last-child td {
+            border-bottom: none
         }
 
-        tr+tr td {
-            border-top: 1px dashed #22305d
-        }
-
-        .time {
-            font-variant-numeric: tabular-nums
-        }
-
-        .btn {
-            display: inline-block;
-            background: #173562;
-            border: 1px solid #2a3c73;
-            color: #cfe3ff;
-            border-radius: 10px;
-            padding: 10px 14px;
+        a {
+            color: #58bbff;
             text-decoration: none
         }
 
-        .row {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
-            margin: 10px 0
+        a:hover {
+            text-decoration: underline
         }
     </style>
 </head>
@@ -98,41 +58,29 @@
 <body>
     <div class="wrap">
         <h1>Leaderboard — {{ date_key }}</h1>
-        <div class="sub">Ranked by adjusted time (chips convert to time bonus).</div>
-        <div class="card">
-            <table>
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Adjusted Time</th>
-                        <th>Bonus (−ms)</th>
-                        <th>Chips Left</th>
-                        <th>Recorded</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if rows %}
-                    {% for r in rows %}
-                    {% set m = r.attempt.meta or {} %}
-                    <tr>
-                        <td>{{ r.rank }}</td>
-                        <td class="time">{{ '%.3f'|format(r.attempt.time_ms/1000.0) }}s</td>
-                        <td class="time">{{ m.get('bonus_ms', 0) }}</td>
-                        <td>{{ m.get('chips_remaining', 0) }}</td>
-                        <td>{{ r.attempt.created_at.strftime("%H:%M UTC • %b %d") }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% else %}
-                    <tr>
-                        <td colspan="5" style="color:#9aa3c7;">No successful runs yet.</td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
-        <div class="row">
-            <a class="btn" href="/escape/today?date={{ date_key }}">Back to today’s room</a>
-        </div>
+        <p><a href="/escape/today">Back to Today’s Room</a></p>
+        {% if rows and rows|length > 0 %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Time</th>
+                    <th>Recorded</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>#{{ r.rank }}</td>
+                    <td>{{ "%.3f"|format(r.seconds|default(0.0)) }} s</td>
+                    <td>{{ r.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No successful escapes yet today. Be the first!</p>
+        {% endif %}
     </div>
 </body>
 

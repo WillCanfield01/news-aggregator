@@ -1,24 +1,29 @@
-# app/escape/routes.py
 # -*- coding: utf-8 -*-
 """
-Trailroom Routes (backward-compatible)
+Mini Escape Rooms - Routes (Blueprint endpoints)
 
 Endpoints
-- GET  /escape/today
-- GET  /escape/api/today
-- POST /escape/api/submit
-- POST /escape/api/finish
-- GET  /escape/leaderboard
-- GET  /escape/api/leaderboard
-- GET  /escape/admin/regen
+- GET  /escape/today                 -> HTML page to play
+- GET  /escape/api/today             -> JSON room (solutions stripped)
+- POST /escape/api/submit            -> {date_key, puzzle_id, answer} -> {correct: bool}
+- POST /escape/api/finish            -> {date_key, started_ms, success, final_code?, meta?} -> leaderboard save
+- GET  /escape/leaderboard           -> HTML page with today's top times
+- GET  /escape/api/leaderboard       -> JSON leaderboard {date_key?, limit?}
+
+Notes
+- Keep routes thin; generation/validation lives in core.py, DB in models.py.
+- Solutions are *never* sent to the client. Only server verifies answers.
 """
 
 from __future__ import annotations
 
 import os
 import json
+import time
+import math
 import datetime as dt
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
+
 from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
 from app.extensions import db
@@ -29,13 +34,6 @@ from .core import (
     verify_meta_final,
     get_today_key,
 )
-
-# ---- Daily Trail chips (non-monetary) ----
-CHIPS_START = 100  # starting pool
-ROUTE_COST = {"cautious": 0, "brisk": 10}  # "move quickly" costs chips
-HINT_COST1 = 10
-HINT_COST2 = 20
-TIME_BONUS_PER_CHIP_MS = 50  # subtract 50 ms per remaining chip at finish
 
 # ---------------------------------------------------------------------
 # Blueprint initializer
@@ -52,7 +50,7 @@ def init_routes(bp: Blueprint):
     @bp.route("/today", methods=["GET"])
     def play_today():
         room = ensure_daily_room()
-        return render_template("play.html", date_key=room.date_key, difficulty=room.difficulty)
+        return render_template("escape/play.html", date_key=room.date_key, difficulty=room.difficulty)
 
     # -----------------------------
     # API: Fetch today's room JSON (solutions stripped)
@@ -68,9 +66,9 @@ def init_routes(bp: Blueprint):
 
         payload = _strip_solutions(room.json_blob or {})
 
-        # Safety: if something odd produced zero puzzles, rebuild offline once
-        if not (payload.get("puzzles") or (payload.get("trail") or {}).get("rooms")):
-            current_app.logger.warning("[escape] api_today saw empty content; attempting offline rebuild")
+        # If something went wrong and we ended up with 0 puzzles/routes, hard fallback to offline
+        if not _has_any_puzzle(payload):
+            current_app.logger.warning("[escape] api_today saw no puzzles/routes; attempting offline regen")
             from .core import generate_room_offline
             secret = os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me")
             try:
@@ -91,9 +89,6 @@ def init_routes(bp: Blueprint):
     # -----------------------------
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
-        """
-        Body: { "date_key": "...", "puzzle_id": "pz_1", "answer": "..." }
-        """
         data = _json_body_or_400()
         date_key = data.get("date_key")
         puzzle_id = data.get("puzzle_id")
@@ -109,121 +104,70 @@ def init_routes(bp: Blueprint):
     # -----------------------------
     # API: Finish a run (for leaderboards)
     # -----------------------------
-@bp.route("/api/finish", methods=["POST"])
-def api_finish():
-    data = _json_body_or_400()
-    date_key = data.get("date_key")
-    started_ms = data.get("started_ms")
-    success = bool(data.get("success"))
-    meta_client = data.get("meta") or {}
+    @bp.route("/api/finish", methods=["POST"])
+    def api_finish():
+        """
+        Record a player's run. We compute the duration server-side.
+        If meta includes chip info, we apply a time bonus (leftover chips -> shorter effective time).
+        """
+        data = _json_body_or_400()
+        date_key = data.get("date_key")
+        started_ms = data.get("started_ms")
+        success = bool(data.get("success"))
+        meta = data.get("meta") or {}
 
-    if not date_key or started_ms is None:
-        return _bad("Missing required fields: date_key, started_ms")
+        if not date_key or started_ms is None:
+            return _bad("Missing required fields: date_key, started_ms")
 
-    room = _get_or_404(date_key)
+        room = _get_or_404(date_key)
 
-    # Duration (server computed)
-    now = dt.datetime.utcnow()
-    try:
-        started_dt = dt.datetime.utcfromtimestamp(int(started_ms) / 1000.0)
-    except Exception:
-        return _bad("started_ms must be epoch milliseconds")
-    dur_ms = int((now - started_dt).total_seconds() * 1000)
-    if dur_ms < 3000:
-        current_app.logger.info("[escape] suspicious finish: duration < 3s")
-        success = False
+        now = dt.datetime.utcnow()
+        try:
+            started_dt = dt.datetime.utcfromtimestamp(int(started_ms) / 1000.0)
+        except Exception:
+            return _bad("started_ms must be epoch milliseconds")
 
-    # Final-code check (if required)
-    if success and room.json_blob.get("final_code") or (room.json_blob.get("final") or {}).get("solution"):
-        submitted_final = (data.get("final_code") or "").strip()
-        if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
+        dur_ms = int((now - started_dt).total_seconds() * 1000)
+        if dur_ms < 3000:
+            current_app.logger.info("[escape] suspicious finish: duration < 3s")
             success = False
 
-    # ---- Chip math (server-authoritative) ----
-    # Client sends which routes they chose and which hints they used per scene.
-    # We recompute chips_remaining from the cost table above.
-    routes = meta_client.get("routes") or []         # e.g. ["cautious","brisk","cautious"]
-    hints_used = meta_client.get("hints") or []      # e.g. [{"h1":true,"h2":false}, ... x3]
+        # If a final meta-code exists on the room, verify it when success is True
+        if success and (room.json_blob.get("final_code") or (room.json_blob.get("final") or {}).get("solution")):
+            submitted_final = (data.get("final_code") or "").strip()
+            if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
+                success = False
 
-    # Coerce shapes
-    try:
-        routes = [str(x) for x in routes][:3]
-    except Exception:
-        routes = []
-    norm_hints = []
-    for h in hints_used[:3]:
-        h1 = bool((h or {}).get("h1"))
-        h2 = bool((h or {}).get("h2"))
-        norm_hints.append({"h1": h1, "h2": h2})
-    while len(norm_hints) < 3:
-        norm_hints.append({"h1": False, "h2": False})
+        # Apply server-side chip bonus (only with sane meta)
+        eff_ms = dur_ms
+        chip_bonus_ms = 0
+        if success:
+            eff_ms, chip_bonus_ms = _apply_chip_bonus(dur_ms, meta)
 
-    # Compute spend
-    chips_spent = 0
-    for rid in routes[:3]:
-        chips_spent += int(ROUTE_COST.get(rid, 0))
-    for h in norm_hints[:3]:
-        if h.get("h1"): chips_spent += HINT_COST1
-        if h.get("h2"): chips_spent += HINT_COST2
+        # Save attempt
+        attempt = EscapeAttempt(
+            user_id=None,
+            date_key=date_key,
+            started_at=started_dt,
+            finished_at=now,
+            time_ms=eff_ms if success else None,
+            success=success,
+            meta={
+                **(meta or {}),
+                "raw_time_ms": dur_ms,
+                "chip_bonus_ms": chip_bonus_ms,
+                "effective_time_ms": eff_ms if success else None,
+            },
+        )
+        db.session.add(attempt)
+        db.session.commit()
 
-    chips_remaining = max(0, min(CHIPS_START - chips_spent, CHIPS_START))
-    bonus_ms = chips_remaining * TIME_BONUS_PER_CHIP_MS
-    adjusted_ms = max(0, dur_ms - bonus_ms) if success else None
-
-    attempt = EscapeAttempt(
-        user_id=None,
-        date_key=date_key,
-        started_at=started_dt,
-        finished_at=now,
-        time_ms=adjusted_ms,
-        success=success,
-        meta={
-            **meta_client,
-            "chips_start": CHIPS_START,
-            "chips_spent": chips_spent,
-            "chips_remaining": chips_remaining,
-            "bonus_ms": bonus_ms,
-            "raw_time_ms": dur_ms,
-            "routes": routes,
-            "hints": norm_hints,
-        },
-    )
-    db.session.add(attempt)
-    db.session.commit()
-
-    return jsonify({
-        "ok": True,
-        "success": success,
-        "time_ms": attempt.time_ms,          # adjusted time (shown on leaderboard)
-        "raw_time_ms": dur_ms,
-        "bonus_ms": bonus_ms,
-        "chips_remaining": chips_remaining,
-        "attempt_id": attempt.id,
-    })
-
-    # -----------------------------
-    # Admin: force regenerate
-    # -----------------------------
-    @bp.route("/admin/regen", methods=["GET", "POST"])
-    def admin_regen():
-        from .core import ensure_daily_room, get_today_key
-
-        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
-        server_token = os.getenv("ESCAPE_ADMIN_TOKEN", "")
-        if not server_token:
-            return jsonify({"ok": False, "error": "server missing ESCAPE_ADMIN_TOKEN env"}), 500
-        if token != server_token:
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
-
-        date_key = request.args.get("date") or get_today_key()
-        force = (request.args.get("force", "true").lower() != "false")
-        try:
-            row = ensure_daily_room(date_key, force_regen=force)
-            puzzles = len(((row.json_blob or {}).get("puzzles") or []))
-            return jsonify({"ok": True, "date": date_key, "puzzles": puzzles})
-        except Exception as e:
-            current_app.logger.exception("[escape] admin_regen failed")
-            return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({
+            "ok": True,
+            "success": success,
+            "time_ms": attempt.time_ms,
+            "attempt_id": attempt.id,
+        })
 
     # -----------------------------
     # HTML: Leaderboard
@@ -267,7 +211,6 @@ def api_finish():
             })
         return jsonify({"date_key": date_q, "top": out})
 
-    # Root -> /today
     @bp.route("/", methods=["GET"])
     def root():
         return redirect(url_for("escape.play_today"), code=302)
@@ -276,29 +219,47 @@ def api_finish():
 # Helpers
 # ---------------------------------------------------------------------
 
-# app/escape/routes.py
+def _has_any_puzzle(room_json: Dict[str, Any]) -> bool:
+    if (room_json.get("puzzles") or []):
+        return True
+    trail = room_json.get("trail") or {}
+    for rm in (trail.get("rooms") or []):
+        for rt in (rm.get("routes") or []):
+            p = (rt.get("puzzle") or {})
+            if p:
+                return True
+    return False
 
-def _strip_solutions(room_json):
+def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep-copy and strip ALL solutions from puzzles and final."""
     if not isinstance(room_json, dict):
         return {}
+
     out = json.loads(json.dumps(room_json))  # deep copy
 
-    # 1) flat list (legacy)
+    # Legacy flat list
     cleaned = []
-    for p in out.get("puzzles", []):
+    for p in (out.get("puzzles") or []):
         if isinstance(p, dict):
             p.pop("solution", None)
             cleaned.append(p)
-    out["puzzles"] = cleaned
+    if "puzzles" in out:
+        out["puzzles"] = cleaned
 
-    # 2) trail shape
+    # New trail shape
     trail = out.get("trail") or {}
     for rm in (trail.get("rooms") or []):
         for rt in (rm.get("routes") or []):
-            p = rt.get("puzzle")
-            if isinstance(p, dict):
-                p.pop("solution", None)
-    out["trail"] = trail
+            if isinstance(rt, dict):
+                pz = rt.get("puzzle")
+                if isinstance(pz, dict):
+                    pz.pop("solution", None)
+
+    # Final solution (never send)
+    fin = out.get("final")
+    if isinstance(fin, dict):
+        if isinstance(fin.get("solution"), dict):
+            fin["solution"] = {}
 
     return out
 
@@ -319,13 +280,35 @@ def _abort_json(status: int, message: str):
     return resp
 
 def _bad(message: str):
-    return _abort_json(400, message)
+    abort(_abort_json(400, message))
 
 def _get_or_404(date_key: str) -> EscapeRoom:
     try:
         existing = db.session.query(EscapeRoom).filter_by(date_key=date_key).first()
-        room = existing or ensure_daily_room(date_key)
-        return room
+        return existing or ensure_daily_room(date_key)
     except Exception as e:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
-        abort(_abort_json(404, "Room not found"))
+        return abort(_abort_json(404, "Room not found"))
+
+def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> (int, int):
+    """
+    Convert leftover chips into a time bonus, with sanity checks.
+    Client sends: chips_start, chips_spent, chips_remaining, chips_to_ms.
+    We validate simple invariants; if broken, ignore bonus.
+    """
+    try:
+        start = int(meta.get("chips_start", 0))
+        spent = int(meta.get("chips_spent", 0))
+        remain = int(meta.get("chips_remaining", 0))
+        per = int(meta.get("chips_to_ms", 0))
+    except Exception:
+        return dur_ms, 0
+
+    if start < 0 or spent < 0 or remain < 0 or per < 0:
+        return dur_ms, 0
+    if remain > start or spent > start or (remain + spent) > start:
+        return dur_ms, 0
+
+    bonus = remain * per
+    eff = max(0, dur_ms - bonus)
+    return eff, bonus
