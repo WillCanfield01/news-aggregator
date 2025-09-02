@@ -62,7 +62,7 @@ FINAL_CODE_MIN_LEN = 4
 FINAL_CODE_MAX_LEN = 12
 
 # Allowed puzzle archetypes (LLM and offline)
-ALLOWED_TYPES = {"anagram","caesar","vigenere","numeric_lock","math","wordpath","riddle"}
+ALLOWED_TYPES = {"anagram", "caesar", "vigenere", "numeric_lock"}
 
 # ───────────────────────── Utilities ─────────────────────────
 
@@ -509,14 +509,14 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
 
 def _trail_prompt(date_key: str) -> str:
     return (
-        "Design a tiny Oregon-Trail-flavored escape room with 3 locations then a final lock.\n"
+        "Design a *tiny Oregon-Trail-flavored* escape: 3 locations (scenes), then a final lock.\n"
         "STRICT JSON ONLY (no markdown). Schema:\n"
         "{"
         ' "id": str, "title": str, "intro": str,'
         ' "npc_lines": [str]?, "supplies_start": int?,'
         ' "rooms": [ { "id": str, "title": str, "text": str,'
         '   "routes": [ { "id": "cautious"|"brisk", "label": str,'
-        '     "puzzle": { "id": str, "type": "anagram|caesar|vigenere|numeric_lock|math|wordpath|riddle",'
+        '     "puzzle": { "id": str, "type": "anagram|caesar|vigenere|numeric_lock",'
         '                 "prompt": str, "answer_format": {"pattern": str},'
         '                 "solution": {"answer": str, "shift"?: int, "key"?: str},'
         '                 "hints": [str]? } } ],'
@@ -525,7 +525,7 @@ def _trail_prompt(date_key: str) -> str:
         '            "solution": {"answer": str} },'
         ' "difficulty": "easy"|"medium"|"hard"'
         "}\n"
-        "- Do NOT reference real-money wagers. Keep it atmospheric and concise.\n"
+        "- Puzzles must be self-contained text/logic only (no counting objects, no images, no outside data).\n"
         "- Avoid stock riddle answers (piano, time, echo, shadow, etc.).\n"
         f"- DATE_KEY: {date_key}\n"
     )

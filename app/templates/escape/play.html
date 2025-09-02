@@ -1,0 +1,332 @@
+<!-- app/templates/escape/play.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Mini Escape — {{ date_key }} ({{ difficulty|default('medium')|title }})</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        /* keep your existing <style> exactly as-is */
+    </style>
+</head>
+
+<body>
+    <div id="overlay" class="overlay">
+        <div class="start-card">
+            <div class="start-title">Mini Escape — Daily Trail</div>
+            <div class="start-sub">
+                Three scenes. At each scene, choose a route and solve its puzzle to collect a fragment.
+                After all three, enter the Final Code to escape.
+                Hints unlock after <span class="kbd">60s</span> and <span class="kbd">120s</span>.
+            </div>
+            <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                <button id="startBtn" class="start-btn">Start Today’s Escape</button>
+                <a class="badge" href="/escape/leaderboard" target="_blank" rel="noopener">View Leaderboard</a>
+            </div>
+            <div class="start-sub" style="font-size:12px; opacity:.8;">Date: <span id="startDate">{{ date_key }}</span>
+                • Difficulty: {{ difficulty|default('medium')|title }}</div>
+        </div>
+    </div>
+
+    <div class="wrap">
+        <header>
+            <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
+            <div class="meta">
+                <span class="badge">Difficulty: <strong id="difficulty">{{ difficulty|default('medium')|title
+                        }}</strong></span>
+                <span class="badge" id="progressBadge">Fragments: 0 / 3</span>
+            </div>
+            <div class="timer" id="timer">00:00.000</div>
+        </header>
+
+        <section class="intro">
+            <div id="roomTitle" style="font-weight:800; margin-bottom:6px;">Loading…</div>
+            <div id="roomIntro" style="color:#c8d4ff;">Please wait…</div>
+        </section>
+
+        <section class="pane">
+            <div id="trail" class="puzzles" style="padding:12px;"></div>
+        </section>
+
+        <section class="footer">
+            <div id="finalGate" class="final-gate hidden">
+                <div id="finalPrompt"><strong>Final Code</strong> — Combine the three fragments.</div>
+                <div class="input-row">
+                    <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
+                    <button id="finishBtn">Finish & Submit Time</button>
+                </div>
+                <div id="finalStatus" class="status"></div>
+            </div>
+
+            <div id="share" class="share">
+                <div id="shareText">Share your time!</div>
+                <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                    <button class="copy-btn" id="copyBtn">Copy Result</button>
+                    <a id="tweetLink" target="_blank" rel="noopener"><button>Post on X</button></a>
+                    <a href="/escape/leaderboard" target="_blank" rel="noopener"><button>View Leaderboard</button></a>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="toast" class="toast">Saved</div>
+
+    <script>
+        // ---------- State ----------
+        const state = {
+            dateKey: "{{ date_key }}",
+            difficulty: "{{ difficulty|default('medium') }}",
+            startedMs: null,
+            tickHandle: null,
+            room: null,
+            trail: null,           // {rooms:[{id,title,text,routes:[{id,label,puzzle}],fragment_rule}]}
+            solvedScenes: 0,
+            chosenRouteByRoom: {}, // room_id -> "cautious" | "brisk"
+            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
+            finished: false,
+        };
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const paramDate = urlParams.get("date");
+        if (paramDate) state.dateKey = paramDate;
+
+        // ---------- Helpers ----------
+        const $ = (id) => document.getElementById(id);
+        function fmtTime(ms) { const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0"); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`; }
+        function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1800); }
+        function randomPick(arr, f = "") { return (!arr || !arr.length) ? f : arr[Math.floor(Math.random() * arr.length)]; }
+
+        // ---------- Fetch ----------
+        async function fetchRoom() {
+            const qs = state.dateKey ? `?date=${encodeURIComponent(state.dateKey)}` : "";
+            const res = await fetch(`/escape/api/today${qs}`, { cache: "no-store" });
+            if (!res.ok) throw new Error("Failed to load room");
+            const room = await res.json();
+
+            $("dateKey").textContent = state.dateKey;
+            $("difficulty").textContent = (room.difficulty || state.difficulty || "medium").toString().replace(/^./, c => c.toUpperCase());
+            state.hintPolicy = room.server_hint_policy || state.hintPolicy;
+
+            $("roomTitle").textContent = room.title || "Today's Trail";
+            $("roomIntro").textContent = room.intro || "";
+
+            state.room = room;
+            state.trail = room.trail || { rooms: [] };
+
+            // Final lock prompt (if author supplied one)
+            if (room.final && room.final.prompt) {
+                $("finalPrompt").innerHTML = `<strong>Final Code</strong> — ${room.final.prompt}`;
+            }
+
+            renderTrail();
+        }
+
+        // ---------- Render ----------
+        function renderTrail() {
+            const holder = $("trail");
+            holder.innerHTML = "";
+            const rooms = state.trail.rooms || [];
+            rooms.forEach((rm, idx) => {
+                const card = document.createElement("div");
+                card.className = "puzzle";
+                card.id = `room-${rm.id}`;
+
+                const head = document.createElement("div");
+                head.className = "puzzle-head";
+                const t = document.createElement("div");
+                t.className = "p-title";
+                t.textContent = `Scene ${idx + 1}: ${rm.title || "Trail"}`;
+                const badge = document.createElement("div");
+                badge.className = "p-arch";
+                badge.textContent = "choose a route";
+                head.appendChild(t); head.appendChild(badge);
+                card.appendChild(head);
+
+                const text = document.createElement("div");
+                text.className = "p-prompt";
+                text.textContent = rm.text || "";
+                card.appendChild(text);
+
+                // Route buttons
+                const routesRow = document.createElement("div");
+                routesRow.style.display = "flex";
+                routesRow.style.gap = "8px";
+                (rm.routes || []).forEach(rt => {
+                    const b = document.createElement("button");
+                    b.textContent = rt.label || (rt.id === "cautious" ? "Cautious" : "Brisk");
+                    b.addEventListener("click", () => chooseRoute(rm, rt, card, routesRow, badge));
+                    routesRow.appendChild(b);
+                });
+                card.appendChild(routesRow);
+
+                // Placeholder for the puzzle UI
+                const pzWrap = document.createElement("div");
+                pzWrap.style.marginTop = "8px";
+                card.appendChild(pzWrap);
+
+                holder.appendChild(card);
+            });
+
+            updateProgress();
+        }
+
+        function updateProgress() {
+            $("progressBadge").textContent = `Fragments: ${state.solvedScenes} / 3`;
+            if (state.solvedScenes >= 3) {
+                $("finalGate").classList.remove("hidden");
+            }
+        }
+
+        function chooseRoute(room, route, card, routesRow, badge) {
+            if (state.chosenRouteByRoom[room.id]) return; // already chosen
+            state.chosenRouteByRoom[room.id] = route.id;
+            // disable both buttons
+            [...routesRow.querySelectorAll("button")].forEach(b => b.disabled = true);
+            badge.textContent = `route: ${route.id}`;
+            renderPuzzleInto(card, room, route);
+        }
+
+        function renderPuzzleInto(container, room, route) {
+            const pz = route.puzzle || {};
+            const box = document.createElement("div");
+            box.style.marginTop = "8px";
+
+            const prompt = document.createElement("div");
+            prompt.className = "p-paraphrase";
+            prompt.textContent = pz.prompt || "";
+            box.appendChild(prompt);
+
+            const inputRow = document.createElement("div");
+            inputRow.className = "input-row";
+            const input = document.createElement("input");
+            input.type = "text"; input.placeholder = "Type your answer…"; input.autocomplete = "off";
+            const btn = document.createElement("button");
+            btn.textContent = "Submit";
+            inputRow.appendChild(input); inputRow.appendChild(btn);
+            box.appendChild(inputRow);
+
+            const status = document.createElement("div");
+            status.className = "status";
+            status.textContent = "Awaiting answer…";
+            box.appendChild(status);
+
+            // Hints
+            const hints = pz.hints || [];
+            if (hints.length) {
+                const hintsWrap = document.createElement("div");
+                hintsWrap.className = "p-hints";
+                const h1btn = document.createElement("button"); h1btn.className = "hint-pill"; h1btn.textContent = "Reveal Hint 1 (60s)";
+                const h1text = document.createElement("div"); h1text.className = "hint-text hidden";
+                const h2btn = document.createElement("button"); h2btn.className = "hint-pill"; h2btn.textContent = "Reveal Hint 2 (120s)";
+                const h2text = document.createElement("div"); h2text.className = "hint-text hidden";
+                hintsWrap.appendChild(h1btn); hintsWrap.appendChild(h1text); hintsWrap.appendChild(h2btn); hintsWrap.appendChild(h2text);
+                box.appendChild(hintsWrap);
+
+                const updateHints = () => {
+                    if (!state.startedMs) return;
+                    const elapsed = Date.now() - state.startedMs;
+                    const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000;
+                    const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000;
+                    h1btn.disabled = elapsed < d1;
+                    h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.ceil((d1 - elapsed) / 1000)}s` : "Reveal Hint 1";
+                    h2btn.disabled = elapsed < d2;
+                    h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.ceil((d2 - elapsed) / 1000)}s` : "Reveal Hint 2";
+                };
+                setInterval(updateHints, 250);
+                h1btn.addEventListener("click", () => { if (!h1btn.disabled) { h1text.textContent = hints[0] || "No hint provided."; h1text.classList.remove("hidden"); } });
+                h2btn.addEventListener("click", () => { if (!h2btn.disabled) { h2text.textContent = hints[1] || "No additional hint."; h2text.classList.remove("hidden"); } });
+            }
+
+            container.appendChild(box);
+
+            async function submit() {
+                if (state.finished) return;
+                const answer = (input.value || "").trim();
+                if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
+                status.textContent = "Checking…"; status.className = "status";
+                try {
+                    const res = await fetch(`/escape/api/submit`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ date_key: state.dateKey, puzzle_id: pz.id, answer })
+                    });
+                    const data = await res.json();
+                    if (data && data.correct) {
+                        input.disabled = true; btn.disabled = true;
+                        status.textContent = "Correct! Fragment secured."; status.className = "status ok";
+                        state.solvedScenes = Math.min(3, state.solvedScenes + 1);
+                        updateProgress();
+                    } else {
+                        status.textContent = "Not yet. Try another angle."; status.className = "status err";
+                    }
+                } catch {
+                    status.textContent = "Network error — try again."; status.className = "status err";
+                }
+            }
+
+            btn.addEventListener("click", submit);
+            input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+        }
+
+        // ---------- Finish flow ----------
+        $("finishBtn").addEventListener("click", async () => {
+            if (state.solvedScenes < 3) { toast("Solve all three scenes first."); return; }
+            const finalVal = ($("finalInput").value || "").trim();
+            if (!finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
+            await doFinish(true, finalVal);
+        });
+
+        async function doFinish(success, finalCode = null) {
+            if (state.finished) return;
+            try {
+                const res = await fetch(`/escape/api/finish`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        date_key: state.dateKey,
+                        started_ms: state.startedMs,
+                        success: !!success,
+                        final_code: finalCode,
+                        meta: {
+                            ua: navigator.userAgent, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                            width: window.innerWidth, height: window.innerHeight
+                        }
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
+                if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check the code."; $("finalStatus").className = "status err"; return; }
+                state.finished = true; stopTimer(); revealShare(data.time_ms || (Date.now() - state.startedMs)); toast("Time submitted!");
+            } catch { $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err"; }
+        }
+
+        function revealShare(timeMs) {
+            const share = $("share");
+            const txt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
+            $("shareText").textContent = txt;
+            $("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText(txt + " /escape/today"); toast("Copied!"); } catch { toast("Copy failed"); } };
+            const tweet = new URL("https://twitter.com/intent/tweet"); tweet.searchParams.set("text", txt + " "); tweet.searchParams.set("url", window.location.origin + "/escape/today"); $("tweetLink").href = tweet.toString();
+            share.classList.add("show");
+        }
+
+        // ---------- Timer ----------
+        function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
+        function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
+
+        // ---------- Start ----------
+        $("startBtn").addEventListener("click", async () => { $("overlay").classList.add("hidden"); await fetchRoom(); startTimer(); });
+
+        // Cmd/Ctrl+Enter submits focused input
+        document.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                const active = document.activeElement;
+                if (active && active.tagName === "INPUT") {
+                    active.closest(".puzzle")?.querySelector("button:not([disabled])")?.click();
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

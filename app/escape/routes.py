@@ -238,43 +238,29 @@ def init_routes(bp: Blueprint):
 # Helpers
 # ---------------------------------------------------------------------
 
-def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Deep-copy and remove any server-side solution data:
-      - top-level puzzles[*].solution
-      - trail.rooms[*].routes[*].puzzle.solution
-      - final.solution
-    """
+# app/escape/routes.py
+
+def _strip_solutions(room_json):
     if not isinstance(room_json, dict):
         return {}
-
     out = json.loads(json.dumps(room_json))  # deep copy
 
-    # Legacy flat puzzles
+    # 1) flat list (legacy)
     cleaned = []
-    for p in (out.get("puzzles") or []):
+    for p in out.get("puzzles", []):
         if isinstance(p, dict):
             p.pop("solution", None)
             cleaned.append(p)
-    if "puzzles" in out:
-        out["puzzles"] = cleaned
+    out["puzzles"] = cleaned
 
-    # Trail structure
+    # 2) trail shape
     trail = out.get("trail") or {}
-    rooms = trail.get("rooms") or []
-    for rm in rooms:
+    for rm in (trail.get("rooms") or []):
         for rt in (rm.get("routes") or []):
             p = rt.get("puzzle")
             if isinstance(p, dict):
                 p.pop("solution", None)
-                # extra safety: remove helper fields that might leak solves
-                if isinstance(p.get("answer_format"), dict):
-                    # keep pattern; it doesn't leak
-                    pass
-
-    # Final lock: keep prompt and pattern, drop solution
-    if isinstance(out.get("final"), dict):
-        out["final"].pop("solution", None)
+    out["trail"] = trail
 
     return out
 
