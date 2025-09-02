@@ -23,7 +23,7 @@ import time
 import math
 import datetime as dt
 from typing import Any, Dict, List, Optional
-
+from typing import Tuple
 from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
 from app.extensions import db
@@ -51,6 +51,36 @@ def init_routes(bp: Blueprint):
     def play_today():
         room = ensure_daily_room()
         return render_template("escape/play.html", date_key=room.date_key, difficulty=room.difficulty)
+
+    @bp.route("/admin/regen", methods=["GET", "POST"])
+    def admin_regen():
+        from .core import ensure_daily_room, get_today_key
+        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
+        server_token = os.getenv("ESCAPE_ADMIN_TOKEN", "")
+        if not server_token:
+            return jsonify({"ok": False, "error": "server missing ESCAPE_ADMIN_TOKEN env"}), 500
+        if token != server_token:
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+        date_key = request.args.get("date") or get_today_key()
+        force = (request.args.get("force", "true").lower() != "false")
+        try:
+            row = ensure_daily_room(date_key, force_regen=force)
+            puzzles = len(((row.json_blob or {}).get("puzzles") or []))
+            return jsonify({"ok": True, "date": date_key, "puzzles": puzzles})
+        except Exception as e:
+            current_app.logger.exception("[escape] admin_regen failed")
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    # --- Admin health & alias ---
+    @bp.route("/admin/ping", methods=["GET"])
+    def admin_ping():
+        return jsonify({"ok": True, "blueprint": bp.name})
+
+    # Keep /admin/regen, add an API alias so we have two ways to hit it
+    @bp.route("/api/admin/regen", methods=["GET", "POST"])
+    def admin_regen_api():
+        return admin_regen()   # just call the handler below
 
     # -----------------------------
     # API: Fetch today's room JSON (solutions stripped)
@@ -290,7 +320,7 @@ def _get_or_404(date_key: str) -> EscapeRoom:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
         return abort(_abort_json(404, "Room not found"))
 
-def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> (int, int):
+def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
     """
     Convert leftover chips into a time bonus, with sanity checks.
     Client sends: chips_start, chips_spent, chips_remaining, chips_to_ms.
