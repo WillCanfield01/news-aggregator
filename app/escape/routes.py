@@ -22,13 +22,10 @@ import time
 import math
 import datetime as dt
 from typing import Any, Dict, List, Optional
+# app/escape/routes.py (top of file)
+import os
+from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
-from flask import (
-    request,
-    jsonify,
-    render_template,
-    current_app,
-)
 from app.extensions import db
 from .models import EscapeAttempt
 from .models import EscapeRoom
@@ -174,20 +171,27 @@ def init_routes(bp):
             "attempt_id": attempt.id,
         })
 
-    @bp.route("/admin/regen", methods=["POST", "GET"])
+    @bp.route("/admin/regen", methods=["GET", "POST"])
     def admin_regen():
-        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
-        if token != os.getenv("ESCAPE_ADMIN_TOKEN"):
-            return jsonify({"error": "unauthorized"}), 401
-
+        # lazy import to avoid circulars
         from .core import ensure_daily_room, get_today_key
+
+        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
+        server_token = os.getenv("ESCAPE_ADMIN_TOKEN", "")
+        if not server_token:
+            return jsonify({"ok": False, "error": "server missing ESCAPE_ADMIN_TOKEN env"}), 500
+        if token != server_token:
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
         date_key = request.args.get("date") or get_today_key()
-        row = ensure_daily_room(date_key, force_regen=True)
-        return jsonify({
-            "ok": True,
-            "date": date_key,
-            "puzzles": len((row.json_blob or {}).get("puzzles", [])),
-        })
+        force = (request.args.get("force", "true").lower() != "false")
+        try:
+            row = ensure_daily_room(date_key, force_regen=force)
+            puzzles = len(((row.json_blob or {}).get("puzzles") or []))
+            return jsonify({"ok": True, "date": date_key, "puzzles": puzzles})
+        except Exception as e:
+            current_app.logger.exception("[escape] admin_regen failed")
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     # -----------------------------
     # HTML: Leaderboard
@@ -241,6 +245,10 @@ def init_routes(bp):
             })
         return jsonify({"date_key": date_q, "top": out})
 
+    @bp.route("/", methods=["GET"])
+    def root():
+        return redirect(url_for("escape.play_today"), code=302)
+
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
@@ -268,11 +276,14 @@ def _json_body_or_400() -> Dict[str, Any]:
     Parse JSON or return a 400 response.
     """
     if not request.data:
-        return _abort_json(400, "Request body required")
+        abort(_abort_json(400, "Request body required"))
     try:
-        return request.get_json(force=True, silent=False) or {}
+        data = request.get_json(force=True, silent=False)
     except Exception:
-        return _abort_json(400, "Invalid JSON")
+        abort(_abort_json(400, "Invalid JSON"))
+    if data is None:
+        abort(_abort_json(400, "Request body required"))
+    return data
 
 
 def _abort_json(status: int, message: str):
@@ -288,7 +299,7 @@ def _bad(message: str):
     """
     Shortcut for 400 errors.
     """
-    return _abort_json(400, message)
+    abort(_abort_json(404, "Room not found"))
 
 
 def _get_or_404(date_key: str) -> EscapeRoom:
