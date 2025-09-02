@@ -312,6 +312,142 @@ def _get_openai_client():
     except Exception:
         return None, None
 
+def _default_pattern_for_type(p_type: str, answer: str) -> str:
+    p_type = (p_type or "").lower()
+    if p_type == "numeric_lock": return r"^\d{4}$"
+    # word-like answers
+    if re.fullmatch(r"^\d+$", str(answer or "")):  # numeric fallback
+        return r"^\d+$"
+    # general alpha (riddle/anagram/caesar/vigenere/wordpath/math textual)
+    return r"^[A-Za-z]{3,12}$"
+
+def _synth_puzzle(rng: random.Random, pid: str) -> Dict[str, Any]:
+    gen = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])
+    return gen(rng, pid, set()).to_json()
+
+def _ensure_two_routes(rm: Dict[str, Any], r_index: int, rng: random.Random) -> Dict[str, Any]:
+    routes_raw = _as_dict_list(rm.get("routes"))
+    # Keep only routes that have a dict puzzle with id/type/prompt/solution
+    cleaned = []
+    for rt in routes_raw:
+        p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
+        if not p: 
+            continue
+        # ensure minimal keys
+        if "id" not in p: p["id"] = f"r{r_index}_autopz_{len(cleaned)+1}"
+        if "type" not in p and "archetype" in p: p["type"] = p["archetype"]
+        if "answer_format" not in p:
+            p["answer_format"] = {"pattern": _default_pattern_for_type(p.get("type"), (p.get("solution") or {}).get("answer",""))}
+        if "solution" not in p or (p.get("solution") or {}).get("answer") in (None, ""):
+            # broken puzzle -> synth new
+            p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}")
+        rt["puzzle"] = p
+        cleaned.append(rt)
+
+    # Prefer one cautious + one brisk
+    def _mk(label_id, label_text, pz):
+        return {"id": label_id, "label": label_text, "puzzle": pz}
+
+    # Pick two
+    cautious = next((rt for rt in cleaned if (rt.get("id") or "").lower()=="cautious"), None)
+    brisk    = next((rt for rt in cleaned if (rt.get("id") or "").lower()=="brisk"), None)
+
+    picks = []
+    if cautious: picks.append(cautious)
+    if brisk:    picks.append(brisk)
+    for rt in cleaned:
+        if len(picks) >= 2: break
+        if rt is not cautious and rt is not brisk:
+            picks.append(rt)
+
+    # Synthesize missing routes
+    while len(picks) < 2:
+        pid = f"r{r_index}_{'caut' if len(picks)==0 else 'brisk'}_pz_autogen"
+        picks.append(_mk("cautious" if len(picks)==0 else "brisk",
+                         "Proceed carefully" if len(picks)==0 else "Move quickly",
+                         _synth_puzzle(rng, pid)))
+
+    # Normalize ids/labels and ensure stable order
+    out = []
+    # slot 0: cautious
+    r0 = picks[0]
+    out.append(_mk("cautious", "Proceed carefully", r0.get("puzzle")))
+    # slot 1: brisk
+    r1 = picks[1]
+    out.append(_mk("brisk", "Move quickly", r1.get("puzzle")))
+    rm["routes"] = out
+
+    # fragment rule default
+    fr = rm.get("fragment_rule") or "FIRST2"
+    if not is_valid_fragment_rule(fr): fr = "FIRST2"
+    rm["fragment_rule"] = fr
+    return rm
+
+def _synth_room(idx: int, rng: random.Random) -> Dict[str, Any]:
+    p1 = _synth_puzzle(rng, f"r{idx}_caut_pz")
+    p2 = _synth_puzzle(rng, f"r{idx}_brisk_pz")
+    fr, _ = _coerce_same_fragment_or_const("FIRST2", p1, p2)
+    return {
+        "id": f"room_{idx}",
+        "title": f"Waystation {idx}",
+        "text": "",
+        "routes": [
+            {"id": "cautious", "label": "Proceed carefully", "puzzle": p1},
+            {"id": "brisk",    "label": "Move quickly",      "puzzle": p2},
+        ],
+        "fragment_rule": fr,
+    }
+
+def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) -> Dict[str, Any]:
+    """Force LLM output into exactly-3-rooms, exactly-2-routes-per-room."""
+    # Wrap into trail if missing (compose_trailroom already does but keep safe)
+    if "trail" not in blob and "rooms" in blob:
+        blob["trail"] = {"supplies_start": blob.get("supplies_start", SUPPLIES_START_DEFAULT),
+                         "rooms": blob.get("rooms", [])}
+
+    trail = blob.get("trail")
+    if not isinstance(trail, dict): trail = {}
+    rooms = _as_dict_list(trail.get("rooms"))
+
+    # Trim/pad to 3
+    rooms = rooms[:3]
+    while len(rooms) < 3:
+        rooms.append(_synth_room(len(rooms)+1, rng))
+
+    # Sanitize each room’s routes
+    fixed_rooms = []
+    for i, rm in enumerate(rooms, start=1):
+        if not isinstance(rm, dict): rm = {"id": f"room_{i}", "routes": []}
+        rm.setdefault("id", f"room_{i}")
+        rm.setdefault("title", f"Waystation {i}")
+        rm.setdefault("text", "")
+        fixed_rooms.append(_ensure_two_routes(rm, i, rng))
+
+    # Apply back
+    trail["rooms"] = fixed_rooms
+    blob["trail"] = trail
+
+    # Ensure final prompt + pattern exist (answer gets reconciled in validate_trailroom)
+    final = blob.get("final")
+    if not isinstance(final, dict): final = {}
+    final.setdefault("id", "final")
+    final.setdefault("prompt", "Assemble the three fragments to form the PASSCODE.")
+    af = final.get("answer_format")
+    if not isinstance(af, dict): af = {}
+    af.setdefault("pattern", r"^[A-Za-z]{4,12}$")
+    final["answer_format"] = af
+    blob["final"] = final
+
+    # Basic top fields
+    blob.setdefault("id", date_key)
+    blob.setdefault("title", "Daily Trail")
+    blob.setdefault("intro", "Three stops, one final lock.")
+    blob.setdefault("difficulty", blob.get("difficulty", DEFAULT_DIFFICULTY))
+    blob.setdefault("anti_spoiler", {"paraphrase_variants": 3, "decoys": 2})
+    if not isinstance(blob.get("npc_lines"), list): blob["npc_lines"] = []
+
+    return blob
+
 def _trail_prompt(date_key: str) -> str:
     return (
         "Design a tiny Oregon-Trail-flavored escape room with 3 locations then a final lock.\n"
@@ -693,7 +829,6 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
 # ───────────────────────── Primary generation ─────────────────────────
 
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
-    """Try LLM; validate; fallback to offline; add novelty guard + critic."""
     if os.getenv("ESCAPE_MODEL","").lower()=="off" or os.getenv("ESCAPE_FORCE_OFFLINE","").lower() in ("1","true","yes"):
         return generate_room_offline(date_key, server_secret)
 
@@ -702,7 +837,6 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     if not isinstance(blob, dict):
         return generate_room_offline(date_key, server_secret)
 
-    # normalize to our internal shape (wrap rooms under "trail" if author omitted)
     if "trail" not in blob and "rooms" in blob:
         blob = {
             "id": blob.get("id", date_key),
@@ -716,7 +850,9 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
             "anti_spoiler": blob.get("anti_spoiler", {"paraphrase_variants":3,"decoys":2}),
         }
 
-    # Validate & standardize; if broken, offline
+    # 🔧 NEW: sanitize to 3 rooms / 2 routes per room
+    blob = _sanitize_llm_blob(blob, rng, date_key)
+
     try:
         room = validate_trailroom(blob)
     except Exception as e:
@@ -727,17 +863,15 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     if too_easy(room):
         room = harden(room, rng)
 
-    # Novelty tweak (title/intro only)
     try:
         if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
             t2,i2 = rng.choice(THEMES); room["title"]=t2; room["intro"]=i2
     except Exception:
         pass
 
-    # Optional critic (safe fields only) — revalidate with *trail* validator
     try:
         room2 = llm_critic_patch(room)
-        room = validate_trailroom(room2)
+        room = validate_trailroom(room2)  # keep trail validator
     except Exception:
         pass
     return room
