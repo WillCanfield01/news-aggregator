@@ -174,6 +174,21 @@ def init_routes(bp):
             "attempt_id": attempt.id,
         })
 
+    @bp.route("/admin/regen", methods=["POST", "GET"])
+    def admin_regen():
+        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
+        if token != os.getenv("ESCAPE_ADMIN_TOKEN"):
+            return jsonify({"error": "unauthorized"}), 401
+
+        from .core import ensure_daily_room, get_today_key
+        date_key = request.args.get("date") or get_today_key()
+        row = ensure_daily_room(date_key, force_regen=True)
+        return jsonify({
+            "ok": True,
+            "date": date_key,
+            "puzzles": len((row.json_blob or {}).get("puzzles", [])),
+        })
+
     # -----------------------------
     # HTML: Leaderboard
     # -----------------------------
