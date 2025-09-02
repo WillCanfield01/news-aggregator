@@ -369,6 +369,9 @@ def gen_numeric_lock(rng: random.Random, pid: str) -> Puzzle:
 # ---------- Optional LLM wrapper (architect + critic) ----------
 
 def _get_openai_client():
+    # Hard switch to disable LLM path entirely while stabilizing
+    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
+        return None, None
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None, None
@@ -384,7 +387,6 @@ def _get_openai_client():
         return openai, "legacy"
     except Exception:
         return None, None
-
 
 def _architect_prompt(algo_pack: List[Puzzle], date_key: str) -> str:
     base = (
@@ -669,23 +671,30 @@ def build_algorithmic_pack(rng: random.Random, blacklist: set) -> List[Puzzle]:
             pack.append(gen_vigenere(rng, pid, blacklist))
         elif archetype == "numeric_lock":
             pack.append(gen_numeric_lock(rng, pid))
-
-    # Absolute safety: never return empty
-    if not pack:
+    if not pack:  # absolute safety
         pack = [gen_numeric_lock(rng, "pz_1")]
     return pack
 
 def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> Dict[str, Any]:
+    # If offline forced, skip LLM path entirely
+    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
+        return offline_wrap(algo_pack, date_key, rng)
+
     blob = llm_wrap_story_and_clues(algo_pack, date_key)
-    # If LLM not available or returned malformed/empty structure, use offline
-    if not isinstance(blob, dict) or not isinstance(blob.get("puzzles"), list) or not blob["puzzles"]:
-        blob = offline_wrap(algo_pack, date_key, rng)
+    # Fallback if LLM absent or returned malformed/empty
+    if not isinstance(blob, dict):
+        return offline_wrap(algo_pack, date_key, rng)
+    puzzles = blob.get("puzzles")
+    if not isinstance(puzzles, list) or not puzzles:
+        return offline_wrap(algo_pack, date_key, rng)
     return blob
 
-def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
+def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
+    """Pure offline generation path (no LLM). Guaranteed non-empty puzzles."""
     seed = daily_seed(date_key, server_secret)
     rng = rng_from_seed(seed)
 
+    # minimal blacklist
     blacklist = set(COMMON_STOCK_ANSWERS)
     for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
         for p in (r.json_blob or {}).get("puzzles", []):
@@ -694,13 +703,9 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
                 blacklist.add(normalize_answer(sol).lower())
 
     pack = build_algorithmic_pack(rng, blacklist)
-    room = compose_room(pack, date_key, rng)
+    room = offline_wrap(pack, date_key, rng)
 
-    # Final guard: if anything upstream produced an empty puzzles list, force offline
-    if not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
-        room = offline_wrap(pack, date_key, rng)
-
-    # ---- rest of your function unchanged below ----
+    # ensure end gate requires all puzzles
     end_id = room.get("graph", {}).get("end")
     node_ids = {n.get("id") for n in room.get("graph", {}).get("nodes", [])}
     puzzle_ids = [p["id"] for p in room.get("puzzles", [])]
@@ -719,21 +724,79 @@ def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
         room = harden(room, rng)
         room = validate_room(room)
 
+    # no critic call in pure offline path
+    return room
+
+def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
+    # If offline forced, just use the offline generator
+    if os.getenv("ESCAPE_MODEL", "").lower() == "off" or os.getenv("ESCAPE_FORCE_OFFLINE", "").lower() in ("1","true","yes"):
+        return generate_room_offline(date_key, server_secret)
+
+    seed = daily_seed(date_key, server_secret)
+    rng = rng_from_seed(seed)
+
+    blacklist = set(COMMON_STOCK_ANSWERS)
+    for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
+        for p in (r.json_blob or {}).get("puzzles", []):
+            sol = (p.get("solution") or {}).get("answer")
+            if sol:
+                blacklist.add(normalize_answer(sol).lower())
+
+    pack = build_algorithmic_pack(rng, blacklist)
+    room = compose_room(pack, date_key, rng)
+
+    # Final guard before validation
+    if not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
+        room = offline_wrap(pack, date_key, rng)
+
+    # Wire end gate to require all puzzles
+    end_id = room.get("graph", {}).get("end")
+    node_ids = {n.get("id") for n in room.get("graph", {}).get("nodes", [])}
+    puzzle_ids = [p["id"] for p in room.get("puzzles", [])]
+    if end_id not in node_ids:
+        room.setdefault("graph", {}).setdefault("nodes", []).append(
+            {"id": "final_door", "type": "gate", "requires": puzzle_ids}
+        )
+        room["graph"]["end"] = "final_door"
+    else:
+        for n in room["graph"]["nodes"]:
+            if n.get("id") == end_id:
+                n["requires"] = puzzle_ids
+
+    # Validate/harden with recovery
+    try:
+        room = validate_room(room)
+    except Exception as e:
+        try:
+            current_app.logger.error(f"[escape] validate_room failed (primary): {e}; puzzles={len(room.get('puzzles') or [])}")
+        except Exception:
+            pass
+        # Absolute fallback: rebuild purely offline
+        room = generate_room_offline(date_key, server_secret)
+
+    if too_easy(room):
+        room = harden(room, rng)
+        room = validate_room(room)
+
+    # Similarity tweak and critic (best-effort)
     if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
         t2, i2 = rng.choice(THEMES)
         room["title"] = t2
         room["intro"] = i2
 
-    room = llm_critic_patch(room)
-    room = validate_room(room)
+    try:
+        room = llm_critic_patch(room)
+        room = validate_room(room)
+    except Exception:
+        # If critic breaks, ignore; the room is already valid
+        pass
+
     return room
 
 # ---------- Public API: ensure/caching ----------
 
 def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False) -> Any:
-    """Get today’s room or generate and cache it."""
     db, EscapeRoom = _get_db_and_models()
-
     if date_key is None:
         date_key = get_today_key()
 
@@ -743,6 +806,8 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
 
     secret = os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me")
     last_error = None
+
+    # Primary attempts (honor ESCAPE_MODEL=off inside generate_room)
     for attempt in range(1, MAX_GEN_ATTEMPTS + 1):
         try:
             room_blob = generate_room(date_key, secret)
@@ -763,10 +828,31 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
                 return new_room
         except Exception as e:
             last_error = e
-            current_app.logger.warning(f"[escape] generation attempt {attempt} failed: {e}")
+            try:
+                current_app.logger.warning(f"[escape] generation attempt {attempt} failed: {e}")
+            except Exception:
+                pass
 
-    raise RuntimeError(f"Failed to generate room after {MAX_GEN_ATTEMPTS} attempts: {last_error}")
-
+    # Absolute fallback: pure offline once more before giving up
+    try:
+        room_blob = generate_room_offline(date_key, secret)
+        if existing:
+            existing.json_blob = room_blob
+            existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
+            db.session.add(existing)
+            db.session.commit()
+            return existing
+        else:
+            new_room = EscapeRoom(
+                date_key=date_key,
+                json_blob=room_blob,
+                difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY),
+            )
+            db.session.add(new_room)
+            db.session.commit()
+            return new_room
+    except Exception as e2:
+        raise RuntimeError(f"Failed to generate room after offline fallback. Last errors: primary={last_error}; offline={e2}")
 
 # ---------- Verify answers (server-side truth) ----------
 
