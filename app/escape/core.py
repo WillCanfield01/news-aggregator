@@ -623,6 +623,64 @@ def validate_room(room_json: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------- Heuristic solver & hardening ----------
 
+def _normalize_graph(room: Dict[str, Any], puzzle_ids: List[str]) -> None:
+    """
+    Make sure graph structure is well-formed and hashable:
+    - graph exists
+    - nodes is a list
+    - every node.id is a string (coerced), unique
+    - every node.requires is a list[str]
+    - graph.end is a string and there is a corresponding gate node requiring all puzzles
+    """
+    g = room.setdefault("graph", {})
+    nodes = g.get("nodes")
+    if not isinstance(nodes, list):
+        nodes = []
+        g["nodes"] = nodes
+
+    seen: set = set()
+    for i, n in enumerate(nodes):
+        # Coerce id to a stable string
+        nid = n.get("id")
+        if isinstance(nid, (str, int)):
+            nid = str(nid)
+        else:
+            nid = f"auto_{i}"
+        # De-dup if necessary
+        if nid in seen:
+            nid = f"{nid}_{i}"
+        n["id"] = nid
+        seen.add(nid)
+
+        # requires must be a list[str]
+        req = n.get("requires", [])
+        if not isinstance(req, list):
+            req = []
+        n["requires"] = [str(r) for r in req]
+
+        # type default
+        n.setdefault("type", "puzzle")
+
+    # Normalize end id
+    end_id = g.get("end")
+    if not isinstance(end_id, (str, int)):
+        end_id = "final_door"
+        g["end"] = end_id
+    end_id = str(end_id)
+
+    # Ensure there is an end node and it requires all puzzles
+    end_node = None
+    for n in nodes:
+        if n.get("id") == end_id:
+            end_node = n
+            break
+    if end_node is None:
+        end_node = {"id": end_id, "type": "gate", "requires": list(puzzle_ids)}
+        nodes.append(end_node)
+    else:
+        end_node["type"] = end_node.get("type", "gate")
+        end_node["requires"] = list(puzzle_ids)
+
 def too_easy(room_json: Dict[str, Any]) -> bool:
     puzzles = room_json.get("puzzles", [])
     if len(puzzles) <= 1:
@@ -716,14 +774,16 @@ def compose_room(algo_pack: List[Puzzle], date_key: str, rng: random.Random) -> 
     blob = llm_wrap_story_and_clues(algo_pack, date_key)
     if not isinstance(blob, dict) or not isinstance(blob.get("puzzles"), list) or not blob["puzzles"]:
         return offline_wrap(algo_pack, date_key, rng)
+    # If graph is missing/odd, we'll normalize later
     return blob
 
-def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
-    """Pure offline generation path (no LLM). Guaranteed non-empty puzzles."""
+def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
+    # If offline forced, keep your existing short-circuit here…
+
     seed = daily_seed(date_key, server_secret)
     rng = rng_from_seed(seed)
 
-    # minimal blacklist
+    # Build blacklist from recent answers
     blacklist = set(COMMON_STOCK_ANSWERS)
     for r in recent_rooms(ANSWER_COOLDOWN_DAYS):
         for p in (r.json_blob or {}).get("puzzles", []):
@@ -732,28 +792,34 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
                 blacklist.add(normalize_answer(sol).lower())
 
     pack = build_algorithmic_pack(rng, blacklist)
-    room = offline_wrap(pack, date_key, rng)
+    room = compose_room(pack, date_key, rng)
 
-    # ensure end gate requires all puzzles
-    end_id = room.get("graph", {}).get("end")
-    node_ids = {n.get("id") for n in room.get("graph", {}).get("nodes", [])}
-    puzzle_ids = [p["id"] for p in room.get("puzzles", [])]
-    if end_id not in node_ids:
-        room.setdefault("graph", {}).setdefault("nodes", []).append(
-            {"id": "final_door", "type": "gate", "requires": puzzle_ids}
-        )
-        room["graph"]["end"] = "final_door"
-    else:
-        for n in room["graph"]["nodes"]:
-            if n.get("id") == end_id:
-                n["requires"] = puzzle_ids
+    # If LLM returned junk, fall back to offline
+    if not isinstance(room, dict) or not isinstance(room.get("puzzles"), list) or not room["puzzles"]:
+        room = offline_wrap(pack, date_key, rng)
 
+    # >>> NEW: sanitize the graph BEFORE making sets
+    puzzle_ids = [str(p.get("id")) for p in room.get("puzzles", []) if p.get("id")]
+    _normalize_graph(room, puzzle_ids)
+
+    # Validate; harden if needed; re-validate
     room = validate_room(room)
     if too_easy(room):
         room = harden(room, rng)
         room = validate_room(room)
 
-    # no critic call in pure offline path
+    # Novelty tweak + critic (best effort)
+    if is_too_similar_to_recent(room, RECENT_WINDOW_DAYS):
+        t2, i2 = rng.choice(THEMES)
+        room["title"] = t2
+        room["intro"] = i2
+
+    try:
+        room = llm_critic_patch(room)
+        room = validate_room(room)
+    except Exception:
+        pass
+
     return room
 
 def generate_room(date_key: str, server_secret: str) -> Dict[str, Any]:
