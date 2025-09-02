@@ -1107,12 +1107,58 @@ def _iter_all_puzzles(room_json: Dict[str,Any]):
     for p in _as_dict_list(room_json.get("puzzles")):
         yield p
 
+def _numeric_lock_accept_alt(answer: str, puzzle: Dict[str, Any]) -> bool:
+    """
+    If this is a numeric_lock and the prompt encodes constraints like:
+      - the first two digits sum to S
+      - the third digit is the first digit plus K1
+      - the last/fourth digit equals the second digit plus K2
+    then accept any 4-digit submission that satisfies them (e.g., both 0285 and 1194).
+    """
+    if not isinstance(puzzle, dict):
+        return False
+    if (puzzle.get("type") or puzzle.get("archetype")) != "numeric_lock":
+        return False
+
+    prompt = (puzzle.get("prompt") or "")
+    # tolerant, case-insensitive parsing
+    mS  = re.search(r"first\s+two\s+digits\s+sum\s+to\s+(-?\d+)", prompt, re.I)
+    mK1 = re.search(r"third\s+digit\s+is\s+the\s+first\s+digit\s+plus\s+(-?\d+)", prompt, re.I)
+    mK2 = re.search(r"(?:last|fourth)\s+digit\s+equals\s+the\s+second\s+digit\s+plus\s+(-?\d+)", prompt, re.I)
+    if not (mS and mK1 and mK2):
+        return False
+
+    try:
+        S  = int(mS.group(1))
+        K1 = int(mK1.group(1))
+        K2 = int(mK2.group(1))
+    except Exception:
+        return False
+
+    digits = re.sub(r"\D", "", str(answer or ""))
+    if len(digits) != 4:
+        return False
+    a, b, c, d = [int(ch) for ch in digits]
+    return (a + b == S) and (c - a == K1) and (d - b == K2)
+
 def verify_puzzle(room_json: Dict[str, Any], puzzle_id: str, answer: str) -> bool:
     for p in _iter_all_puzzles(room_json):
         if p.get("id") == puzzle_id:
             sol = (p.get("solution") or {}).get("answer")
             pattern = (p.get("answer_format") or {}).get("pattern")
-            return _match_answer(str(sol), str(answer or ""), pattern) if sol is not None else False
+
+            if sol is None:
+                return False
+
+            # Primary: exact stored answer (handles normalized/leading zeros)
+            if _match_answer(str(sol), str(answer or ""), pattern):
+                return True
+
+            # Numeric lock tolerance: accept any valid 4-digit code that satisfies the prompt constraints.
+            if _numeric_lock_accept_alt(answer, p):
+                return True
+
+            return False
     return False
 
 def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
