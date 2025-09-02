@@ -19,6 +19,7 @@ Notes
 from __future__ import annotations
 
 import time
+import json
 import math
 import datetime as dt
 from typing import Any, Dict, List, Optional
@@ -263,18 +264,17 @@ def init_routes(bp):
 
 # app/escape/routes.py
 
-def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Deep-copy the room and remove 'solution' keys only. Do NOT rebuild puzzle dicts.
-    This avoids accidentally dropping puzzles when the LLM returns odd shapes.
-    """
-    out = json.loads(json.dumps(room_json))  # deep copy
-    puzzles = out.get("puzzles") or []
-    if isinstance(puzzles, list):
-        for p in puzzles:
-            if isinstance(p, dict):
-                p.pop("solution", None)
-    out["puzzles"] = puzzles
+def _strip_solutions(room_json):
+    if not isinstance(room_json, dict):
+        return {}
+    # deep copy so we never mutate the DB blob
+    out = json.loads(json.dumps(room_json))
+    cleaned = []
+    for p in out.get("puzzles", []):
+        if isinstance(p, dict):
+            p.pop("solution", None)
+            cleaned.append(p)
+    out["puzzles"] = cleaned
     return out
 
 def _json_body_or_400() -> Dict[str, Any]:
