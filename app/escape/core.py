@@ -405,12 +405,24 @@ def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] =
     g = rng.choice(gens)
     return g(rng, pid, bl).to_json()
 
+def _coerce_same_fragment_or_const_all(rule: str, puzzles: List[Dict[str,Any]]) -> Tuple[str, str]:
+    """Ensure *all* routes for a room yield the same fragment; fallback to CONST if not."""
+    if not is_valid_fragment_rule(rule):
+        rule = "FIRST2"
+    frags = []
+    for p in puzzles:
+        ans = (p.get("solution") or {}).get("answer", "")
+        frags.append(apply_fragment_rule(ans, rule))
+    first = frags[0] if frags else ""
+    if any(f != first for f in frags):
+        rule = f"CONST:{first}"
+        frags = [first] * len(frags)
+    return rule, first
+
 def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
-    """Walk all LLM puzzles; if a puzzle's answer is recently used, replace it with a fresh offline one.
-       Keeps the original puzzle id; re-coerces each room's fragment rule afterwards.
-    """
     recent_norm = _recent_answer_set()
-    recent_lower = { s.lower() for s in recent_norm }  # our word lists are lowercase
+    recent_lower = {s.lower() for s in recent_norm}
+
     def _needs_replace(p: Dict[str, Any]) -> bool:
         ans = (p.get("solution") or {}).get("answer", "")
         return normalize_answer(ans) in recent_norm
@@ -428,93 +440,84 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
         routes = (rm.get("routes") or [])
         for j, rt in enumerate(routes, start=1):
             p = (rt.get("puzzle") or {})
-            if not isinstance(p, dict): 
-                # broken puzzle -> synth new
-                rt["puzzle"] = _synth_puzzle(rng, f"r{i}_{'caut' if j==1 else 'brisk'}_auto", recent_lower)
+            if not isinstance(p, dict):
+                rt["puzzle"] = _synth_puzzle(rng, f"r{i}_auto_{j}", recent_lower)
                 continue
             if _needs_replace(p):
-                pid = p.get("id") or f"r{i}_{'caut' if j==1 else 'brisk'}_auto"
+                pid = p.get("id") or f"r{i}_auto_{j}"
                 ptype = (p.get("type") or p.get("archetype") or "").lower()
-                gen = type_map.get(ptype, None)
-                new_p = (gen(rng, pid, recent_lower).to_json() if gen 
+                gen = type_map.get(ptype)
+                new_p = (gen(rng, pid, recent_lower).to_json() if gen
                          else _synth_puzzle(rng, pid, recent_lower))
-                # preserve the original id to keep stability in UI/refs
                 new_p["id"] = pid
                 rt["puzzle"] = new_p
 
-        # After any replacements, re-coerce fragment equality across the two routes
-        if len(routes) >= 2:
-            p1 = (routes[0].get("puzzle") or {})
-            p2 = (routes[1].get("puzzle") or {})
-            fr0 = rm.get("fragment_rule") or "FIRST2"
-            fr_ok, _frag = _coerce_same_fragment_or_const(fr0, p1, p2)
-            rm["fragment_rule"] = fr_ok
+        # Re-coerce fragment equality across all available routes
+        pz = []
+        for r in routes:
+            q = r.get("puzzle") if isinstance(r.get("puzzle"), dict) else {}
+            if q:
+                _validate_puzzle(q)
+                pz.append(q)
+        if pz:
+            fr_rule = rm.get("fragment_rule") or "FIRST2"
+            fr_rule, _ = _coerce_same_fragment_or_const_all(fr_rule, pz)
+            rm["fragment_rule"] = fr_rule
 
-    blob["trail"] = { **trail, "rooms": rooms }
+    blob["trail"] = {**trail, "rooms": rooms}
     return blob
 
-def _ensure_two_routes(rm: Dict[str, Any], r_index: int, rng: random.Random) -> Dict[str, Any]:
+def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: int = 3) -> Dict[str, Any]:
     routes_raw = _as_dict_list(rm.get("routes"))
-    # Keep only routes that have a dict puzzle with id/type/prompt/solution
     cleaned = []
     for rt in routes_raw:
         p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
-        if not p: 
+        if not p:
             continue
-        # ensure minimal keys
-        if "id" not in p: p["id"] = f"r{r_index}_autopz_{len(cleaned)+1}"
-        if "type" not in p and "archetype" in p: p["type"] = p["archetype"]
+        if "id" not in p:
+            p["id"] = f"r{r_index}_autopz_{len(cleaned)+1}"
+        if "type" not in p and "archetype" in p:
+            p["type"] = p["archetype"]
         if "answer_format" not in p:
-            p["answer_format"] = {"pattern": _default_pattern_for_type(p.get("type"), (p.get("solution") or {}).get("answer",""))}
+            p["answer_format"] = {
+                "pattern": _default_pattern_for_type(
+                    p.get("type"), (p.get("solution") or {}).get("answer", "")
+                )
+            }
         if "solution" not in p or (p.get("solution") or {}).get("answer") in (None, ""):
-            # broken puzzle -> synth new
             p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}")
-        rt["puzzle"] = p
-        cleaned.append(rt)
+        cleaned.append({
+            "id": (rt.get("id") or "").lower(),
+            "label": rt.get("label"),
+            "puzzle": p
+        })
 
-    # Prefer one cautious + one brisk
-    def _mk(label_id, label_text, pz):
-        return {"id": label_id, "label": label_text, "puzzle": pz}
+    ids = ["cautious", "brisk", "risky"][:count]
+    labels = {
+        "cautious": "Proceed carefully",
+        "brisk": "Move quickly",
+        "risky": "Take a risk",
+    }
 
-    # Pick two
-    cautious = next((rt for rt in cleaned if (rt.get("id") or "").lower()=="cautious"), None)
-    brisk    = next((rt for rt in cleaned if (rt.get("id") or "").lower()=="brisk"), None)
-
-    picks = []
-    if cautious: picks.append(cautious)
-    if brisk:    picks.append(brisk)
-    for rt in cleaned:
-        if len(picks) >= 2: break
-        if rt is not cautious and rt is not brisk:
-            picks.append(rt)
-
-    # Synthesize missing routes
-    while len(picks) < 2:
-        pid = f"r{r_index}_{'caut' if len(picks)==0 else 'brisk'}_pz_autogen"
-        picks.append(_mk("cautious" if len(picks)==0 else "brisk",
-                         "Proceed carefully" if len(picks)==0 else "Move quickly",
-                         _synth_puzzle(rng, pid)))
-
-    # Normalize ids/labels and ensure stable order
     out = []
-    # slot 0: cautious
-    r0 = picks[0]
-    out.append(_mk("cautious", "Proceed carefully", r0.get("puzzle")))
-    # slot 1: brisk
-    r1 = picks[1]
-    out.append(_mk("brisk", "Move quickly", r1.get("puzzle")))
-    rm["routes"] = out
+    for rid in ids:
+        existing = next((x for x in cleaned if x["id"] == rid), None)
+        if existing:
+            out.append({"id": rid, "label": labels[rid], "puzzle": existing["puzzle"]})
+        else:
+            pid = f"r{r_index}_{rid}_pz_autogen"
+            out.append({"id": rid, "label": labels[rid], "puzzle": _synth_puzzle(rng, pid)})
 
-    # fragment rule default
+    rm["routes"] = out
     fr = rm.get("fragment_rule") or "FIRST2"
-    if not is_valid_fragment_rule(fr): fr = "FIRST2"
-    rm["fragment_rule"] = fr
+    rm["fragment_rule"] = fr if is_valid_fragment_rule(fr) else "FIRST2"
     return rm
 
 def _synth_room(idx: int, rng: random.Random) -> Dict[str, Any]:
     p1 = _synth_puzzle(rng, f"r{idx}_caut_pz")
     p2 = _synth_puzzle(rng, f"r{idx}_brisk_pz")
-    fr, _ = _coerce_same_fragment_or_const("FIRST2", p1, p2)
+    p3 = _synth_puzzle(rng, f"r{idx}_risky_pz")
+    fr, _ = _coerce_same_fragment_or_const_all("FIRST2", [p1, p2, p3])
     return {
         "id": f"room_{idx}",
         "title": f"Waystation {idx}",
@@ -522,13 +525,13 @@ def _synth_room(idx: int, rng: random.Random) -> Dict[str, Any]:
         "routes": [
             {"id": "cautious", "label": "Proceed carefully", "puzzle": p1},
             {"id": "brisk",    "label": "Move quickly",      "puzzle": p2},
+            {"id": "risky",    "label": "Take a risk",       "puzzle": p3},
         ],
         "fragment_rule": fr,
     }
 
 def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) -> Dict[str, Any]:
-    """Force LLM output into exactly-3-rooms, exactly-2-routes-per-room."""
-    # Wrap into trail if missing (compose_trailroom already does but keep safe)
+    """Force LLM output into exactly-3-rooms, exactly-3-routes-per-room."""
     if "trail" not in blob and "rooms" in blob:
         blob["trail"] = {"supplies_start": blob.get("supplies_start", SUPPLIES_START_DEFAULT),
                          "rooms": blob.get("rooms", [])}
@@ -537,21 +540,18 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
     if not isinstance(trail, dict): trail = {}
     rooms = _as_dict_list(trail.get("rooms"))
 
-    # Trim/pad to 3
     rooms = rooms[:3]
     while len(rooms) < 3:
         rooms.append(_synth_room(len(rooms)+1, rng))
 
-    # Sanitize each room’s routes
     fixed_rooms = []
     for i, rm in enumerate(rooms, start=1):
         if not isinstance(rm, dict): rm = {"id": f"room_{i}", "routes": []}
         rm.setdefault("id", f"room_{i}")
         rm.setdefault("title", f"Waystation {i}")
         rm.setdefault("text", "")
-        fixed_rooms.append(_ensure_two_routes(rm, i, rng))
+        fixed_rooms.append(_ensure_routes(rm, i, rng, 3))
 
-    # Apply back
     trail["rooms"] = fixed_rooms
     blob["trail"] = trail
 
@@ -578,13 +578,14 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
 
 def _trail_prompt(date_key: str) -> str:
     return (
-        "Design a *tiny Oregon-Trail-flavored* escape: 3 locations (scenes), then a final lock.\n"
+        "Design a mini escape for today with a unique theme (not tied to any franchise): "
+        "3 short scenes, then a final lock. Keep it self-contained, pure text/logic.\n"
         "STRICT JSON ONLY (no markdown). Schema:\n"
         "{"
         ' "id": str, "title": str, "intro": str,'
         ' "npc_lines": [str]?, "supplies_start": int?,'
         ' "rooms": [ { "id": str, "title": str, "text": str,'
-        '   "routes": [ { "id": "cautious"|"brisk", "label": str,'
+        '   "routes": [ { "id": "cautious"|"brisk"|"risky", "label": str,'
         '     "puzzle": { "id": str, "type": "anagram|caesar|vigenere|numeric_lock",'
         '                 "prompt": str, "answer_format": {"pattern": str},'
         '                 "solution": {"answer": str, "shift"?: int, "key"?: str},'
@@ -594,7 +595,7 @@ def _trail_prompt(date_key: str) -> str:
         '            "solution": {"answer": str} },'
         ' "difficulty": "easy"|"medium"|"hard"'
         "}\n"
-        "- Puzzles must be self-contained text/logic only (no counting objects, no images, no outside data).\n"
+        "- Puzzles must be solvable from the text alone (no counting images, no outside facts).\n"
         "- Avoid stock riddle answers (piano, time, echo, shadow, etc.).\n"
         f"- DATE_KEY: {date_key}\n"
     )
@@ -799,18 +800,21 @@ def validate_trailroom(room: Dict[str,Any]) -> Dict[str,Any]:
     room["trail"] = trail
 
     # puzzles validation + consistent fragment per room
-    fragments=[]
+    # puzzles validation + consistent fragment per room
+    fragments = []
     for rm in rooms:
         routes = _as_dict_list(rm.get("routes"))
-        if len(routes) != 2:
-            raise ValueError("Each room must have exactly 2 routes")
-        p1 = routes[0].get("puzzle") if isinstance(routes[0].get("puzzle"), dict) else {}
-        p2 = routes[1].get("puzzle") if isinstance(routes[1].get("puzzle"), dict) else {}
-        _validate_puzzle(p1); _validate_puzzle(p2)
+        if len(routes) != 3:
+            raise ValueError("Each room must have exactly 3 routes")
+        pz = []
+        for r in routes:
+            q = r.get("puzzle") if isinstance(r.get("puzzle"), dict) else {}
+            _validate_puzzle(q)
+            pz.append(q)
         fr_rule = rm.get("fragment_rule") or "FIRST2"
-        fr_rule, frag = _coerce_same_fragment_or_const(fr_rule, p1, p2)
+        fr_rule, frag = _coerce_same_fragment_or_const_all(fr_rule, pz)
         rm["routes"] = routes
-        rm["fragment_rule"] = fr_rule  # may be hardened to CONST
+        rm["fragment_rule"] = fr_rule
         fragments.append(frag)
 
     # final answer: must equal concat of fragments (trim to bounds)
@@ -919,26 +923,25 @@ def harden(room: Dict[str,Any], rng: Optional[random.Random]=None) -> Dict[str,A
 
 # ───────────────────────── Offline fallback ─────────────────────────
 
-def _offline_trail(date_key: str, rng: random.Random) -> Dict[str,Any]:
+def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
     title, intro = rng.choice(THEMES)
 
-    # Build blacklist: stock words + recently used (normalized to lowercase)
     recent_norm = _recent_answer_set()
-    blacklist = { s.lower() for s in recent_norm } | { s.lower() for s in COMMON_STOCK_ANSWERS }
+    blacklist = {s.lower() for s in recent_norm} | {s.lower() for s in COMMON_STOCK_ANSWERS}
 
-    # create three pairs of puzzles
-    def pair(idx: int):
-        pid1 = f"r{idx}_caut_pz"; pid2 = f"r{idx}_brisk_pz"
-        p1 = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid1, blacklist)
-        p2 = rng.choice([gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock])(rng, pid2, blacklist)
-        return p1.to_json(), p2.to_json()
+    def trio(idx: int):
+        pid1 = f"r{idx}_caut_pz"; pid2 = f"r{idx}_brisk_pz"; pid3 = f"r{idx}_risky_pz"
+        g = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock]
+        p1 = rng.choice(g)(rng, pid1, blacklist)
+        p2 = rng.choice(g)(rng, pid2, blacklist)
+        p3 = rng.choice(g)(rng, pid3, blacklist)
+        return p1.to_json(), p2.to_json(), p3.to_json()
 
-    rooms=[]
-    fragments=[]
-    for i in range(1,4):
-        p1,p2 = pair(i)
-        fr = "FIRST2"
-        fr, frag = _coerce_same_fragment_or_const(fr, p1, p2)
+    rooms = []
+    fragments = []
+    for i in range(1, 4):
+        p1, p2, p3 = trio(i)
+        fr, frag = _coerce_same_fragment_or_const_all("FIRST2", [p1, p2, p3])
         fragments.append(frag)
         rooms.append({
             "id": f"room_{i}",
@@ -949,18 +952,17 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str,Any]:
             "routes": [
                 {"id":"cautious","label":"Proceed carefully","puzzle":p1},
                 {"id":"brisk","label":"Move quickly","puzzle":p2},
+                {"id":"risky","label":"Take a risk","puzzle":p3},
             ],
             "fragment_rule": fr
         })
 
-    concat = "".join(fragments); final = normalize_answer(concat)[:FINAL_CODE_MAX_LEN]
+    concat = "".join(fragments)
+    final = normalize_answer(concat)[:FINAL_CODE_MAX_LEN]
     if len(final) < FINAL_CODE_MIN_LEN:
         final = (final + "X"*FINAL_CODE_MIN_LEN)[:FINAL_CODE_MAX_LEN]
 
-    trail = {
-        "supplies_start": SUPPLIES_START_DEFAULT,
-        "rooms": rooms
-    }
+    trail = {"supplies_start": SUPPLIES_START_DEFAULT, "rooms": rooms}
     room = {
         "id": date_key, "title": title, "intro": intro,
         "npc_lines": [], "difficulty": DEFAULT_DIFFICULTY,
@@ -1024,9 +1026,6 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
 
     # Sanitize/repair LLM puzzles in-place (or regenerate deterministically)
     _sanitize_trail_puzzles(blob, rng, blacklist)
-
-    try: current_app.logger.info(f"[escape] replaced invalid {typ} with offline {pid}")
-    except Exception: pass
 
     # Validate & standardize; if broken, fallback offline
     try:

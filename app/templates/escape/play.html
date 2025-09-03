@@ -315,25 +315,27 @@
             <div class="rules">
                 <div class="rule">
                     <div style="font-weight:700;margin-bottom:4px;">How it works</div>
-                    <div class="muted">Solve 3 scenes to collect fragments, then unlock the final code.</div>
+                    <div class="muted">Solve 3 scenes to collect fragments, then combine them — in order — to unlock the
+                        final code.</div>
                 </div>
                 <div class="rule">
                     <div style="font-weight:700;margin-bottom:4px;">Routes</div>
-                    <div class="muted"><b>Proceed carefully</b> (safer) or <b>Move quickly</b> (risk/reward). “Move
-                        quickly” delays hints by <b>+30s</b> and costs more chips, but finishing a brisk scene on your
-                        <b>first try with no hints</b> gives a <b>−2s</b> time bonus; stumbling (≥3 tries) adds
-                        <b>+1.5s</b> penalty.
+                    <div class="muted">
+                        Each scene offers three distinct options: <b>Proceed carefully</b> (1×), <b>Move quickly</b>
+                        (2×), or <b>Take a risk</b> (3×).<br />
+                        Choosing faster routes delays hint availability (<b>+30s</b> for quick, <b>+60s</b> for risky).
+                        Fast routes may reward speed — but more mistakes can cost you.
                     </div>
                 </div>
                 <div class="rule">
                     <div style="font-weight:700;margin-bottom:4px;">Hints & chips</div>
-                    <div class="muted">Hints cost chips. Leftover chips convert to time bonus automatically at the end.
-                    </div>
+                    <div class="muted">Hints cost chips. Leftover chips convert to a time bonus automatically at the
+                        end.</div>
                 </div>
                 <div class="rule">
                     <div style="font-weight:700;margin-bottom:4px;">Tips</div>
-                    <div class="muted">Notes save locally per day. You can press <b>Cmd/Ctrl+Enter</b> to submit the
-                        current answer.</div>
+                    <div class="muted">Notes save locally per day. Press <b>Cmd/Ctrl+Enter</b> to submit an answer
+                        quickly.</div>
                 </div>
             </div>
 
@@ -367,7 +369,8 @@
 
                 <!-- Final gate -->
                 <section class="footer panel final" id="finalGate">
-                    <div><strong>Final Code</strong> — Combine what you’ve learned.</div>
+                    <div><strong>Final Code</strong> — Combine the three fragments <em>in order</em> (Scene 1 + Scene 2
+                        + Scene 3).</div>
                     <div class="row" style="margin-top:6px;">
                         <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
                         <button id="finishBtn">Finish & Submit Time</button>
@@ -405,22 +408,10 @@
     <script>
         // ------- Glossary (shown under hints) -------
         const GLOSSARY = {
-            anagram: {
-                label: "What’s an anagram?",
-                text: "Rearrange all the given letters to form a single valid word (use every letter exactly once)."
-            },
-            caesar: {
-                label: "What’s a Caesar shift?",
-                text: "Each letter was shifted forward a fixed amount in the alphabet (A→B is +1). Try small shifts until a word appears."
-            },
-            vigenere: {
-                label: "What’s Vigenère?",
-                text: "A repeating word key shifts letters by varying amounts. Decrypt to reveal the hidden uppercase word."
-            },
-            numeric_lock: {
-                label: "What’s a numeric lock?",
-                text: "A 4-digit code defined by arithmetic constraints. Solve the digits with simple equations."
-            }
+            anagram: { label: "What’s an anagram?", text: "Rearrange all the given letters to form a single valid word (use every letter exactly once)." },
+            caesar: { label: "What’s a Caesar shift?", text: "Each letter was shifted forward a fixed amount (A→B is +1). Try small shifts until a word appears." },
+            vigenere: { label: "What’s Vigenère?", text: "A repeating word key shifts letters by varying amounts. Decrypt to reveal the hidden uppercase word." },
+            numeric_lock: { label: "What’s a numeric lock?", text: "A 4-digit code defined by arithmetic constraints. Turn each clue into a simple equation." }
         };
 
         // ------- State -------
@@ -431,7 +422,9 @@
             room: null,
             currentScene: 0, // 0..2
             solvedScenes: [false, false, false],
-            chosenRoutes: [null, null, null], // "cautious" | "brisk"
+            chosenRoutes: [null, null, null], // "cautious" | "brisk" | "risky"
+            hintsUsedScene: [0, 0, 0],
+            submissionsScene: [0, 0, 0],
             hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 }
         };
         const $ = id => document.getElementById(id);
@@ -447,10 +440,7 @@
         function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 1000); }
 
         // ------- Prefetch room for intro modal -------
-        window.addEventListener("DOMContentLoaded", async () => {
-            await prefetchRoom();
-            loadNotes();
-        });
+        window.addEventListener("DOMContentLoaded", async () => { await prefetchRoom(); loadNotes(); });
 
         async function prefetchRoom() {
             try {
@@ -458,9 +448,9 @@
                 const room = await res.json();
                 state.room = room;
                 state.hintPolicy = room.server_hint_policy || state.hintPolicy;
-                $("ovTitle").textContent = room.title || "Today's Trail";
+                $("ovTitle").textContent = room.title || "Today’s Puzzle";
                 $("ovIntro").textContent = room.intro || "";
-                $("roomTitle").textContent = room.title || "Today's Trail";
+                $("roomTitle").textContent = room.title || "Today’s Puzzle";
                 $("roomIntro").textContent = room.intro || "";
             } catch (e) {
                 $("ovTitle").textContent = "Mini Escape — Daily Trail";
@@ -489,14 +479,11 @@
                 wrap.innerHTML = `
           <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
           <div style="color:#c8d4ff">${rm.text || ""}</div>
-          <div class="route-btns" style="margin-top:8px;">
-            <button data-route="cautious">Proceed carefully (1×)</button>
-            <button data-route="brisk">Move quickly (2×)</button>
-          </div>
+          <div class="route-btns" id="routebtns-${idx}" style="margin-top:8px;"></div>
           <div class="p-card" id="pzwrap-${idx}" style="display:none;">
             <div id="pzp-${idx}" style="white-space:pre-wrap;"></div>
             <div class="row" style="margin-top:6px;">
-              <input id="pzin-${idx}" type="text" placeholder="Type your answer…"/>
+              <input id="pzin-${idx}" type="text" placeholder="Type your answer…" />
               <button id="pzbtn-${idx}">Submit</button>
             </div>
             <div id="pzstatus-${idx}" class="status">Awaiting answer…</div>
@@ -514,13 +501,19 @@
         `;
                 holder.appendChild(wrap);
 
-                wrap.querySelectorAll(".route-btns button").forEach(b => {
+                // Build route buttons dynamically (expecting 3)
+                const btnHolder = document.getElementById(`routebtns-${idx}`);
+                const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
+                (rm.routes || []).forEach(r => {
+                    const b = document.createElement("button");
+                    b.setAttribute("data-route", r.id);
+                    b.textContent = `${r.label || r.id} (${mult[r.id] || "1×"})`;
                     b.addEventListener("click", () => {
-                        const route = b.getAttribute("data-route");
-                        state.chosenRoutes[idx] = route;
-                        showPuzzle(idx, rm, route);
-                        wrap.querySelectorAll(".route-btns button").forEach(x => x.disabled = true);
+                        state.chosenRoutes[idx] = r.id;
+                        showPuzzle(idx, rm, r.id);
+                        btnHolder.querySelectorAll("button").forEach(x => x.disabled = true);
                     });
+                    btnHolder.appendChild(b);
                 });
             });
             $("finalGate").style.display = "none";
@@ -536,35 +529,35 @@
             const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
             const glossBox = $(`gloss-${idx}`);
 
-            // Glossary (per type)
+            // Glossary by puzzle type
             const typ = (p.type || p.archetype || "").toLowerCase();
             const G = GLOSSARY[typ];
-            if (G) {
-                glossBox.style.display = "block";
-                glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`;
-            }
+            if (G) { glossBox.style.display = "block"; glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`; }
 
-            // Hint timers based on global start (+30s if brisk)
-            const extraDelay = (routeId === "brisk") ? 30000 : 0;
+            // Hint timers based on global start (+30s brisk, +60s risky)
+            const extraDelay = routeId === "brisk" ? 30000 : routeId === "risky" ? 60000 : 0;
             function updateHints() {
                 if (!state.startedMs) return;
                 const elapsed = Date.now() - state.startedMs;
                 const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000 + extraDelay;
                 const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000 + extraDelay;
                 h1btn.disabled = elapsed < d1;
-                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
                 h2btn.disabled = elapsed < d2;
+                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
                 h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
             }
             updateHints(); const iv = setInterval(updateHints, 250);
 
-            h1btn.onclick = () => { if (h1btn.disabled) return; h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
-            h2btn.onclick = () => { if (h2btn.disabled) return; h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
+            // Count hints once each
+            let h1Shown = false, h2Shown = false;
+            h1btn.onclick = () => { if (h1btn.disabled) return; if (!h1Shown) { state.hintsUsedScene[idx] += 1; h1Shown = true; } h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
+            h2btn.onclick = () => { if (h2btn.disabled) return; if (!h2Shown) { state.hintsUsedScene[idx] += 1; h2Shown = true; } h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
 
             btn.onclick = async () => {
                 const answer = (input.value || "").trim();
                 if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
                 status.textContent = "Checking…"; status.className = "status";
+                state.submissionsScene[idx] += 1;
                 try {
                     const res = await fetch(`/escape/api/submit`, {
                         method: "POST", headers: { "Content-Type": "application/json" },
@@ -572,10 +565,11 @@
                     });
                     const data = await res.json();
                     if (data && data.correct) {
-                        status.textContent = "Correct! Fragment secured."; status.className = "status ok"; input.disabled = true; btn.disabled = true;
-                        clearInterval(iv);
+                        status.textContent = "Correct! Fragment secured."; status.className = "status ok";
+                        input.disabled = true; btn.disabled = true; clearInterval(iv);
                         state.solvedScenes[idx] = true;
-                        const nextBtn = $(`next-${idx}`); if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); } else { revealFinal(); }
+                        const nextBtn = $(`next-${idx}`);
+                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); } else { revealFinal(); }
                     } else {
                         status.textContent = "Not yet. Try another angle."; status.className = "status err";
                     }
@@ -604,12 +598,17 @@
                 const res = await fetch(`/escape/api/finish`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        date_key: state.dateKey, started_ms: state.startedMs, success: true, final_code: finalVal,
+                        date_key: state.dateKey,
+                        started_ms: state.startedMs,
+                        success: true,
+                        final_code: finalVal,
                         meta: {
-                            ua: navigator.userAgent, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                            ua: navigator.userAgent,
+                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
                             width: window.innerWidth, height: window.innerHeight,
-                            // optional gameplay meta for server risk/reward:
-                            routes: state.chosenRoutes, hints_used_scene: [], submissions_scene: []
+                            routes: state.chosenRoutes,
+                            hints_used_scene: state.hintsUsedScene,
+                            submissions_scene: state.submissionsScene
                         }
                     })
                 });
@@ -621,7 +620,10 @@
                 const timeMs = data.time_ms || (Date.now() - state.startedMs);
                 const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
                 $("shareText").textContent = shareTxt;
-                $("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`); toast("Copied!"); } catch (e) { toast("Copy failed"); } };
+                $("copyBtn").onclick = async () => {
+                    try { await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`); toast("Copied!"); }
+                    catch (e) { toast("Copy failed"); }
+                };
                 $("share").style.display = "block";
             } catch (e) {
                 $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err";
@@ -632,10 +634,11 @@
         $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
         $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
 
-        // (Optional) Cmd/Ctrl+Enter submits active scene’s puzzle
+        // Cmd/Ctrl+Enter submits active scene’s puzzle
         document.addEventListener("keydown", (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`); if (btn && !btn.disabled) btn.click();
+                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`);
+                if (btn && !btn.disabled) btn.click();
             }
         });
     </script>

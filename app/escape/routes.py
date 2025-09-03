@@ -331,22 +331,25 @@ def _get_or_404(date_key: str) -> EscapeRoom:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
         return abort(_abort_json(404, "Room not found"))
 
-def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
+def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> (int, int):
     """
     Risk/Reward with routes + chips -> time conversion.
 
-    - Chips: server-enforced conversion at 40 ms per leftover chip.
-    - Reward: for each BRISK scene solved on FIRST TRY with NO HINTS, -2000 ms.
-    - Risk: for each BRISK scene with 3+ submissions, +1500 ms penalty.
+    Server-enforced:
+      - Per-chip conversion depends on difficulty (easy/med/hard).
+      - Route bonuses/penalties:
+          brisk:  first-try + no hints => -2000ms; 3+ tries => +1500ms
+          risky:  first-try + no hints => -3500ms; 3+ tries => +3000ms
+      - Cautious has no route-based adjustment.
 
-    Expected meta keys (all optional — we fall back safely):
+    Expected meta (all optional; we sanitize):
       chips_start, chips_spent, chips_remaining
-      routes: ["cautious"|"brisk", ...] length 3
-      hints_used_scene: [int,int,int]  (0,1,2…)
-      submissions_scene: [int,int,int] (how many attempts each scene)
+      routes: ["cautious"|"brisk"|"risky", ...] length 3
+      hints_used_scene: [int,int,int]
+      submissions_scene: [int,int,int]
+      difficulty: "easy"|"medium"|"hard" (from client is advisory; server can override if needed)
     """
-    # --- Chips sanity & server-side conversion ---
-    PER_CHIP_MS = 40  # fixed; ignore any client-provided chips_to_ms
+    # --- Chips sanity ---
     try:
         start  = int(meta.get("chips_start", 0))
         spent  = int(meta.get("chips_spent", 0))
@@ -356,45 +359,48 @@ def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
 
     if (start < 0 or spent < 0 or remain < 0 or
         remain > start or spent > start or (remain + spent) > start):
-        # Bad accounting -> no chip bonus
-        remain = 0
+        remain = 0  # bad accounting -> no chip bonus
 
-    chip_bonus_ms = remain * PER_CHIP_MS
+    # Difficulty-scaled per-chip
+    diff = (meta.get("difficulty") or "").lower()
+    per_chip = 40
+    if diff == "easy": per_chip = 30
+    elif diff == "hard": per_chip = 50
+
+    chip_bonus_ms = remain * per_chip
 
     # --- Route risk/reward ---
     routes = meta.get("routes") or []
     hints  = meta.get("hints_used_scene") or []
     tries  = meta.get("submissions_scene") or []
 
-    BRISK_FIRST_TRY_NO_HINT_BONUS = 2000  # ms
-    BRISK_STUMBLE_PENALTY        = 1500   # ms (3+ attempts)
-
     route_bonus_ms = 0
     route_penalty_ms = 0
 
     for i, r in enumerate(routes[:3]):
-        if isinstance(r, str) and r.lower() == "brisk":
-            h = 0
-            t = 0
-            if i < len(hints):
-                try: h = int(hints[i])
-                except Exception: h = 0
-            if i < len(tries):
-                try: t = int(tries[i])
-                except Exception: t = 0
+        rname = str(r or "").lower()
+        h = int(hints[i]) if i < len(hints) and str(hints[i]).isdigit() else 0
+        t = int(tries[i]) if i < len(tries) and str(tries[i]).isdigit() else 0
 
+        if rname == "brisk":
             if h == 0 and t == 1:
-                route_bonus_ms += BRISK_FIRST_TRY_NO_HINT_BONUS
+                route_bonus_ms += 2000
             elif t >= 3:
-                route_penalty_ms += BRISK_STUMBLE_PENALTY
+                route_penalty_ms += 1500
+        elif rname == "risky":
+            if h == 0 and t == 1:
+                route_bonus_ms += 3500
+            elif t >= 3:
+                route_penalty_ms += 3000
+        # cautious: no adjustments
 
-    total_bonus_ms = chip_bonus_ms + route_bonus_ms - route_penalty_ms
     effective_ms = max(0, dur_ms - chip_bonus_ms - route_bonus_ms + route_penalty_ms)
+    total_bonus_ms = chip_bonus_ms + route_bonus_ms - route_penalty_ms
 
-    # Optionally stash breakdown back onto meta (caller persists it)
-    meta["chip_bonus_ms"]   = chip_bonus_ms
-    meta["route_bonus_ms"]  = route_bonus_ms
-    meta["route_penalty_ms"] = route_penalty_ms
+    # Keep breakdown (useful for leaderboard audit)
+    meta["chip_bonus_ms"]     = chip_bonus_ms
+    meta["route_bonus_ms"]    = route_bonus_ms
+    meta["route_penalty_ms"]  = route_penalty_ms
     meta["effective_time_ms"] = effective_ms
 
     return effective_ms, total_bonus_ms
