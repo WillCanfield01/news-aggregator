@@ -62,7 +62,7 @@ FINAL_CODE_MIN_LEN = 4
 FINAL_CODE_MAX_LEN = 12
 
 # Allowed puzzle archetypes (LLM and offline)
-ALLOWED_TYPES = {"anagram", "caesar", "vigenere", "numeric_lock"}
+ALLOWED_TYPES = {"acrostic", "tapcode", "pathcode"}
 
 # ───────────────────────── Utilities ─────────────────────────
 
@@ -263,6 +263,98 @@ def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = No
                      "Derive the lock sequence."]
     )
 
+# ───────────── Scene-aware mini games (safe & verifiable) ─────────────
+
+def _scene_word_from_title(rng: random.Random, title: str, min_len=4, max_len=8) -> str:
+    # try pulling a clean word from the title; otherwise fall back to our list
+    toks = re.findall(r"[A-Za-z]{%d,%d}" % (min_len, max_len), (title or ""))
+    toks = [t.lower() for t in toks if t.lower() not in {"the","and","room","hall","night","vault"}]
+    return (rng.choice(toks) if toks else _random_word(rng, set())).lower()
+
+def gen_acrostic(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    """First letters of each line spell the answer (fits the room theme)."""
+    ans = _scene_word_from_title(rng, theme)
+    # ensure letters-only 4..8
+    if not (4 <= len(ans) <= 8 and ans.isalpha()):
+        ans = _random_word(rng, blacklist)
+    lines = []
+    for i, ch in enumerate(ans):
+        # Make a sentence starting with ch, lightly themed
+        frag = rng.choice([
+            "shadows", "signal", "lantern", "archive", "glass", "stairs",
+            "whisper", "copper", "fog", "vault", "console", "runes"
+        ])
+        lines.append(f"{ch.upper()}{ch.lower()}—{frag} tied to {theme or 'the room'}...")
+    poem = "\n".join(lines)
+    return Puzzle(
+        id=pid, archetype="acrostic",
+        prompt=f"A scrap of verse is pinned to the wall:\n{poem}\nWhat single word do the first letters spell?",
+        answer_format={"pattern": r"^[A-Za-z]{4,12}$"},
+        solution={"answer": ans},
+        hints=["Read the FIRST letters vertically.", "Each line begins with a letter of the word."],
+        decoys=[ans[::-1], "".join(sorted(ans)), ans[:-1]+ans[-1]*2],
+        paraphrases=[f"Acrostic poem hints a word about {theme or 'this place'}."]
+    )
+
+# 5x5 Polybius/Tap code (I/J share a cell). We emit row-col pairs (1..5).
+_POLY = "ABCDEFGHIKLMNOPQRSTUVWXYZ"  # J merged into I
+def _tap_pairs_for_word(w: str) -> List[str]:
+    out=[]
+    for ch in w.upper().replace("J","I"):
+        i = _POLY.index(ch); r = i//5 + 1; c = i%5 + 1
+        out.append(f"{r}-{c}")
+    return out
+
+def gen_tapcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    w = _scene_word_from_title(rng, theme)
+    w = re.sub(r"[^A-Za-z]", "", w).upper().replace("J","I")
+    if len(w) < 4: w = _random_word(rng, blacklist).upper().replace("J","I")
+    taps = ", ".join(_tap_pairs_for_word(w))
+    return Puzzle(
+        id=pid, archetype="tapcode",
+        prompt=(f"From the {theme or 'pipes'}, you hear rhythmic taps: {taps}.\n"
+                "Decode them using a 5×5 Polybius square (I/J share a cell). Enter the word."),
+        answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
+        solution={"answer": w.replace("I","I")},  # already normalized
+        hints=["Map 1–5 row/col to letters in a 5×5 grid.", "Remember I/J share the same cell."],
+        decoys=[w[::-1], w[1:]+w[:1]],
+        paraphrases=[f"Taps from the {theme or 'room'} encode a word."]
+    )
+
+def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    """Tiny grid; follow directions to read the path word."""
+    word = _scene_word_from_title(rng, theme, 4, 6)
+    if not (4 <= len(word) <= 6): word = _random_word(rng, blacklist)
+    # build a 3x3/4x4 grid containing the path word placed snake-wise
+    n = 3 if len(word) <= 5 else 4
+    grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
+    # carve a simple path
+    r, c = 0, 0
+    grid[r][c] = word[0].upper()
+    path = []
+    for ch in word[1:]:
+        # move right or down preferentially, wrapping if needed
+        if rng.random() < 0.5 and c+1 < n: c += 1; path.append("R")
+        elif r+1 < n: r += 1; path.append("D")
+        else: c = (c+1) % n; path.append("R")
+        grid[r][c] = ch.upper()
+    grid_str = "\n".join(" ".join(row) for row in grid)
+    return Puzzle(
+        id=pid, archetype="pathcode",
+        prompt=(f"A glowing tile grid is etched on the floor:\n{grid_str}\n"
+                f"Starting at the top-left, follow the path {', '.join(path)} to collect letters. What word do you read?"),
+        answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
+        solution={"answer": word.upper(), "grid": grid, "path": path},
+        hints=["Trace the moves on the grid, recording each letter you land on.",
+               "Start at top-left. Directions are R=right, D=down (wrapping if needed)."],
+        decoys=[word.upper()[::-1], "".join(sorted(word.upper()))],
+        paraphrases=[f"A path puzzle carved into {theme or 'the chamber'}."]
+    )
+
+def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    g = rng.choice([gen_acrostic, gen_tapcode, gen_pathcode])
+    return g(rng, pid, blacklist, theme)
+
 # --- Sanitizer helpers -------------------------------------------------
 
 def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set) -> Dict[str, Any]:
@@ -321,9 +413,15 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 p.setdefault("hints", [])
                 p.setdefault("paraphrases", [])
 
-            elif typ in {"caesar", "vigenere", "numeric_lock"}:
-                # LLM frequently drifts here; replace with our deterministic, checkable versions.
-                rt["puzzle"] = _regen_puzzle(typ, rng, pid, blacklist)
+            elif typ in {"acrostic", "tapcode", "pathcode"}:
+                # Rebuild with our trusted generator but keep the room flavor
+                theme = room.get("title","") or room.get("text","")
+                if typ == "acrostic":
+                    rt["puzzle"] = gen_acrostic(rng, pid, blacklist, theme).to_json()
+                elif typ == "tapcode":
+                    rt["puzzle"] = gen_tapcode(rng, pid, blacklist, theme).to_json()
+                elif typ == "pathcode":
+                    rt["puzzle"] = gen_pathcode(rng, pid, blacklist, theme).to_json()
 
             else:
                 # Unknown/custom types: keep but enforce a safe generic pattern
@@ -399,9 +497,12 @@ def _default_pattern_for_type(p_type: str, answer: str) -> str:
     # general alpha (riddle/anagram/caesar/vigenere/wordpath/math textual)
     return r"^[A-Za-z]{3,12}$"
 
-def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None) -> Dict[str, Any]:
+def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None,
+                  theme: str = "") -> Dict[str, Any]:
     bl = blacklist_lower or set()
-    gens = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock]
+    gens = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock,
+            # add scene-aware minis
+            lambda r,p,b: gen_scene_mini(r, p, b, theme)]
     g = rng.choice(gens)
     return g(rng, pid, bl).to_json()
 
@@ -578,15 +679,20 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
 
 def _trail_prompt(date_key: str) -> str:
     return (
-        "Design a mini escape for today with a unique theme (not tied to any franchise): "
-        "3 short scenes, then a final lock. Keep it self-contained, pure text/logic.\n"
+        "Design a tiny DAILY escape with 3 distinct locations (scenes), then a final lock.\n"
+        "- Do NOT reference Oregon Trail. Pick a fresh theme and tone today.\n"
+        "- Each scene MUST have exactly THREE routes: cautious, brisk, risky — and each route uses a DIFFERENT mechanic.\n"
+        "- Allowed puzzle types (must set `type` to one of): "
+        "acrostic | tapcode | pathcode.\n"
+        "- The puzzle prompt MUST clearly fit the scene’s story (mention props/setting) and be solvable from the text alone.\n"
+        "- Provide 1–2 short hints. Provide a concrete `solution.answer`.\n"
         "STRICT JSON ONLY (no markdown). Schema:\n"
         "{"
         ' "id": str, "title": str, "intro": str,'
         ' "npc_lines": [str]?, "supplies_start": int?,'
         ' "rooms": [ { "id": str, "title": str, "text": str,'
         '   "routes": [ { "id": "cautious"|"brisk"|"risky", "label": str,'
-        '     "puzzle": { "id": str, "type": "anagram|caesar|vigenere|numeric_lock",'
+        '     "puzzle": { "id": str, "type": "acrostic|tapcode|pathcode",'
         '                 "prompt": str, "answer_format": {"pattern": str},'
         '                 "solution": {"answer": str, "shift"?: int, "key"?: str},'
         '                 "hints": [str]? } } ],'
@@ -595,7 +701,6 @@ def _trail_prompt(date_key: str) -> str:
         '            "solution": {"answer": str} },'
         ' "difficulty": "easy"|"medium"|"hard"'
         "}\n"
-        "- Puzzles must be solvable from the text alone (no counting images, no outside facts).\n"
         "- Avoid stock riddle answers (piano, time, echo, shadow, etc.).\n"
         f"- DATE_KEY: {date_key}\n"
     )

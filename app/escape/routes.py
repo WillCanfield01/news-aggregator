@@ -33,6 +33,7 @@ from .core import (
     verify_puzzle,
     verify_meta_final,
     get_today_key,
+    apply_fragment_rule,   # ← NEW: compute fragment server-side
 )
 
 # ---------------------------------------------------------------------
@@ -129,7 +130,13 @@ def init_routes(bp: Blueprint):
 
         room = _get_or_404(date_key)
         ok = verify_puzzle(room.json_blob, puzzle_id, answer)
-        return jsonify({"correct": bool(ok)})
+
+        # If correct, compute this scene’s fragment using the scene’s fragment_rule.
+        frag = None
+        if ok:
+            frag = _fragment_for_submission(room.json_blob, puzzle_id, str(answer))
+
+        return jsonify({"correct": bool(ok), "fragment": frag})
 
     # -----------------------------
     # API: Finish a run (for leaderboards)
@@ -314,6 +321,24 @@ def _json_body_or_400() -> Dict[str, Any]:
     if data is None:
         abort(_abort_json(400, "Request body required"))
     return data
+
+def _fragment_for_submission(room_json: Dict[str, Any], puzzle_id: str, submitted_answer: str) -> Optional[str]:
+    """
+    Find the room containing puzzle_id, get its fragment_rule,
+    and compute the fragment from the *submitted* answer.
+    CONST: rules remain constant; for others we apply FIRST2/LAST2/etc.
+    """
+    trail = room_json.get("trail") or {}
+    for rm in (trail.get("rooms") or []):
+        rule = (rm.get("fragment_rule") or "FIRST2")
+        for rt in (rm.get("routes") or []):
+            pz = (rt.get("puzzle") or {})
+            if pz.get("id") == puzzle_id:
+                try:
+                    return apply_fragment_rule(submitted_answer, rule)
+                except Exception:
+                    return None
+    return None
 
 def _abort_json(status: int, message: str):
     resp = jsonify({"ok": False, "error": message})

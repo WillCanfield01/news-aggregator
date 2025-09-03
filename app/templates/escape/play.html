@@ -367,10 +367,14 @@
                 <!-- Scenes (sequential reveal) -->
                 <section id="scenes"></section>
 
-                <!-- Final gate -->
                 <section class="footer panel final" id="finalGate">
                     <div><strong>Final Code</strong> — Combine the three fragments <em>in order</em> (Scene 1 + Scene 2
-                        + Scene 3).</div>
+                        + Scene 3).
+                    </div>
+
+                    <!-- NEW: live fragment display -->
+                    <div id="fragBag" class="status" style="margin-top:6px;"></div>
+
                     <div class="row" style="margin-top:6px;">
                         <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
                         <button id="finishBtn">Finish & Submit Time</button>
@@ -425,8 +429,10 @@
             chosenRoutes: [null, null, null], // "cautious" | "brisk" | "risky"
             hintsUsedScene: [0, 0, 0],
             submissionsScene: [0, 0, 0],
+            fragments: ["", "", ""],          // ← NEW: store fragments per scene
             hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 }
         };
+
         const $ = id => document.getElementById(id);
         const fmtTime = ms => {
             const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
@@ -517,8 +523,17 @@
                 });
             });
             $("finalGate").style.display = "none";
-            updateSceneBadge();
+            updateSceneBadge(); updateFragmentDisplay();
         }
+
+        function updateFragmentDisplay() {
+            const parts = state.fragments.map((f, i) => f ? `Scene ${i + 1}: <b>${f}</b>` : `Scene ${i + 1}: _ _`);
+            $("fragBag").innerHTML = `Fragments — ${parts.join("  •  ")}`;
+            if (state.fragments.every(Boolean)) {
+                $("finalInput").placeholder = state.fragments.join("");
+            }
+        }
+
 
         function showPuzzle(idx, rm, routeId) {
             const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
@@ -565,14 +580,26 @@
                     });
                     const data = await res.json();
                     if (data && data.correct) {
-                        status.textContent = "Correct! Fragment secured."; status.className = "status ok";
-                        input.disabled = true; btn.disabled = true; clearInterval(iv);
+                        const frag = (data.fragment || "").toString();
+                        if (frag) {
+                            state.fragments[idx] = frag;
+                            updateFragmentDisplay();                   // ← refresh the strip
+                            status.innerHTML = `Correct! Fragment secured: <b>${frag}</b>`;
+                        } else {
+                            status.textContent = "Correct! Fragment secured.";
+                        }
+                        status.className = "status ok";
+                        input.disabled = true; btn.disabled = true;
+                        clearInterval(iv);
                         state.solvedScenes[idx] = true;
+
                         const nextBtn = $(`next-${idx}`);
-                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); } else { revealFinal(); }
+                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); }
+                        else { revealFinal(); }
                     } else {
                         status.textContent = "Not yet. Try another angle."; status.className = "status err";
                     }
+
                 } catch (e) {
                     status.textContent = "Network error — try again."; status.className = "status err";
                 }
@@ -587,7 +614,7 @@
             updateSceneBadge();
         }
         function updateSceneBadge() { $("sceneBadge").textContent = `Scene ${state.currentScene + 1} of 3`; }
-        function revealFinal() { if (state.solvedScenes.every(Boolean)) { $("finalGate").style.display = "block"; goToScene(2); } }
+        function revealFinal() { if (state.solvedScenes.every(Boolean)) { $("finalGate").style.display = "block"; updateFragmentDisplay(); goToScene(2); } }
 
         // ------- Finish flow -------
         $("finishBtn").addEventListener("click", async () => {
