@@ -357,77 +357,42 @@ def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = ""
 
 # --- Sanitizer helpers -------------------------------------------------
 
-def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set) -> Dict[str, Any]:
-    if archetype == "anagram":
-        return gen_anagram(rng, pid, blacklist).to_json()
-    if archetype == "caesar":
-        return gen_caesar(rng, pid, blacklist).to_json()
-    if archetype == "vigenere":
-        return gen_vigenere(rng, pid, blacklist).to_json()
-    if archetype == "numeric_lock":
-        return gen_numeric_lock(rng, pid, blacklist).to_json()  # ← pass blacklist
-    return gen_numeric_lock(rng, pid, blacklist).to_json()
+def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Dict[str, Any]:
+    if archetype == "acrostic": return gen_acrostic(rng, pid, blacklist, theme).to_json()
+    if archetype == "tapcode":  return gen_tapcode(rng, pid, blacklist, theme).to_json()
+    if archetype == "pathcode": return gen_pathcode(rng, pid, blacklist, theme).to_json()
+    # fallback: pick one scene mini matching theme
+    return gen_scene_mini(rng, pid, blacklist, theme).to_json()
 
 _ANAGRAM_TOKEN_RE = re.compile(r"(?:'|\*\*)([A-Za-z]{3,12})(?:'|\*\*)")
 
 def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist: set) -> None:
-    """Make LLM puzzles safe/deterministic. Mutates the room in place."""
     trail = room.get("trail") or {}
     rooms = trail.get("rooms") or []
     for ridx, rm in enumerate(rooms, start=1):
         routes = rm.get("routes") or []
+        theme = rm.get("title","") or rm.get("text","")
         for rt in routes:
             p = rt.get("puzzle")
+            pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
             if not isinstance(p, dict):
-                # If it's not a dict, drop in a safe numeric lock
-                pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
-                rt["puzzle"] = _regen_puzzle("numeric_lock", rng, pid, blacklist)
+                rt["puzzle"] = _regen_puzzle("acrostic", rng, pid, blacklist, theme)  # any mini via _regen_puzzle fallback
                 continue
 
-            # Normalize ids/types
-            pid = p.get("id") or f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
-            p["id"] = pid
+            p["id"] = p.get("id") or pid
             typ = (p.get("type") or p.get("archetype") or "").lower()
 
-            # Guard for missing structures
-            if not typ:
-                rt["puzzle"] = _regen_puzzle("numeric_lock", rng, pid, blacklist)
+            if not typ or typ not in {"acrostic","tapcode","pathcode"}:
+                rt["puzzle"] = _regen_puzzle("acrostic", rng, p["id"], blacklist, theme)
                 continue
 
-            # --- Strict handling per type ---
-            if typ == "anagram":
-                # Validate that prompt contains a single jumbled token whose multiset equals solution letters
-                sol = (p.get("solution") or {}).get("answer")
-                token = None
-                m = _ANAGRAM_TOKEN_RE.search(p.get("prompt") or "")
-                if m:
-                    token = m.group(1).upper()
-                ok = bool(
-                    sol and token and
-                    "".join(sorted(normalize_answer(sol))) == "".join(sorted(token))
-                )
-                if not ok:
-                    rt["puzzle"] = _regen_puzzle("anagram", rng, pid, blacklist)
-                    continue
-                p.setdefault("answer_format", {"pattern": r"^[A-Za-z]{3,12}$"})
-                p.setdefault("hints", [])
-                p.setdefault("paraphrases", [])
-
-            elif typ in {"acrostic", "tapcode", "pathcode"}:
-                # Rebuild with our trusted generator but keep the room flavor
-                theme = room.get("title","") or room.get("text","")
-                if typ == "acrostic":
-                    rt["puzzle"] = gen_acrostic(rng, pid, blacklist, theme).to_json()
-                elif typ == "tapcode":
-                    rt["puzzle"] = gen_tapcode(rng, pid, blacklist, theme).to_json()
-                elif typ == "pathcode":
-                    rt["puzzle"] = gen_pathcode(rng, pid, blacklist, theme).to_json()
-
-            else:
-                # Unknown/custom types: keep but enforce a safe generic pattern
-                p.setdefault("answer_format", {"pattern": r"^[A-Za-z0-9]{2,16}$"})
-                p.setdefault("hints", [])
-                p.setdefault("paraphrases", [])
+            # Rebuild with trusted generators to lock determinism & fit the theme
+            if typ == "acrostic":
+                rt["puzzle"] = gen_acrostic(rng, p["id"], blacklist, theme).to_json()
+            elif typ == "tapcode":
+                rt["puzzle"] = gen_tapcode(rng, p["id"], blacklist, theme).to_json()
+            elif typ == "pathcode":
+                rt["puzzle"] = gen_pathcode(rng, p["id"], blacklist, theme).to_json()
 
 # ───────────────────────── Fragment rules ─────────────────────────
 
@@ -488,14 +453,9 @@ def _get_openai_client():
     except Exception:
         return None, None
 
-def _default_pattern_for_type(p_type: str, answer: str) -> str:
-    p_type = (p_type or "").lower()
-    if p_type == "numeric_lock": return r"^\d{4}$"
-    # word-like answers
-    if re.fullmatch(r"^\d+$", str(answer or "")):  # numeric fallback
-        return r"^\d+$"
-    # general alpha (riddle/anagram/caesar/vigenere/wordpath/math textual)
-    return r"^[A-Za-z]{3,12}$"
+def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None, theme: str = "") -> Dict[str, Any]:
+    bl = blacklist_lower or set()
+    return gen_scene_mini(rng, pid, bl, theme).to_json()
 
 def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None,
                   theme: str = "") -> Dict[str, Any]:
@@ -524,45 +484,35 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
     recent_norm = _recent_answer_set()
     recent_lower = {s.lower() for s in recent_norm}
 
-    def _needs_replace(p: Dict[str, Any]) -> bool:
-        ans = (p.get("solution") or {}).get("answer", "")
-        return normalize_answer(ans) in recent_norm
-
-    type_map = {
-        "anagram": gen_anagram,
-        "caesar": gen_caesar,
-        "vigenere": gen_vigenere,
-        "numeric_lock": gen_numeric_lock,
-    }
-
     trail = blob.get("trail") or {}
     rooms = (trail.get("rooms") or [])
     for i, rm in enumerate(rooms, start=1):
+        theme = rm.get("title","") or rm.get("text","")
         routes = (rm.get("routes") or [])
         for j, rt in enumerate(routes, start=1):
             p = (rt.get("puzzle") or {})
             if not isinstance(p, dict):
-                rt["puzzle"] = _synth_puzzle(rng, f"r{i}_auto_{j}", recent_lower)
+                rt["puzzle"] = _synth_puzzle(rng, f"r{i}_auto_{j}", recent_lower, theme)
                 continue
-            if _needs_replace(p):
+            ans = (p.get("solution") or {}).get("answer", "")
+            if normalize_answer(ans) in recent_norm:
                 pid = p.get("id") or f"r{i}_auto_{j}"
-                ptype = (p.get("type") or p.get("archetype") or "").lower()
-                gen = type_map.get(ptype)
-                new_p = (gen(rng, pid, recent_lower).to_json() if gen
-                         else _synth_puzzle(rng, pid, recent_lower))
+                typ = (p.get("type") or p.get("archetype") or "").lower()
+                if   typ == "acrostic": new_p = gen_acrostic(rng, pid, recent_lower, theme).to_json()
+                elif typ == "tapcode":  new_p = gen_tapcode(rng,  pid, recent_lower, theme).to_json()
+                elif typ == "pathcode": new_p = gen_pathcode(rng, pid, recent_lower, theme).to_json()
+                else:                   new_p = _synth_puzzle(rng, pid, recent_lower, theme)
                 new_p["id"] = pid
                 rt["puzzle"] = new_p
 
-        # Re-coerce fragment equality across all available routes
-        pz = []
+        # re-coerce fragments across all routes
+        puzzles = []
         for r in routes:
             q = r.get("puzzle") if isinstance(r.get("puzzle"), dict) else {}
-            if q:
-                _validate_puzzle(q)
-                pz.append(q)
-        if pz:
+            if q: _validate_puzzle(q); puzzles.append(q)
+        if puzzles:
             fr_rule = rm.get("fragment_rule") or "FIRST2"
-            fr_rule, _ = _coerce_same_fragment_or_const_all(fr_rule, pz)
+            fr_rule, _ = _coerce_same_fragment_or_const_all(fr_rule, puzzles)
             rm["fragment_rule"] = fr_rule
 
     blob["trail"] = {**trail, "rooms": rooms}
@@ -615,9 +565,11 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
     return rm
 
 def _synth_room(idx: int, rng: random.Random) -> Dict[str, Any]:
-    p1 = _synth_puzzle(rng, f"r{idx}_caut_pz")
-    p2 = _synth_puzzle(rng, f"r{idx}_brisk_pz")
-    p3 = _synth_puzzle(rng, f"r{idx}_risky_pz")
+    theme = f"Room {idx}"
+    p1 = _synth_puzzle(rng, f"r{idx}_caut_pz", theme=theme)
+    p2 = _synth_puzzle(rng, f"r{idx}_brisk_pz", theme=theme)
+    p3 = _synth_puzzle(rng, f"r{idx}_risky_pz", theme=theme)
+
     fr, _ = _coerce_same_fragment_or_const_all("FIRST2", [p1, p2, p3])
     return {
         "id": f"room_{idx}",
@@ -742,8 +694,6 @@ def llm_generate_trailroom(date_key: str) -> Optional[Dict[str, Any]]:
         jb = _extract_json_block(text)
         return json.loads(jb) if jb else None
     except Exception as e:
-        try: current_app.logger.warning(f"[escape] LLM trail gen failed: {e}")
-        except Exception: pass
         return None
 
 # ───────────────────────── Critic (safe patch) ─────────────────────────
@@ -1034,26 +984,26 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
     recent_norm = _recent_answer_set()
     blacklist = {s.lower() for s in recent_norm} | {s.lower() for s in COMMON_STOCK_ANSWERS}
 
-    def trio(idx: int):
-        pid1 = f"r{idx}_caut_pz"; pid2 = f"r{idx}_brisk_pz"; pid3 = f"r{idx}_risky_pz"
-        g = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock]
-        p1 = rng.choice(g)(rng, pid1, blacklist)
-        p2 = rng.choice(g)(rng, pid2, blacklist)
-        p3 = rng.choice(g)(rng, pid3, blacklist)
-        return p1.to_json(), p2.to_json(), p3.to_json()
-
     rooms = []
     fragments = []
     for i in range(1, 4):
-        p1, p2, p3 = trio(i)
+        theme = ["Glass Arcade","Switchyard","Ferry Ramp"][i-1] if i<=3 else f"Stop {i}"
+        kinds = rng.sample(["acrostic","tapcode","pathcode"], k=3)
+        gens = {
+            "acrostic": gen_acrostic,
+            "tapcode": gen_tapcode,
+            "pathcode": gen_pathcode
+        }
+        p1 = gens[kinds[0]](rng, f"r{i}_caut_pz",  blacklist, theme).to_json()
+        p2 = gens[kinds[1]](rng, f"r{i}_brisk_pz", blacklist, theme).to_json()
+        p3 = gens[kinds[2]](rng, f"r{i}_risky_pz", blacklist, theme).to_json()
+
         fr, frag = _coerce_same_fragment_or_const_all("FIRST2", [p1, p2, p3])
         fragments.append(frag)
         rooms.append({
             "id": f"room_{i}",
-            "title": ["The Dockhouse","Switchyard","Ferry Ramp"][i-1] if i<=3 else f"Stop {i}",
-            "text": ["Ledger pages flutter in a draft.",
-                     "Signals tick from a rusted panel.",
-                     "Fog beads across the ticket glass."][i-1] if i<=3 else "",
+            "title": theme,
+            "text": ["LEDs stutter on a damp console.","Signals tick from a rusted panel.","Fog beads across the ticket glass."][i-1] if i<=3 else "",
             "routes": [
                 {"id":"cautious","label":"Proceed carefully","puzzle":p1},
                 {"id":"brisk","label":"Move quickly","puzzle":p2},
@@ -1078,8 +1028,7 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
         "anti_spoiler": {"paraphrase_variants": 3, "decoys": 2},
     }
     room = validate_trailroom(room)
-    room = harden(room, rng)
-    return room
+    return harden(room, rng)
 
 def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     seed = daily_seed(date_key, server_secret); rng = rng_from_seed(seed)
