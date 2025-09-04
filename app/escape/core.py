@@ -366,18 +366,16 @@ def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set, 
 _ANAGRAM_TOKEN_RE = re.compile(r"(?:'|\*\*)([A-Za-z]{3,12})(?:'|\*\*)")
 
 def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist: set) -> None:
-    """Make any incoming puzzles safe, allowed, and theme-aware."""
     trail = room.get("trail") or {}
     rooms = trail.get("rooms") or []
     for rm in rooms:
-        theme = f"{rm.get('title','')} {rm.get('text','')}".strip()
+        theme = rm.get("title", "") or rm.get("text", "")
         routes = rm.get("routes") or []
-
         for rt in routes:
-            pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
             p = rt.get("puzzle")
+            pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
 
-            # If missing or malformed, synthesize a scene mini
+            # No puzzle? synthesize one scene-aware
             if not isinstance(p, dict):
                 rt["puzzle"] = _synth_puzzle(rng, pid, blacklist, theme)
                 continue
@@ -386,16 +384,16 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
             p["id"] = p.get("id") or pid
             typ = (p.get("type") or p.get("archetype") or "").lower()
 
-            # If type not allowed, replace with a themed mini
-            if typ not in {"acrostic","tapcode","pathcode"}:
+            # Unknown/empty type -> synthesize
+            if typ not in {"acrostic", "tapcode", "pathcode"}:
                 rt["puzzle"] = _synth_puzzle(rng, p["id"], blacklist, theme)
                 continue
 
-            # Rebuild exactly with our trusted generators (locks determinism & format)
+            # Rebuild deterministically using our generators, tied to the scene
             if typ == "acrostic":
                 rt["puzzle"] = gen_acrostic(rng, p["id"], blacklist, theme).to_json()
             elif typ == "tapcode":
-                rt["puzzle"] = gen_tapcode(rng,  p["id"], blacklist, theme).to_json()
+                rt["puzzle"] = gen_tapcode(rng, p["id"], blacklist, theme).to_json()
             else:  # pathcode
                 rt["puzzle"] = gen_pathcode(rng, p["id"], blacklist, theme).to_json()
 
@@ -459,8 +457,11 @@ def _get_openai_client():
         return None, None
 
 def _default_pattern_for_type(p_type: str, answer: str) -> str:
-    p_type = (p_type or "").lower()
-    # Our allowed minis all produce word answers.
+    p = (p_type or "").lower()
+    # our three archetypes are word answers
+    if p in {"acrostic", "tapcode", "pathcode"}:
+        return r"^[A-Za-z]{3,12}$"
+    # fallback: match the answer shape if it's numeric
     if re.fullmatch(r"^\d+$", str(answer or "")):
         return r"^\d+$"
     return r"^[A-Za-z]{3,12}$"
