@@ -358,40 +358,45 @@ def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = ""
 # --- Sanitizer helpers -------------------------------------------------
 
 def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Dict[str, Any]:
-    if archetype == "acrostic": return gen_acrostic(rng, pid, blacklist, theme).to_json()
-    if archetype == "tapcode":  return gen_tapcode(rng, pid, blacklist, theme).to_json()
-    if archetype == "pathcode": return gen_pathcode(rng, pid, blacklist, theme).to_json()
-    # fallback: pick one scene mini matching theme
+    if archetype == "acrostic":  return gen_acrostic(rng, pid, blacklist, theme).to_json()
+    if archetype == "tapcode":   return gen_tapcode(rng, pid, blacklist, theme).to_json()
+    if archetype == "pathcode":  return gen_pathcode(rng, pid, blacklist, theme).to_json()
     return gen_scene_mini(rng, pid, blacklist, theme).to_json()
 
 _ANAGRAM_TOKEN_RE = re.compile(r"(?:'|\*\*)([A-Za-z]{3,12})(?:'|\*\*)")
 
 def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist: set) -> None:
+    """Make any incoming puzzles safe, allowed, and theme-aware."""
     trail = room.get("trail") or {}
     rooms = trail.get("rooms") or []
-    for ridx, rm in enumerate(rooms, start=1):
+    for rm in rooms:
+        theme = f"{rm.get('title','')} {rm.get('text','')}".strip()
         routes = rm.get("routes") or []
-        theme = rm.get("title","") or rm.get("text","")
+
         for rt in routes:
-            p = rt.get("puzzle")
             pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
+            p = rt.get("puzzle")
+
+            # If missing or malformed, synthesize a scene mini
             if not isinstance(p, dict):
-                rt["puzzle"] = _regen_puzzle("acrostic", rng, pid, blacklist, theme)  # any mini via _regen_puzzle fallback
+                rt["puzzle"] = _synth_puzzle(rng, pid, blacklist, theme)
                 continue
 
+            # Normalize id/type
             p["id"] = p.get("id") or pid
             typ = (p.get("type") or p.get("archetype") or "").lower()
 
-            if not typ or typ not in {"acrostic","tapcode","pathcode"}:
-                rt["puzzle"] = _regen_puzzle("acrostic", rng, p["id"], blacklist, theme)
+            # If type not allowed, replace with a themed mini
+            if typ not in {"acrostic","tapcode","pathcode"}:
+                rt["puzzle"] = _synth_puzzle(rng, p["id"], blacklist, theme)
                 continue
 
-            # Rebuild with trusted generators to lock determinism & fit the theme
+            # Rebuild exactly with our trusted generators (locks determinism & format)
             if typ == "acrostic":
                 rt["puzzle"] = gen_acrostic(rng, p["id"], blacklist, theme).to_json()
             elif typ == "tapcode":
-                rt["puzzle"] = gen_tapcode(rng, p["id"], blacklist, theme).to_json()
-            elif typ == "pathcode":
+                rt["puzzle"] = gen_tapcode(rng,  p["id"], blacklist, theme).to_json()
+            else:  # pathcode
                 rt["puzzle"] = gen_pathcode(rng, p["id"], blacklist, theme).to_json()
 
 # ───────────────────────── Fragment rules ─────────────────────────
@@ -453,18 +458,17 @@ def _get_openai_client():
     except Exception:
         return None, None
 
-def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None, theme: str = "") -> Dict[str, Any]:
-    bl = blacklist_lower or set()
-    return gen_scene_mini(rng, pid, bl, theme).to_json()
+def _default_pattern_for_type(p_type: str, answer: str) -> str:
+    p_type = (p_type or "").lower()
+    # Our allowed minis all produce word answers.
+    if re.fullmatch(r"^\d+$", str(answer or "")):
+        return r"^\d+$"
+    return r"^[A-Za-z]{3,12}$"
 
 def _synth_puzzle(rng: random.Random, pid: str, blacklist_lower: Optional[set] = None,
                   theme: str = "") -> Dict[str, Any]:
     bl = blacklist_lower or set()
-    gens = [gen_anagram, gen_caesar, gen_vigenere, gen_numeric_lock,
-            # add scene-aware minis
-            lambda r,p,b: gen_scene_mini(r, p, b, theme)]
-    g = rng.choice(gens)
-    return g(rng, pid, bl).to_json()
+    return gen_scene_mini(rng, pid, bl, theme).to_json()
 
 def _coerce_same_fragment_or_const_all(rule: str, puzzles: List[Dict[str,Any]]) -> Tuple[str, str]:
     """Ensure *all* routes for a room yield the same fragment; fallback to CONST if not."""
@@ -519,12 +523,13 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
     return blob
 
 def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: int = 3) -> Dict[str, Any]:
+    theme = f"{rm.get('title','')} {rm.get('text','')}".strip()
     routes_raw = _as_dict_list(rm.get("routes"))
     cleaned = []
     for rt in routes_raw:
         p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
         if not p:
-            continue
+            p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}", theme=theme)
         if "id" not in p:
             p["id"] = f"r{r_index}_autopz_{len(cleaned)+1}"
         if "type" not in p and "archetype" in p:
@@ -536,7 +541,8 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
                 )
             }
         if "solution" not in p or (p.get("solution") or {}).get("answer") in (None, ""):
-            p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}")
+            p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}", theme=theme)
+
         cleaned.append({
             "id": (rt.get("id") or "").lower(),
             "label": rt.get("label"),
@@ -557,7 +563,7 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
             out.append({"id": rid, "label": labels[rid], "puzzle": existing["puzzle"]})
         else:
             pid = f"r{r_index}_{rid}_pz_autogen"
-            out.append({"id": rid, "label": labels[rid], "puzzle": _synth_puzzle(rng, pid)})
+            out.append({"id": rid, "label": labels[rid], "puzzle": _synth_puzzle(rng, pid, theme=theme)})
 
     rm["routes"] = out
     fr = rm.get("fragment_rule") or "FIRST2"
@@ -630,15 +636,69 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
     return blob
 
 def _trail_prompt(date_key: str) -> str:
+    """
+    Novelty-first daily brief.
+    - Keeps schema identical.
+    - Injects recency context so scenes don't echo recent days.
+    - Bans cliché answers/themes and forces route→mechanic mapping that matches our generators.
+    """
+    # Collect light recency context for anti-repeat nudges (safe to best-effort fail)
+    recent_titles = []
+    try:
+        for r in recent_rooms(RECENT_WINDOW_DAYS):
+            t = (r.json_blob or {}).get("title")
+            if t:
+                recent_titles.append(t)
+    except Exception:
+        pass
+    recent_titles = recent_titles[:8]
+
+    # We also pass recent answers as a soft ban list (server enforces separately)
+    try:
+        ban_answers = sorted(list(_recent_answer_set()))[:50]
+    except Exception:
+        ban_answers = []
+
+    recent_titles_s = " • ".join(recent_titles) if recent_titles else "(none)"
+    ban_answers_s  = ", ".join(ban_answers) if ban_answers else "(none)"
+
     return (
-        "Design a tiny DAILY escape with 3 distinct locations (scenes), then a final lock.\n"
-        "- Do NOT reference Oregon Trail. Pick a fresh theme and tone today.\n"
-        "- Each scene MUST have exactly THREE routes: cautious, brisk, risky — and each route uses a DIFFERENT mechanic.\n"
-        "- Allowed puzzle types (must set `type` to one of): "
-        "acrostic | tapcode | pathcode.\n"
-        "- The puzzle prompt MUST clearly fit the scene’s story (mention props/setting) and be solvable from the text alone.\n"
-        "- Provide 1–2 short hints. Provide a concrete `solution.answer`.\n"
-        "STRICT JSON ONLY (no markdown). Schema:\n"
+        "You are designing TODAY’S mini escape: 3 distinct scenes → 1 final lock.\n"
+        "\n"
+        "PRIMARY GOAL (NOVELTY): Each day must feel fresh and return-worthy.\n"
+        "Write scenes with striking, specific props/sensory cues so the puzzle text can be grounded in the place.\n"
+        "Avoid repeating themes, wording, or vibes from recent days.\n"
+        "\n"
+        "RECENT_TITLES (avoid similarity): " + recent_titles_s + "\n"
+        "BAN_ANSWERS (do not use as solutions or key words): " + ban_answers_s + "\n"
+        "ALSO avoid stock riddle answers (piano, time, echo, shadow, etc.).\n"
+        "\n"
+        "ROUTES PER SCENE (must be exactly these three, one each):\n"
+        "- cautious → type=acrostic (observation/read the environment)\n"
+        "- brisk    → type=tapcode  (listening/rhythm through a device or structure)\n"
+        "- risky    → type=pathcode (movement/path tracing on tiles, panels, or lattice)\n"
+        "Each route’s puzzle prompt MUST explicitly mention scene props so it feels bespoke to the location.\n"
+        "\n"
+        "TONE & LENGTH:\n"
+        "- Keep each scene’s `text` to ~40–60 words with 2–3 vivid, concrete details (smells, materials, signage).\n"
+        "- No fantasy clichés, no ancient doors/torches/scrolls, no generic computer terminals.\n"
+        "- Prefer modern/industrial/liminal realism with one surprising object.\n"
+        "\n"
+        "HINTS (per puzzle):\n"
+        "- Provide 1–2 crisp hints. Hint 1 nudges the mechanic; Hint 2 nudges a concrete next step.\n"
+        "- No spoilers; no giving away letters or the answer directly.\n"
+        "\n"
+        "FRAGMENTS:\n"
+        "- Set `fragment_rule` so all three routes yield the same fragment from their answers.\n"
+        "- Prefer FIRST2 or LAST2. You may use FIRST3/LAST3 or IDX:i,j if thematic, but keep it consistent per scene.\n"
+        "\n"
+        "STRICT RULES:\n"
+        "- EXACTLY 3 scenes. EACH scene has EXACTLY these three routes with different `type`s (acrostic, tapcode, pathcode).\n"
+        "- The `answer_format.pattern` must be anchored and fit the solution (use ^[A-Za-z]{3,12}$ for words).\n"
+        "- Do not include solutions in prose; put them only in `solution.answer`.\n"
+        "- JSON ONLY. Follow schema exactly.\n"
+        "\n"
+        "SCHEMA:\n"
         "{"
         ' "id": str, "title": str, "intro": str,'
         ' "npc_lines": [str]?, "supplies_start": int?,'
@@ -646,14 +706,20 @@ def _trail_prompt(date_key: str) -> str:
         '   "routes": [ { "id": "cautious"|"brisk"|"risky", "label": str,'
         '     "puzzle": { "id": str, "type": "acrostic|tapcode|pathcode",'
         '                 "prompt": str, "answer_format": {"pattern": str},'
-        '                 "solution": {"answer": str, "shift"?: int, "key"?: str},'
+        '                 "solution": {"answer": str},'
         '                 "hints": [str]? } } ],'
         '   "fragment_rule": "FIRST2|FIRST3|LAST2|LAST3|CAESAR:+K;FIRST2|IDX:i,j|NUM:LAST2" } ],'
         ' "final": { "id": "final", "prompt": str, "answer_format": {"pattern": "^[A-Za-z]{4,12}$"},'
         '            "solution": {"answer": str} },'
         ' "difficulty": "easy"|"medium"|"hard"'
         "}\n"
-        "- Avoid stock riddle answers (piano, time, echo, shadow, etc.).\n"
+        "\n"
+        "QUALITY CHECK BEFORE YOU OUTPUT:\n"
+        "1) Are the three scene settings distinct and non-overlapping?\n"
+        "2) Does each route’s prompt clearly tie to THAT scene’s props?\n"
+        "3) Is language vivid but tight? (no filler, no clichés)\n"
+        "4) Do hints nudge method then step? (no answers)\n"
+        "\n"
         f"- DATE_KEY: {date_key}\n"
     )
 
@@ -677,7 +743,12 @@ def llm_generate_trailroom(date_key: str) -> Optional[Dict[str, Any]]:
                 resp = client.chat.completions.create(
                     model=model,
                     messages=[{"role":"system","content":sys},{"role":"user","content":content}],
-                    temperature=0.7, response_format={"type":"json_object"}
+                    temperature=float(os.getenv("ESCAPE_TEMP","0.9")),
+                    top_p=float(os.getenv("ESCAPE_TOP_P","0.95")),
+                    presence_penalty=float(os.getenv("ESCAPE_PRESENCE","0.7")),
+                    frequency_penalty=float(os.getenv("ESCAPE_FREQ","0.2")),
+                    max_tokens=int(os.getenv("ESCAPE_MAX_TOKENS","1400")),
+                    response_format={"type":"json_object"}
                 )
                 text = (resp.choices[0].message.content or "").strip()
             except Exception:

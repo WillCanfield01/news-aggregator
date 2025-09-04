@@ -412,11 +412,20 @@
     <script>
         // ------- Glossary (shown under hints) -------
         const GLOSSARY = {
-            anagram: { label: "What’s an anagram?", text: "Rearrange all the given letters to form a single valid word (use every letter exactly once)." },
-            caesar: { label: "What’s a Caesar shift?", text: "Each letter was shifted forward a fixed amount (A→B is +1). Try small shifts until a word appears." },
-            vigenere: { label: "What’s Vigenère?", text: "A repeating word key shifts letters by varying amounts. Decrypt to reveal the hidden uppercase word." },
-            numeric_lock: { label: "What’s a numeric lock?", text: "A 4-digit code defined by arithmetic constraints. Turn each clue into a simple equation." }
+            acrostic: {
+                label: "What’s an acrostic?",
+                text: "Read the FIRST letter of each line vertically to spell a single word."
+            },
+            tapcode: {
+                label: "What’s tap code?",
+                text: "Use a 5×5 Polybius square (I/J share a cell). Each pair like 3-2 is row-col."
+            },
+            pathcode: {
+                label: "What’s a path code?",
+                text: "Follow the given moves (R/D) on the grid from top-left, collecting letters."
+            }
         };
+        const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
 
         // ------- State -------
         const state = {
@@ -633,10 +642,11 @@
                             ua: navigator.userAgent,
                             tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
                             width: window.innerWidth, height: window.innerHeight,
-                            routes: state.chosenRoutes,
+                            routes: state.chosenRoutes.map(r => ROUTE_TO_APPROACH[r] || r),
                             hints_used_scene: state.hintsUsedScene,
                             submissions_scene: state.submissionsScene
                         }
+
                     })
                 });
                 const data = await res.json();

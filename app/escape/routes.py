@@ -130,12 +130,7 @@ def init_routes(bp: Blueprint):
 
         room = _get_or_404(date_key)
         ok = verify_puzzle(room.json_blob, puzzle_id, answer)
-
-        # If correct, compute this scene’s fragment using the scene’s fragment_rule.
-        frag = None
-        if ok:
-            frag = _fragment_for_submission(room.json_blob, puzzle_id, str(answer))
-
+        frag = _fragment_for_submission(room.json_blob, puzzle_id, answer) if ok else None
         return jsonify({"correct": bool(ok), "fragment": frag})
 
     # -----------------------------
@@ -144,8 +139,8 @@ def init_routes(bp: Blueprint):
     @bp.route("/api/finish", methods=["POST"])
     def api_finish():
         """
-        Record a player's run. We compute the duration server-side.
-        If meta includes chip info, we apply a time bonus (leftover chips -> shorter effective time).
+        Record a player's run. Duration is computed server-side.
+        We apply (a) leftover-chips bonus and (b) route risk/reward bonus/penalty.
         """
         data = _json_body_or_400()
         date_key = data.get("date_key")
@@ -169,21 +164,23 @@ def init_routes(bp: Blueprint):
             current_app.logger.info("[escape] suspicious finish: duration < 3s")
             success = False
 
-        # If a final meta-code exists on the room, verify it when success is True
+        # Verify final meta-code if provided/required
         if success and (room.json_blob.get("final_code") or (room.json_blob.get("final") or {}).get("solution")):
             submitted_final = (data.get("final_code") or "").strip()
             if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
                 success = False
 
-        # Apply server-side chip bonus (only with sane meta)
-        # Apply server-side chip + route risk/reward (only with sane meta)
         eff_ms = dur_ms
-        if success:
-            # This mutates `meta` to include a breakdown:
-            # chip_bonus_ms, route_bonus_ms, route_penalty_ms, effective_time_ms
-            eff_ms, _ = _apply_chip_bonus(dur_ms, meta)
+        chip_bonus_ms = 0
+        route_bonus_ms = 0
+        route_penalty_ms = 0
 
-        # Save attempt (persist the breakdown populated by _apply_chip_bonus)
+        if success:
+            # Apply bonuses in sequence on the running effective time
+            eff_ms, chip_bonus_ms = _apply_chip_bonus(eff_ms, meta)
+            eff_ms, route_bonus_ms, route_penalty_ms = _apply_approach_bonus(eff_ms, meta)
+
+        # Save attempt
         attempt = EscapeAttempt(
             user_id=None,
             date_key=date_key,
@@ -194,15 +191,10 @@ def init_routes(bp: Blueprint):
             meta={
                 **(meta or {}),
                 "raw_time_ms": dur_ms,
-                # Normalize numbers in case meta is missing anything
-                "chip_bonus_ms": int((meta or {}).get("chip_bonus_ms", 0)),
-                "route_bonus_ms": int((meta or {}).get("route_bonus_ms", 0)),
-                "route_penalty_ms": int((meta or {}).get("route_penalty_ms", 0)),
-                "total_bonus_ms": (
-                    int((meta or {}).get("chip_bonus_ms", 0))
-                    + int((meta or {}).get("route_bonus_ms", 0))
-                    - int((meta or {}).get("route_penalty_ms", 0))
-                ),
+                "chip_bonus_ms": int(chip_bonus_ms),
+                "route_bonus_ms": int(route_bonus_ms),
+                "route_penalty_ms": int(route_penalty_ms),
+                "total_bonus_ms": int(chip_bonus_ms + route_bonus_ms - route_penalty_ms),
                 "effective_time_ms": eff_ms if success else None,
             },
         )
@@ -356,76 +348,46 @@ def _get_or_404(date_key: str) -> EscapeRoom:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
         return abort(_abort_json(404, "Room not found"))
 
-def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> (int, int):
+def _apply_approach_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int, int]:
     """
-    Risk/Reward with routes + chips -> time conversion.
-
-    Server-enforced:
-      - Per-chip conversion depends on difficulty (easy/med/hard).
-      - Route bonuses/penalties:
-          brisk:  first-try + no hints => -2000ms; 3+ tries => +1500ms
-          risky:  first-try + no hints => -3500ms; 3+ tries => +3000ms
-      - Cautious has no route-based adjustment.
-
-    Expected meta (all optional; we sanitize):
-      chips_start, chips_spent, chips_remaining
-      routes: ["cautious"|"brisk"|"risky", ...] length 3
-      hints_used_scene: [int,int,int]
-      submissions_scene: [int,int,int]
-      difficulty: "easy"|"medium"|"hard" (from client is advisory; server can override if needed)
+    Risk/reward per scene.
+    Supports both old route ids ("cautious","brisk","risky") and new labels
+    ("observe","listen","traverse"). Bonus only if (no hints AND first try).
+    Penalty if >=3 tries.
     """
-    # --- Chips sanity ---
-    try:
-        start  = int(meta.get("chips_start", 0))
-        spent  = int(meta.get("chips_spent", 0))
-        remain = int(meta.get("chips_remaining", 0))
-    except Exception:
-        start = spent = remain = 0
-
-    if (start < 0 or spent < 0 or remain < 0 or
-        remain > start or spent > start or (remain + spent) > start):
-        remain = 0  # bad accounting -> no chip bonus
-
-    # Difficulty-scaled per-chip
-    diff = (meta.get("difficulty") or "").lower()
-    per_chip = 40
-    if diff == "easy": per_chip = 30
-    elif diff == "hard": per_chip = 50
-
-    chip_bonus_ms = remain * per_chip
-
-    # --- Route risk/reward ---
     routes = meta.get("routes") or []
     hints  = meta.get("hints_used_scene") or []
     tries  = meta.get("submissions_scene") or []
 
-    route_bonus_ms = 0
-    route_penalty_ms = 0
+    MAP = {"cautious": "observe", "brisk": "listen", "risky": "traverse"}
+    TUNE = {
+        "observe":  {"bonus": 0,    "penalty": 0},
+        "listen":   {"bonus": 1500, "penalty": 2000},
+        "traverse": {"bonus": 3000, "penalty": 5000},
+    }
 
+    bonus = penalty = 0
     for i, r in enumerate(routes[:3]):
-        rname = str(r or "").lower()
-        h = int(hints[i]) if i < len(hints) and str(hints[i]).isdigit() else 0
-        t = int(tries[i]) if i < len(tries) and str(tries[i]).isdigit() else 0
+        key = MAP.get((r or "").lower(), (r or "").lower())
+        h = int(hints[i]) if i < len(hints) else 0
+        t = int(tries[i]) if i < len(tries) else 0
+        tune = TUNE.get(key, {"bonus": 0, "penalty": 0})
+        if h == 0 and t == 1:
+            bonus += tune["bonus"]
+        elif t >= 3:
+            penalty += tune["penalty"]
 
-        if rname == "brisk":
-            if h == 0 and t == 1:
-                route_bonus_ms += 2000
-            elif t >= 3:
-                route_penalty_ms += 1500
-        elif rname == "risky":
-            if h == 0 and t == 1:
-                route_bonus_ms += 3500
-            elif t >= 3:
-                route_penalty_ms += 3000
-        # cautious: no adjustments
+    eff = max(0, dur_ms - bonus + penalty)
+    return eff, bonus, penalty
 
-    effective_ms = max(0, dur_ms - chip_bonus_ms - route_bonus_ms + route_penalty_ms)
-    total_bonus_ms = chip_bonus_ms + route_bonus_ms - route_penalty_ms
-
-    # Keep breakdown (useful for leaderboard audit)
-    meta["chip_bonus_ms"]     = chip_bonus_ms
-    meta["route_bonus_ms"]    = route_bonus_ms
-    meta["route_penalty_ms"]  = route_penalty_ms
-    meta["effective_time_ms"] = effective_ms
-
-    return effective_ms, total_bonus_ms
+def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
+    """
+    Convert leftover chips into a time bonus.
+    Expects client to send `chips_left` (or `chips`) in meta.
+    """
+    chips_left = int((meta or {}).get("chips_left", (meta or {}).get("chips", 0)) or 0)
+    chips_left = max(0, min(60, chips_left))   # sanity clamp
+    MS_PER_CHIP = 400                          # tune: 0.4s per chip
+    bonus = chips_left * MS_PER_CHIP
+    eff = max(0, dur_ms - bonus)
+    return eff, bonus
