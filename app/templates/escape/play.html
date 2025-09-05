@@ -508,6 +508,7 @@
 
         // ------- State -------
         // AFTER
+        // AFTER
         const state = {
             dateKey: "{{ date_key }}",
             startedMs: null,
@@ -524,8 +525,8 @@
             // per-scene temp answers for mini mechanics
             miniAnswer: ["", "", ""],
 
-            // NEW: per-scene mount timestamps (for hint gating)
-            puzzleMountedAt: [0, 0, 0]
+            // NEW: lock a scene after a route is chosen (prevents double fires)
+            routeLocked: [false, false, false]
         };
 
         const $ = id => document.getElementById(id);
@@ -614,23 +615,35 @@
 
                 // Build route buttons dynamically (expecting 3)
                 // AFTER
+                // AFTER
                 const btnHolder = document.getElementById(`routebtns-${idx}`);
                 const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
-                (rm.routes || []).forEach(r => {
-                    const b = document.createElement("button");
-                    b.setAttribute("data-route", r.id);
-                    b.textContent = `${r.label || r.id} (${mult[r.id] || "1×"})`;
-                    // Single-fire handler + nicer UX
-                    b.addEventListener("click", () => {
-                        state.chosenRoutes[idx] = r.id;
-                        showPuzzle(idx, rm, r.id);
-                        // disable all route buttons visibly
-                        btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
-                        // scroll puzzle into view
-                        document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }, { once: true });
-                    btnHolder.appendChild(b);
-                });
+
+                // (Re)build all three buttons as HTML (ensures clean dataset + type="button")
+                btnHolder.innerHTML = (rm.routes || []).map(r =>
+                    `<button type="button" data-route="${r.id}">${r.label || r.id} (${mult[r.id] || "1×"})</button>`
+                ).join("");
+
+                // reset the scene lock
+                state.routeLocked[idx] = false;
+
+                // Robust: one delegated listener per scene container
+                btnHolder.addEventListener("click", (ev) => {
+                    const btn = ev.target.closest("button[data-route]");
+                    if (!btn || state.routeLocked[idx]) return;
+
+                    const routeId = btn.dataset.route;
+                    state.routeLocked[idx] = true;
+                    state.chosenRoutes[idx] = routeId;
+
+                    // disable all three visibly
+                    btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
+
+                    // mount puzzle and scroll it into view
+                    showPuzzle(idx, rm, routeId);
+                    document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, { once: true });
+
             });
             $("finalGate").style.display = "none";
             updateSceneBadge(); updateFragmentDisplay();
