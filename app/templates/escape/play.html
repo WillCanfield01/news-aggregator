@@ -388,6 +388,23 @@
             color: var(--muted);
             margin-top: 2px;
         }
+
+        /* Thematic route buttons */
+        .route-btn {
+            text-align: left;
+            min-width: 240px
+        }
+
+        .route-title {
+            font-weight: 700
+        }
+
+        .route-sub {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px
+        }
     </style>
 </head>
 
@@ -522,6 +539,32 @@
             }
         };
         const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
+        // --- Thematic labeling fallback (client-side) ---
+        const STOP = new Set(["the", "a", "an", "and", "of", "to", "in", "on", "at", "for", "with", "into", "across", "over", "under", "hall", "room", "scene", "chamber"]);
+        function pickNoun(text = "") {
+            const words = (text || "").toLowerCase().match(/[a-z]{4,}/g) || [];
+            const w = words.find(w => !STOP.has(w)) || "device";
+            return w;
+        }
+        function isGenericLabel(s = "") { return /^(proceed carefully|move quickly|take a risk)$/i.test(s.trim()); }
+        function themedRouteCopy(rm, rid, route) {
+            const noun = pickNoun(`${rm.title || ""} ${rm.text || ""}`);
+            const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
+            const defaults = {
+                cautious: { label: `Inspect the ${noun}`, sub: "Safer path — hints unlock sooner." },
+                brisk: { label: `Weave past the ${noun}`, sub: "Faster path — hints unlock +30s; small time bonus if clean." },
+                risky: { label: `Tamper with the ${noun}`, sub: "Bold path — hints unlock +60s; bigger bonus if first try." }
+            };
+            const fromApi = {
+                label: (route.label && !isGenericLabel(route.label)) ? route.label : null,
+                sub: route.sub || null
+            };
+            return {
+                label: fromApi.label || defaults[rid].label,
+                sub: fromApi.sub || defaults[rid].sub,
+                mult: mult[rid] || "1×"
+            };
+        }
 
         // ------- State -------
         // AFTER
@@ -630,53 +673,40 @@
           `;
                 holder.appendChild(wrap);
 
-                // AFTER
+                // Build route buttons dynamically (works + themed)
                 const btnHolder = document.getElementById(`routebtns-${idx}`);
-                const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
-                const defaultSub = {
-                    cautious: "Safer path — hints unlock sooner.",
-                    brisk: "Faster path — hints unlock +30s; small time bonus if clean.",
-                    risky: "Bold path — hints unlock +60s; bigger bonus if first try."
-                };
-
-                btnHolder.innerHTML = (rm.routes || []).map(r => {
-                    const label = r.label || r.id;
-                    const sub = r.sub || defaultSub[r.id] || "";
-                    return `
-                <button type="button" class="route-btn"
-                        onclick="chooseRoute(${idx}, '${r.id}')"
-                        title="${sub.replace(/"/g, '&quot;')}">
-                <span class="route-title">${label} <span class="badge">${mult[r.id] || "1×"}</span></span>
-                <span class="route-sub">${sub}</span>
-                </button>`;
-                }).join("");
-
-                // reset the scene lock for this row
+                btnHolder.innerHTML = "";
                 state.routeLocked[idx] = false;
 
-                // reset the scene lock
-                state.routeLocked[idx] = false;
+                (rm.routes || []).forEach((r) => {
+                    const rid = r.id;
+                    const copy = themedRouteCopy(rm, rid, r);
 
-                // Robust: one delegated listener per scene container
-                btnHolder.addEventListener("click", (ev) => {
-                    const btn = ev.target.closest("button[data-route]");
-                    if (!btn || state.routeLocked[idx]) return;
+                    const b = document.createElement("button");
+                    b.type = "button";
+                    b.className = "route-btn";
+                    b.setAttribute("data-route", rid);
+                    b.innerHTML = `
+    <span class="route-title">${copy.label} <span class="badge">${copy.mult}</span></span>
+    <span class="route-sub">${copy.sub}</span>
+  `;
 
-                    const routeId = btn.dataset.route;
-                    state.routeLocked[idx] = true;
-                    state.chosenRoutes[idx] = routeId;
+                    b.addEventListener("click", () => {
+                        if (state.routeLocked[idx]) return;
+                        state.routeLocked[idx] = true;
+                        state.chosenRoutes[idx] = rid;
 
-                    // disable all three visibly
-                    btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
+                        // Visually disable all three
+                        btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
 
-                    // mount puzzle and scroll it into view
-                    showPuzzle(idx, rm, routeId);
-                    document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, { once: true });
+                        // Mount the puzzle and scroll to it
+                        showPuzzle(idx, rm, rid);
+                        document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    });
 
+                    btnHolder.appendChild(b);
+                });
             });
-            $("finalGate").style.display = "none";
-            updateSceneBadge(); updateFragmentDisplay();
         }
 
         function updateFragmentDisplay() {
