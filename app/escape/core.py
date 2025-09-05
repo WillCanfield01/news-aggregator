@@ -273,19 +273,24 @@ def _scene_word_from_title(rng: random.Random, title: str, min_len=4, max_len=8)
 
 def gen_acrostic(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     """First letters of each line spell the answer (fits the room theme)."""
-    ans = _scene_word_from_title(rng, theme)
-    # ensure letters-only 4..8
-    if not (4 <= len(ans) <= 8 and ans.isalpha()):
-        ans = _random_word(rng, blacklist)
+    bl = {str(s).lower() for s in (blacklist or set())}
+
+    # try a themed word first
+    ans = re.sub(r"[^A-Za-z]", "", _scene_word_from_title(rng, theme)).lower()
+
+    # reject if bad length or on the blacklist
+    if not (4 <= len(ans) <= 8) or ans in bl:
+        ans = _random_word(rng, bl)
+
     lines = []
-    for i, ch in enumerate(ans):
-        # Make a sentence starting with ch, lightly themed
+    for ch in ans:
         frag = rng.choice([
             "shadows", "signal", "lantern", "archive", "glass", "stairs",
             "whisper", "copper", "fog", "vault", "console", "runes"
         ])
         lines.append(f"{ch.upper()}{ch.lower()}—{frag} tied to {theme or 'the room'}...")
     poem = "\n".join(lines)
+
     return Puzzle(
         id=pid, archetype="acrostic",
         prompt=f"A scrap of verse is pinned to the wall:\n{poem}\nWhat single word do the first letters spell?",
@@ -296,49 +301,51 @@ def gen_acrostic(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
         paraphrases=[f"Acrostic poem hints a word about {theme or 'this place'}."]
     )
 
-# 5x5 Polybius/Tap code (I/J share a cell). We emit row-col pairs (1..5).
-_POLY = "ABCDEFGHIKLMNOPQRSTUVWXYZ"  # J merged into I
-def _tap_pairs_for_word(w: str) -> List[str]:
-    out=[]
-    for ch in w.upper().replace("J","I"):
-        i = _POLY.index(ch); r = i//5 + 1; c = i%5 + 1
-        out.append(f"{r}-{c}")
-    return out
-
 def gen_tapcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    w = _scene_word_from_title(rng, theme)
-    w = re.sub(r"[^A-Za-z]", "", w).upper().replace("J","I")
-    if len(w) < 4: w = _random_word(rng, blacklist).upper().replace("J","I")
-    taps = ", ".join(_tap_pairs_for_word(w))
+    bl = {str(s).lower() for s in (blacklist or set())}
+
+    # themed try, normalized, with J→I merge for Polybius
+    w = re.sub(r"[^A-Za-z]", "", _scene_word_from_title(rng, theme)).lower().replace("j", "i")
+
+    # reject if too short or blacklisted
+    if len(w) < 4 or w in bl:
+        w = _random_word(rng, bl).lower().replace("j", "i")
+
+    taps = ", ".join(_tap_pairs_for_word(w.upper()))
     return Puzzle(
         id=pid, archetype="tapcode",
         prompt=(f"From the {theme or 'pipes'}, you hear rhythmic taps: {taps}.\n"
                 "Decode them using a 5×5 Polybius square (I/J share a cell). Enter the word."),
         answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
-        solution={"answer": w.replace("I","I")},  # already normalized
+        solution={"answer": w.upper()},
         hints=["Map 1–5 row/col to letters in a 5×5 grid.", "Remember I/J share the same cell."],
-        decoys=[w[::-1], w[1:]+w[:1]],
+        decoys=[w.upper()[::-1], (w[1:]+w[:1]).upper()],
         paraphrases=[f"Taps from the {theme or 'room'} encode a word."]
     )
 
 def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     """Tiny grid; follow directions to read the path word."""
-    word = _scene_word_from_title(rng, theme, 4, 6)
-    if not (4 <= len(word) <= 6): word = _random_word(rng, blacklist)
-    # build a 3x3/4x4 grid containing the path word placed snake-wise
+    bl = {str(s).lower() for s in (blacklist or set())}
+
+    word = re.sub(r"[^A-Za-z]", "", _scene_word_from_title(rng, theme, 4, 6)).lower()
+    if not (4 <= len(word) <= 6) or word in bl:
+        word = _random_word(rng, bl)
+
     n = 3 if len(word) <= 5 else 4
     grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
-    # carve a simple path
     r, c = 0, 0
     grid[r][c] = word[0].upper()
     path = []
     for ch in word[1:]:
-        # move right or down preferentially, wrapping if needed
-        if rng.random() < 0.5 and c+1 < n: c += 1; path.append("R")
-        elif r+1 < n: r += 1; path.append("D")
-        else: c = (c+1) % n; path.append("R")
+        if rng.random() < 0.5 and c+1 < n:
+            c += 1; path.append("R")
+        elif r+1 < n:
+            r += 1; path.append("D")
+        else:
+            c = (c+1) % n; path.append("R")
         grid[r][c] = ch.upper()
     grid_str = "\n".join(" ".join(row) for row in grid)
+
     return Puzzle(
         id=pid, archetype="pathcode",
         prompt=(f"A glowing tile grid is etched on the floor:\n{grid_str}\n"
