@@ -768,40 +768,39 @@ def _extract_json_block(text: str) -> Optional[str]:
 
 def llm_generate_trailroom(date_key: str) -> Optional[Dict[str, Any]]:
     client, mode = _get_openai_client()
-    if not client: return None
-    sys = "You are a careful game designer. Return JSON only. Follow the schema exactly."
-    content = _trail_prompt(date_key)
-    model = os.getenv("ESCAPE_MODEL","gpt-4o-mini")
-    try:
-        if mode == "modern":
-            try:
-                resp = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role":"system","content":sys},{"role":"user","content":content}],
-                    temperature=float(os.getenv("ESCAPE_TEMP","0.9")),
-                    top_p=float(os.getenv("ESCAPE_TOP_P","0.95")),
-                    presence_penalty=float(os.getenv("ESCAPE_PRESENCE","0.7")),
-                    frequency_penalty=float(os.getenv("ESCAPE_FREQ","0.2")),
-                    max_tokens=int(os.getenv("ESCAPE_MAX_TOKENS","1400")),
-                    response_format={"type":"json_object"}
-                )
-                text = (resp.choices[0].message.content or "").strip()
-            except Exception:
-                resp = client.responses.create(
-                    model=model, input=[{"role":"user","content":sys+"\n\n"+content}], temperature=0.7
-                )
-                text = getattr(resp, "output_text", "") or ""
-        else:
-            text = client.ChatCompletion.create(  # type: ignore
-                model=model,
-                messages=[{"role":"system","content":sys},{"role":"user","content":content}],
-                temperature=0.7
-            )["choices"][0]["message"]["content"]
-        jb = _extract_json_block(text)
-        return json.loads(jb) if jb else None
-    except Exception as e:
+    if not client:
+        current_app.logger.warning("[escape] no OpenAI client; using offline")
         return None
 
+    sys = "You are a careful game designer. Return JSON only. Follow the schema exactly."
+    user = _trail_prompt(date_key)
+    model = os.getenv("ESCAPE_MODEL", "gpt-5-chat-latest")
+
+    try:
+        if mode == "modern":
+            # Responses API → reliable across models
+            resp = client.responses.create(
+                model=model,
+                input=[{"role":"system","content":sys},{"role":"user","content":user}],
+                response_format={"type":"json_object"},
+                temperature=float(os.getenv("ESCAPE_TEMP","0.9")),
+                top_p=float(os.getenv("ESCAPE_TOP_P","0.95")),
+            )
+            text = getattr(resp, "output_text", "") or ""
+        else:
+            # Legacy SDK fallback
+            text = client.ChatCompletion.create(  # type: ignore
+                model=model,
+                messages=[{"role":"system","content":sys},{"role":"user","content":user}],
+                temperature=0.9
+            )["choices"][0]["message"]["content"]
+
+        jb = _extract_json_block(text) or text
+        return json.loads(jb) if jb else None
+
+    except Exception as e:
+        current_app.logger.exception(f"[escape] llm_generate_trailroom failed: {e}")
+        return None
 # ───────────────────────── Critic (safe patch) ─────────────────────────
 
 def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
