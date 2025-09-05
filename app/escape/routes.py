@@ -81,7 +81,23 @@ def init_routes(bp: Blueprint):
     # Keep /admin/regen, add an API alias so we have two ways to hit it
     @bp.route("/api/admin/regen", methods=["GET", "POST"])
     def admin_regen_api():
-        return admin_regen()   # just call the handler below
+        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
+        server_token = os.getenv("ESCAPE_ADMIN_TOKEN", "")
+        if token != server_token: return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+        date_key = request.args.get("date") or get_today_key()
+        force = (request.args.get("force", "true").lower() != "false")
+        salt  = request.args.get("salt")
+
+        try:
+            if salt is not None:
+                os.environ["ESCAPE_REGEN_SALT"] = salt
+            row = ensure_daily_room(date_key, force_regen=force)
+            puzzles = len(((row.json_blob or {}).get("puzzles") or []))
+            return jsonify({"ok": True, "date": date_key, "puzzles": puzzles})
+        finally:
+            if salt is not None:
+                os.environ.pop("ESCAPE_REGEN_SALT", None)
 
     # -----------------------------
     # API: Fetch today's room JSON (solutions stripped)

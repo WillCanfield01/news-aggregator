@@ -1200,15 +1200,18 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
     return harden(room, rng)
 
 def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
-    seed = daily_seed(date_key, server_secret)
+    salt = os.getenv("ESCAPE_REGEN_SALT", "")
+    seed = daily_seed(date_key, server_secret + salt)   # ← was server_secret only
     rng = rng_from_seed(seed)
     room = _offline_trail(date_key, rng)
-    room["source"] = "offline"            # ← add
+    room["source"] = "offline"
     return room
 
 # ───────────────────────── Primary generation ─────────────────────────
 
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
+    salt = os.getenv("ESCAPE_REGEN_SALT", "")
+    rng = rng_from_seed(daily_seed(date_key, server_secret + salt))
     if os.getenv("ESCAPE_MODEL","").lower()=="off" or os.getenv("ESCAPE_FORCE_OFFLINE","").lower() in ("1","true","yes"):
         return generate_room_offline(date_key, server_secret)
 
