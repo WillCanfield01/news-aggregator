@@ -371,6 +371,23 @@
             pointer-events: none;
             filter: saturate(.7);
         }
+
+        /* AFTER: add near other button styles */
+        .route-btn {
+            text-align: left;
+            min-width: 220px;
+        }
+
+        .route-title {
+            font-weight: 700;
+        }
+
+        .route-sub {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
     </style>
 </head>
 
@@ -613,16 +630,29 @@
           `;
                 holder.appendChild(wrap);
 
-                // Build route buttons dynamically (expecting 3)
-                // AFTER
                 // AFTER
                 const btnHolder = document.getElementById(`routebtns-${idx}`);
                 const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
+                const defaultSub = {
+                    cautious: "Safer path — hints unlock sooner.",
+                    brisk: "Faster path — hints unlock +30s; small time bonus if clean.",
+                    risky: "Bold path — hints unlock +60s; bigger bonus if first try."
+                };
 
-                // (Re)build all three buttons as HTML (ensures clean dataset + type="button")
-                btnHolder.innerHTML = (rm.routes || []).map(r =>
-                    `<button type="button" data-route="${r.id}">${r.label || r.id} (${mult[r.id] || "1×"})</button>`
-                ).join("");
+                btnHolder.innerHTML = (rm.routes || []).map(r => {
+                    const label = r.label || r.id;
+                    const sub = r.sub || defaultSub[r.id] || "";
+                    return `
+                <button type="button" class="route-btn"
+                        onclick="chooseRoute(${idx}, '${r.id}')"
+                        title="${sub.replace(/"/g, '&quot;')}">
+                <span class="route-title">${label} <span class="badge">${mult[r.id] || "1×"}</span></span>
+                <span class="route-sub">${sub}</span>
+                </button>`;
+                }).join("");
+
+                // reset the scene lock for this row
+                state.routeLocked[idx] = false;
 
                 // reset the scene lock
                 state.routeLocked[idx] = false;

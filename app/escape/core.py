@@ -564,6 +564,29 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
     blob["trail"] = {**trail, "rooms": rooms}
     return blob
 
+# AFTER: new helper
+def _thematic_routes_for_room(rng: random.Random, theme: str) -> Dict[str, Tuple[str, str]]:
+    """
+    Returns per-route (label, sub) that reference the scene.
+    Label = button text; sub = short pros/cons/hinty line.
+    """
+    noun = re.sub(r"[^A-Za-z ]", "", (_scene_word_from_title(rng, theme, 4, 12) or "")).strip().lower() or "device"
+    art = "an" if noun[:1] in "aeiou" else "a"
+
+    cautious_verbs = ["Inspect", "Observe", "Trace", "Skirt"]
+    brisk_verbs    = ["Weave past", "Cut through", "Stride by", "Skim past"]
+    risky_verbs    = ["Tamper with", "Force", "Gamble on", "Rush"]
+
+    c_lab = f"{rng.choice(cautious_verbs)} the {noun}"
+    b_lab = f"{rng.choice(brisk_verbs)} the {noun}"
+    r_lab = f"{rng.choice(risky_verbs)} the {noun}"
+
+    return {
+        "cautious": (c_lab, "Safer path — hints unlock sooner."),
+        "brisk":    (b_lab,  "Faster path — hints unlock +30s; small time bonus if clean."),
+        "risky":    (r_lab,  "Bold path — hints unlock +60s; bigger bonus if first try.")
+    }
+
 def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: int = 3) -> Dict[str, Any]:
     theme = f"{rm.get('title','')} {rm.get('text','')}".strip()
     routes_raw = _as_dict_list(rm.get("routes"))
@@ -594,21 +617,31 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
             "puzzle": p
         })
 
-    ids = ["cautious", "brisk", "risky"][:count]
-    labels = {
-        "cautious": "Proceed carefully",
-        "brisk": "Move quickly",
-        "risky": "Take a risk",
-    }
+        # AFTER
+        ids = ["cautious", "brisk", "risky"][:count]
+        themed = _thematic_routes_for_room(rng, theme)
 
-    out = []
-    for rid in ids:
-        existing = next((x for x in cleaned if x["id"] == rid), None)
-        if existing:
-            out.append({"id": rid, "label": labels[rid], "puzzle": existing["puzzle"]})
-        else:
-            pid = f"r{r_index}_{rid}_pz_autogen"
-            out.append({"id": rid, "label": labels[rid], "puzzle": _synth_puzzle(rng, pid, theme=theme)})
+        out = []
+        for rid in ids:
+            existing = next((x for x in cleaned if x["id"] == rid), None)
+            label, sub = themed.get(rid, (None, None))
+            if existing:
+                # keep LLM/custom labels if present; otherwise use themed defaults
+                lbl = existing.get("label") or label or rid.title()
+                out.append({
+                    "id": rid,
+                    "label": lbl,
+                    "sub": existing.get("sub") or sub,          # NEW
+                    "puzzle": existing["puzzle"]
+                })
+            else:
+                pid = f"r{r_index}_{rid}_pz_autogen"
+                out.append({
+                    "id": rid,
+                    "label": label or rid.title(),
+                    "sub": sub,                                  # NEW
+                    "puzzle": _synth_puzzle(rng, pid, theme=theme)
+                })
 
     rm["routes"] = out
     fr = rm.get("fragment_rule") or "FIRST2"
@@ -621,15 +654,18 @@ def _synth_room(idx: int, rng: random.Random) -> Dict[str, Any]:
     p2 = _synth_puzzle(rng, f"r{idx}_brisk_pz", theme=theme)
     p3 = _synth_puzzle(rng, f"r{idx}_risky_pz", theme=theme)
 
+    # AFTER
     fr, _ = _coerce_same_fragment_or_const_all("FIRST2", [p1, p2, p3])
+    theme = f"Waystation {idx}"
+    themed = _thematic_routes_for_room(rng, theme)
     return {
         "id": f"room_{idx}",
-        "title": f"Waystation {idx}",
+        "title": theme,
         "text": "",
         "routes": [
-            {"id": "cautious", "label": "Proceed carefully", "puzzle": p1},
-            {"id": "brisk",    "label": "Move quickly",      "puzzle": p2},
-            {"id": "risky",    "label": "Take a risk",       "puzzle": p3},
+            {"id": "cautious", "label": themed["cautious"][0], "sub": themed["cautious"][1], "puzzle": p1},
+            {"id": "brisk",    "label": themed["brisk"][0],    "sub": themed["brisk"][1],    "puzzle": p2},
+            {"id": "risky",    "label": themed["risky"][0],    "sub": themed["risky"][1],    "puzzle": p3},
         ],
         "fragment_rule": fr,
     }
