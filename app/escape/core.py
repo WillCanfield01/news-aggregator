@@ -62,9 +62,21 @@ FINAL_CODE_MIN_LEN = 4
 FINAL_CODE_MAX_LEN = 12
 
 # Allowed puzzle archetypes (LLM and offline)
-ALLOWED_TYPES = {"acrostic", "tapcode", "pathcode"}
+ALLOWED_TYPES = {"mini", "acrostic", "tapcode", "pathcode", "anagram", "caesar", "vigenere", "numeric_lock"}
+ALLOWED_MECHANICS = {"multiple_choice", "sequence_input", "grid_input", "text_input"}
 
 # ───────────────────────── Utilities ─────────────────────────
+
+def _is_numeric(s: str) -> bool:
+    return bool(re.fullmatch(r"\d+", str(s or "")))
+
+def _default_pattern_for_answer(answer: str) -> str:
+    # Compact, anchored patterns that still allow short tokens
+    a = str(answer or "")
+    if _is_numeric(a): return r"^\d{1,12}$"
+    if re.fullmatch(r"[A-Za-z]+", a): return r"^[A-Za-z]{2,16}$"
+    # allow short tokens with commas/dashes (e.g., sequences)
+    return r"^[A-Za-z0-9,\-]{1,24}$"
 
 def daily_seed(date_key: str, secret: str) -> int:
     digest = hmac.new(secret.encode("utf-8"), date_key.encode("utf-8"), hashlib.sha256).digest()
@@ -389,27 +401,40 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
             p = rt.get("puzzle")
             pid = f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
 
-            # No puzzle? synthesize one scene-aware
             if not isinstance(p, dict):
                 rt["puzzle"] = _synth_puzzle(rng, pid, blacklist, theme)
                 continue
 
-            # Normalize id/type
+            # normalize id/type
             p["id"] = p.get("id") or pid
             typ = (p.get("type") or p.get("archetype") or "").lower()
 
-            # Unknown/empty type -> synthesize
-            if typ not in {"acrostic", "tapcode", "pathcode"}:
-                rt["puzzle"] = _synth_puzzle(rng, p["id"], blacklist, theme)
+            if typ == "mini":
+                # ensure mechanic + ui_spec exist
+                mech = (p.get("mechanic") or "").lower()
+                if mech not in ALLOWED_MECHANICS:
+                    # fallback to simple text_input
+                    p["mechanic"] = "text_input"
+                    p.setdefault("ui_spec", {})
+                else:
+                    p.setdefault("ui_spec", {})
+                # ensure pattern sane
+                sol = (p.get("solution") or {}).get("answer", "")
+                af = p.get("answer_format") or {}
+                af["pattern"] = af.get("pattern") or _default_pattern_for_answer(sol)
+                p["answer_format"] = af
+                rt["puzzle"] = p
                 continue
 
-            # Rebuild deterministically using our generators, tied to the scene
+            # legacy allowed → rebuild deterministically to keep things valid
             if typ == "acrostic":
                 rt["puzzle"] = gen_acrostic(rng, p["id"], blacklist, theme).to_json()
             elif typ == "tapcode":
                 rt["puzzle"] = gen_tapcode(rng, p["id"], blacklist, theme).to_json()
-            else:  # pathcode
+            elif typ == "pathcode":
                 rt["puzzle"] = gen_pathcode(rng, p["id"], blacklist, theme).to_json()
+            else:
+                rt["puzzle"] = _synth_puzzle(rng, p["id"], blacklist, theme)
 
 # ───────────────────────── Fragment rules ─────────────────────────
 
@@ -651,26 +676,18 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
     return blob
 
 def _trail_prompt(date_key: str) -> str:
-    """
-    Novelty-first daily brief.
-    - Keeps schema identical.
-    - Injects recency context so scenes don't echo recent days.
-    - Bans cliché answers/themes and forces route→mechanic mapping that matches our generators.
-    """
-    # Collect light recency context for anti-repeat nudges (safe to best-effort fail)
+    # recent context to discourage repeats
     recent_titles = []
     try:
         for r in recent_rooms(RECENT_WINDOW_DAYS):
             t = (r.json_blob or {}).get("title")
-            if t:
-                recent_titles.append(t)
+            if t: recent_titles.append(t)
     except Exception:
         pass
     recent_titles = recent_titles[:8]
 
-    # We also pass recent answers as a soft ban list (server enforces separately)
     try:
-        ban_answers = sorted(list(_recent_answer_set()))[:50]
+        ban_answers = sorted(list(_recent_answer_set()))[:60]
     except Exception:
         ban_answers = []
 
@@ -678,65 +695,68 @@ def _trail_prompt(date_key: str) -> str:
     ban_answers_s  = ", ".join(ban_answers) if ban_answers else "(none)"
 
     return (
-        "You are designing TODAY’S mini escape: 3 distinct scenes → 1 final lock.\n"
+        "You are designing TODAY’S daily escape: **exactly 3 scenes → 1 final lock**.\n"
         "\n"
-        "PRIMARY GOAL (NOVELTY): Each day must feel fresh and return-worthy.\n"
-        "Write scenes with striking, specific props/sensory cues so the puzzle text can be grounded in the place.\n"
-        "Avoid repeating themes, wording, or vibes from recent days.\n"
+        "BIG IDEA: Each scene contains a **brand-new micro-game** that is easy to learn (<30s), fast to play (≈1–2 min),\n"
+        "and thematically tied to the scene. These are not recycled puzzle types: invent fresh rules/skins daily,\n"
+        "but express them using one of FOUR frontend mechanics so the client can render them:\n"
+        "  mechanics = multiple_choice | sequence_input | grid_input | text_input\n"
         "\n"
-        "RECENT_TITLES (avoid similarity): " + recent_titles_s + "\n"
-        "BAN_ANSWERS (do not use as solutions or key words): " + ban_answers_s + "\n"
-        "ALSO avoid stock riddle answers (piano, time, echo, shadow, etc.).\n"
+        "HARD REQUIREMENTS:\n"
+        "• JSON ONLY, follow the schema below precisely; no additional prose or commentary.\n"
+        "• EXACTLY 3 scenes in order (rooms[0..2]).\n"
+        "• Each scene has EXACTLY three routes with ids: cautious, brisk, risky.\n"
+        "• For every route, produce a **mini-game**: {type:'mini', mechanic, ui_spec, prompt, answer_format, solution.answer, hints}.\n"
+        "• `prompt` must reference concrete props of THAT scene so it feels bespoke.\n"
+        "• Keep prompts tight (≈40–80 words). 1–2 short hints per puzzle (no spoilers).\n"
+        "• The three routes in the SAME scene must share **one fragment_rule** that extracts the same fragment from each answer.\n"
+        "  Prefer FIRST2/LAST2; FIRST3/LAST3/IDX:i,j are allowed if thematic.\n"
+        "• Final code = concatenation of the three scene fragments. Final answer must be a 4–12 char alphanumeric string.\n"
+        "• DO NOT use or hint at any words in BAN_ANSWERS. Avoid stock riddle answers entirely (echo, time, shadow, piano, etc.).\n"
         "\n"
-        "ROUTES PER SCENE (must be exactly these three, one each):\n"
-        "- cautious → type=acrostic (observation/read the environment)\n"
-        "- brisk    → type=tapcode  (listening/rhythm through a device or structure)\n"
-        "- risky    → type=pathcode (movement/path tracing on tiles, panels, or lattice)\n"
-        "Each route’s puzzle prompt MUST explicitly mention scene props so it feels bespoke to the location.\n"
+        f"RECENT_TITLES (avoid similarity): {recent_titles_s}\n"
+        f"BAN_ANSWERS: {ban_answers_s}\n"
         "\n"
-        "TONE & LENGTH:\n"
-        "- Keep each scene’s `text` to ~40–60 words with 2–3 vivid, concrete details (smells, materials, signage).\n"
-        "- No fantasy clichés, no ancient doors/torches/scrolls, no generic computer terminals.\n"
-        "- Prefer modern/industrial/liminal realism with one surprising object.\n"
+        "MECHANIC RULES (ui_spec):\n"
+        "• multiple_choice: ui_spec = {\"options\": [str, ...]} and solution.answer must equal one of the options.\n"
+        "• sequence_input: ui_spec = {\"sequence\": [str, ...]} where tokens are simple verbs/nouns like 'tap', 'hold', 'left', 'right', 'rotate_left'.\n"
+        "• grid_input: ui_spec = {\"grid\": [[str,...],...]} 2..6 rows; each cell is a 1–2 char label. Optional: start, goal, notes.\n"
+        "• text_input: ui_spec = {} (freeform short token answer).\n"
         "\n"
-        "HINTS (per puzzle):\n"
-        "- Provide 1–2 crisp hints. Hint 1 nudges the mechanic; Hint 2 nudges a concrete next step.\n"
-        "- No spoilers; no giving away letters or the answer directly.\n"
+        "ANCHOR PATTERNS:\n"
+        "• answer_format.pattern must be anchored with ^...$ and match the answer (use ^[A-Za-z]{2,16}$ for words or ^\\d{1,12}$ for numbers;\n"
+        "  for sequences allow ^[A-Za-z0-9,\\-]{1,24}$).\n"
         "\n"
-        "FRAGMENTS:\n"
-        "- Set `fragment_rule` so all three routes yield the same fragment from their answers.\n"
-        "- Prefer FIRST2 or LAST2. You may use FIRST3/LAST3 or IDX:i,j if thematic, but keep it consistent per scene.\n"
-        "\n"
-        "STRICT RULES:\n"
-        "- EXACTLY 3 scenes. EACH scene has EXACTLY these three routes with different `type`s (acrostic, tapcode, pathcode).\n"
-        "- The `answer_format.pattern` must be anchored and fit the solution (use ^[A-Za-z]{3,12}$ for words).\n"
-        "- Do not include solutions in prose; put them only in `solution.answer`.\n"
-        "- JSON ONLY. Follow schema exactly.\n"
-        "\n"
-        "SCHEMA:\n"
-        "{"
-        ' "id": str, "title": str, "intro": str,'
-        ' "npc_lines": [str]?, "supplies_start": int?,'
-        ' "rooms": [ { "id": str, "title": str, "text": str,'
-        '   "routes": [ { "id": "cautious"|"brisk"|"risky", "label": str,'
-        '     "puzzle": { "id": str, "type": "acrostic|tapcode|pathcode",'
-        '                 "prompt": str, "answer_format": {"pattern": str},'
-        '                 "solution": {"answer": str},'
-        '                 "hints": [str]? } } ],'
-        '   "fragment_rule": "FIRST2|FIRST3|LAST2|LAST3|CAESAR:+K;FIRST2|IDX:i,j|NUM:LAST2" } ],'
-        ' "final": { "id": "final", "prompt": str, "answer_format": {"pattern": "^[A-Za-z]{4,12}$"},'
-        '            "solution": {"answer": str} },'
-        ' "difficulty": "easy"|"medium"|"hard"'
+        "SCHEMA (return ONE JSON object only):\n"
+        "{\n"
+        '  "id": "<date_key>",\n'
+        '  "title": str,\n'
+        '  "intro": str,\n'
+        '  "npc_lines": [str]?,\n'
+        '  "supplies_start": 3,\n'
+        '  "rooms": [\n"'
+        '    { "id": "room_1", "title": str, "text": str,\n'
+        '      "routes": [\n'
+        '        { "id": "cautious", "label": "Proceed carefully",\n'
+        '          "puzzle": { "id": "r1_caut", "type": "mini", "mechanic": "multiple_choice|sequence_input|grid_input|text_input",\n'
+        '                      "ui_spec": object, "prompt": str,\n'
+        '                      "answer_format": {"pattern": str}, "solution": {"answer": str}, "hints": [str, str]? } },\n'
+        '        { "id": "brisk", "label": "Move quickly", "puzzle": { ... type: "mini" ... } },\n'
+        '        { "id": "risky", "label": "Take a risk", "puzzle": { ... type: "mini" ... } }\n'
+        '      ],\n'
+        '      "fragment_rule": "FIRST2|LAST2|FIRST3|LAST3|IDX:i,j"\n'
+        '    },\n'
+        '    { "id": "room_2", ... },\n'
+        '    { "id": "room_3", ... }\n'
+        '  ],\n'
+        '  "final": { "id": "final", "prompt": "Assemble the three fragments to form the PASSCODE.",\n'
+        '             "answer_format": {"pattern": "^[A-Za-z0-9]{4,12}$"}, "solution": {"answer": "<concat>"} },\n'
+        '  "difficulty": "medium"\n'
         "}\n"
         "\n"
-        "QUALITY CHECK BEFORE YOU OUTPUT:\n"
-        "1) Are the three scene settings distinct and non-overlapping?\n"
-        "2) Does each route’s prompt clearly tie to THAT scene’s props?\n"
-        "3) Is language vivid but tight? (no filler, no clichés)\n"
-        "4) Do hints nudge method then step? (no answers)\n"
-        "\n"
-        f"- DATE_KEY: {date_key}\n"
+        f"DATE_KEY: {date_key}\n"
     )
+
 
 def _extract_json_block(text: str) -> Optional[str]:
     if not text or not text.strip(): return None
@@ -884,7 +904,66 @@ def _recent_answer_set(days: int = ANSWER_COOLDOWN_DAYS) -> set:
                 if sol: S.add(normalize_answer(sol))
     return S
 
+def _validate_minigame(p: Dict[str, Any]) -> None:
+    # Required base fields
+    for k in ("id","type","prompt","answer_format","solution"):
+        if k not in p:
+            raise ValueError(f"Mini-game missing '{k}'")
+    if p["type"] != "mini":
+        raise ValueError("Mini-game must have type='mini'")
+
+    mech = (p.get("mechanic") or "").strip()
+    if mech not in ALLOWED_MECHANICS:
+        raise ValueError(f"Mini-game mechanic not allowed: {mech}")
+
+    ans = (p.get("solution") or {}).get("answer")
+    if not ans or not normalize_answer(ans):
+        raise ValueError("Mini-game has empty solution")
+
+    # UI spec sanity per mechanic
+    ui = p.get("ui_spec") or {}
+    if mech == "multiple_choice":
+        opts = ui.get("options")
+        if not isinstance(opts, list) or len(opts) < 2:
+            raise ValueError("multiple_choice requires >=2 options in ui_spec.options")
+        if str(ans) not in [str(x) for x in opts]:
+            # We accept normalized match too
+            if normalize_answer(str(ans)) not in {normalize_answer(str(x)) for x in opts}:
+                raise ValueError("answer must be one of options for multiple_choice")
+    elif mech == "sequence_input":
+        seq = ui.get("sequence")
+        if not isinstance(seq, list) or not seq:
+            raise ValueError("sequence_input requires non-empty ui_spec.sequence")
+        # sequences are validated by pattern only; keep tokens simple
+    elif mech == "grid_input":
+        grid = ui.get("grid")
+        if not (isinstance(grid, list) and 2 <= len(grid) <= 6 and all(isinstance(r, list) for r in grid)):
+            raise ValueError("grid_input requires ui_spec.grid as 2..6 rows of lists")
+        # optional start/goal, directions spec, etc. are for client only
+    elif mech == "text_input":
+        # nothing special
+        pass
+
+    # Pattern must be anchored and match answer (normalized accepted)
+    pat = ((p.get("answer_format") or {}).get("pattern")) or _default_pattern_for_answer(ans)
+    if not re.fullmatch(r"^\^.*\$$", pat):
+        raise ValueError("answer_format.pattern must be anchored ^...$")
+    if not (re.fullmatch(pat, str(ans)) or re.fullmatch(pat, normalize_answer(str(ans)))):
+        raise ValueError("Mini-game solution does not match declared pattern")
+
+    # Stock/cooldown protection
+    if normalize_answer(ans).lower() in {s.lower() for s in COMMON_STOCK_ANSWERS}:
+        raise ValueError("Mini-game uses a stock/cliché answer")
+    if answer_recently_used(str(ans)):
+        raise ValueError("Mini-game answer recently used")
+
 def _validate_puzzle(p: Dict[str, Any]) -> None:
+    # Mini-games use their own validator
+    if (p.get("type") or "").lower() == "mini":
+        _validate_minigame(p)
+        return
+
+    # --- existing legacy validation below (unchanged) ---
     for k in ("id","prompt","answer_format","solution"):
         if k not in p: raise ValueError(f"Puzzle missing '{k}'")
     if p.get("type") not in ALLOWED_TYPES:
@@ -924,6 +1003,10 @@ def _flatten_puzzles(trail: Dict[str,Any]) -> List[Dict[str,Any]]:
                 pj.setdefault("archetype", pj.get("type"))
                 pj["room_id"] = rm.get("id")
                 pj["route_id"] = rt.get("id")
+                # make sure mini meta survives
+                if pj.get("type") == "mini":
+                    pj["mechanic"] = pj.get("mechanic")
+                    pj["ui_spec"]  = pj.get("ui_spec") or {}
                 out.append(pj)
     return out
 

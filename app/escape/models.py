@@ -132,9 +132,11 @@ class DailyLeaderboardView:
         rows.sort(
             key=lambda a: (
                 a.time_ms if a.time_ms is not None else 10 ** 12,
-                -int((a.meta or {}).get("chips_remaining", 0)),
+                -int((a.meta or {}).get("chips_left",
+                    (a.meta or {}).get("chips_remaining", 0)))
             )
         )
+
         out = []
         for idx, row in enumerate(rows[:limit], start=1):
             out.append({"rank": idx, "attempt": row})

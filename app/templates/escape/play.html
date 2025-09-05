@@ -301,6 +301,69 @@
             cursor: pointer;
             color: #b6c4ff
         }
+
+        .choice {
+            display: inline-block;
+            margin: 4px 6px 0 0;
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: #14234a;
+            border: 1px solid #2a3c73;
+            cursor: pointer;
+            user-select: none
+        }
+
+        .choice.selected {
+            outline: 2px solid var(--brand)
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px
+        }
+
+        .chip {
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #132147;
+            border: 1px solid #2a3c73;
+            cursor: pointer
+        }
+
+        .chip:hover {
+            filter: brightness(1.06)
+        }
+
+        .grid {
+            display: inline-grid;
+            gap: 6px;
+            margin-top: 6px
+        }
+
+        .grid .cell {
+            min-width: 36px;
+            min-height: 36px;
+            padding: 6px 8px;
+            text-align: center;
+            border-radius: 8px;
+            background: #0e1832;
+            border: 1px solid #243463;
+            cursor: pointer;
+            user-select: none;
+            font-variant-numeric: tabular-nums
+        }
+
+        .grid .cell.on {
+            outline: 2px solid var(--brand)
+        }
+
+        .helper {
+            font-size: 12px;
+            color: #9aa3c7;
+            margin-top: 6px
+        }
     </style>
 </head>
 
@@ -415,7 +478,7 @@
     <div id="toast" class="toast">Saved</div>
 
     <script>
-        // ------- Glossary (shown under hints) -------
+        // ------- Glossary (legacy types) -------
         const GLOSSARY = {
             acrostic: {
                 label: "What’s an acrostic?",
@@ -428,6 +491,10 @@
             pathcode: {
                 label: "What’s a path code?",
                 text: "Follow the given moves (R/D) on the grid from top-left, collecting letters."
+            },
+            mini: {
+                label: "What’s a mini-game?",
+                text: "A short, scene-themed challenge. Controls change daily: buttons, chips, grid, or text."
             }
         };
         const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
@@ -443,8 +510,11 @@
             chosenRoutes: [null, null, null], // "cautious" | "brisk" | "risky"
             hintsUsedScene: [0, 0, 0],
             submissionsScene: [0, 0, 0],
-            fragments: ["", "", ""],          // ← NEW: store fragments per scene
-            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 }
+            fragments: ["", "", ""],
+            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
+
+            // per-scene temp answers for mini mechanics
+            miniAnswer: ["", "", ""]
         };
 
         const $ = id => document.getElementById(id);
@@ -497,28 +567,38 @@
                 wrap.className = "scene panel" + (idx === 0 ? " active" : "");
                 wrap.id = `scene-${idx}`;
                 wrap.innerHTML = `
-          <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
-          <div style="color:#c8d4ff">${rm.text || ""}</div>
-          <div class="route-btns" id="routebtns-${idx}" style="margin-top:8px;"></div>
-          <div class="p-card" id="pzwrap-${idx}" style="display:none;">
-            <div id="pzp-${idx}" style="white-space:pre-wrap;"></div>
-            <div class="row" style="margin-top:6px;">
-              <input id="pzin-${idx}" type="text" placeholder="Type your answer…" />
-              <button id="pzbtn-${idx}">Submit</button>
+            <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
+            <div style="color:#c8d4ff">${rm.text || ""}</div>
+            <div class="route-btns" id="routebtns-${idx}" style="margin-top:8px;"></div>
+    
+            <div class="p-card" id="pzwrap-${idx}" style="display:none;">
+              <div id="pzp-${idx}" style="white-space:pre-wrap;"></div>
+    
+              <!-- Dynamic UI surface -->
+              <div id="pzui-${idx}" style="margin-top:6px;"></div>
+    
+              <!-- Text input row (used for text_input and as fallback/manual entry) -->
+              <div class="row" id="pzinrow-${idx}" style="margin-top:6px; display:none;">
+                <input id="pzin-${idx}" type="text" placeholder="Type your answer…" autocomplete="off" />
+                <button id="pzbtn-${idx}">Submit</button>
+              </div>
+    
+              <div id="pzstatus-${idx}" class="status">Awaiting answer…</div>
+    
+              <div class="hint-row">
+                <button class="hint-pill" id="h1btn-${idx}">Hint 1 in …</button>
+                <button class="hint-pill" id="h2btn-${idx}">Hint 2 in …</button>
+              </div>
+              <div class="hint-text" id="h1txt-${idx}"></div>
+              <div class="hint-text" id="h2txt-${idx}"></div>
+    
+              <div class="gloss" id="gloss-${idx}" style="display:none;"></div>
             </div>
-            <div id="pzstatus-${idx}" class="status">Awaiting answer…</div>
-            <div class="hint-row">
-              <button class="hint-pill" id="h1btn-${idx}">Hint 1 in …</button>
-              <button class="hint-pill" id="h2btn-${idx}">Hint 2 in …</button>
+    
+            <div class="row" style="margin-top:8px;">
+              <button class="btn" id="next-${idx}" style="display:none;">Next scene →</button>
             </div>
-            <div class="hint-text" id="h1txt-${idx}"></div>
-            <div class="hint-text" id="h2txt-${idx}"></div>
-            <div class="gloss" id="gloss-${idx}" style="display:none;"></div>
-          </div>
-          <div class="row" style="margin-top:8px;">
-            <button class="btn" id="next-${idx}" style="display:none;">Next scene →</button>
-          </div>
-        `;
+          `;
                 holder.appendChild(wrap);
 
                 // Build route buttons dynamically (expecting 3)
@@ -548,20 +628,191 @@
             }
         }
 
+        // ------- Mini-game renderers -------
+        function renderMultipleChoice(idx, uiSpec, statusEl) {
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const wrap = document.createElement("div");
+            const opts = Array.isArray(uiSpec?.options) ? uiSpec.options : [];
+            if (!opts.length) {
+                wrap.innerHTML = `<div class="helper">No options provided — type your choice below.</div>`;
+                $(`pzinrow-${idx}`).style.display = "flex";
+                ui.appendChild(wrap);
+                return;
+            }
+            opts.forEach(opt => {
+                const btn = document.createElement("div");
+                btn.className = "choice";
+                btn.textContent = String(opt);
+                btn.addEventListener("click", () => {
+                    // toggle selection (single-select)
+                    wrap.querySelectorAll(".choice").forEach(x => x.classList.remove("selected"));
+                    btn.classList.add("selected");
+                    state.miniAnswer[idx] = String(opt);
+                    statusEl.textContent = `Selected: ${opt}`;
+                    statusEl.className = "status";
+                });
+                wrap.appendChild(btn);
+            });
+            ui.appendChild(wrap);
+            // show submit row as well, pre-fill on submit
+            $(`pzinrow-${idx}`).style.display = "flex";
+        }
 
+        const DEFAULT_TOKENS = ["tap", "hold", "left", "right", "up", "down", "rotate_left", "rotate_right", "press", "wait"];
+        function renderSequenceInput(idx, uiSpec, statusEl) {
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const chosen = [];
+            const tokens = Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length
+                ? uiSpec.tokens
+                : DEFAULT_TOKENS;
+
+            const box = document.createElement("div");
+            box.className = "chips";
+            tokens.forEach(tok => {
+                const chip = document.createElement("div");
+                chip.className = "chip";
+                chip.textContent = tok;
+                chip.addEventListener("click", () => {
+                    chosen.push(tok);
+                    state.miniAnswer[idx] = chosen.join(",");
+                    statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
+                    statusEl.className = "status";
+                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                });
+                box.appendChild(chip);
+            });
+            ui.appendChild(box);
+
+            const controls = document.createElement("div");
+            controls.className = "row";
+            controls.style.marginTop = "6px";
+            const undo = document.createElement("button");
+            undo.textContent = "Undo";
+            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`; };
+            const clear = document.createElement("button");
+            clear.textContent = "Clear";
+            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
+            controls.appendChild(undo); controls.appendChild(clear);
+            ui.appendChild(controls);
+
+            // free-type is allowed too
+            $(`pzinrow-${idx}`).style.display = "flex";
+            $(`pzin-${idx}`).placeholder = "e.g., tap,hold,left,right";
+        }
+
+        function renderGridInput(idx, uiSpec, statusEl) {
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const grid = Array.isArray(uiSpec?.grid) ? uiSpec.grid : [];
+            if (!grid.length) {
+                ui.innerHTML = `<div class="helper">Grid missing — type the answer below.</div>`;
+                $(`pzinrow-${idx}`).style.display = "flex"; return;
+            }
+
+            const nCols = Math.max(...grid.map(r => r.length));
+            const g = document.createElement("div");
+            g.className = "grid";
+            g.style.gridTemplateColumns = `repeat(${nCols}, minmax(36px, auto))`;
+
+            const path = [];
+            grid.forEach((row, r) => row.forEach((val, c) => {
+                const cell = document.createElement("div");
+                cell.className = "cell";
+                cell.textContent = String(val);
+                cell.addEventListener("click", () => {
+                    cell.classList.toggle("on");
+                    if (cell.classList.contains("on")) {
+                        path.push(String(val));
+                    } else {
+                        // remove the last occurrence of this value (simple heuristic)
+                        const i = path.lastIndexOf(String(val));
+                        if (i >= 0) path.splice(i, 1);
+                    }
+                    state.miniAnswer[idx] = path.join("");
+                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                    statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
+                });
+                g.appendChild(cell);
+            }));
+            ui.appendChild(g);
+
+            const controls = document.createElement("div");
+            controls.className = "row";
+            controls.style.marginTop = "6px";
+            const undo = document.createElement("button");
+            undo.textContent = "Undo";
+            undo.onclick = () => {
+                // un-toggle the last selected label if visible
+                const last = path.pop();
+                if (last !== undefined) {
+                    // try to un-highlight a matching visible cell (best-effort)
+                    const cells = g.querySelectorAll(".cell.on");
+                    for (let i = cells.length - 1; i >= 0; i--) {
+                        if (cells[i].textContent === last) { cells[i].classList.remove("on"); break; }
+                    }
+                }
+                state.miniAnswer[idx] = path.join("");
+                $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
+            };
+            const clear = document.createElement("button");
+            clear.textContent = "Clear";
+            clear.onclick = () => {
+                g.querySelectorAll(".cell.on").forEach(c => c.classList.remove("on"));
+                path.splice(0, path.length);
+                state.miniAnswer[idx] = "";
+                $(`pzin-${idx}`).value = "";
+                statusEl.textContent = "Path cleared.";
+            };
+            controls.appendChild(undo); controls.appendChild(clear);
+            ui.appendChild(controls);
+
+            // allow manual edit too
+            $(`pzinrow-${idx}`).style.display = "flex";
+            $(`pzin-${idx}`).placeholder = "Your collected letters…";
+        }
+
+        // ------- Puzzle mount / hints / submit -------
         function showPuzzle(idx, rm, routeId) {
             const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
             const p = route.puzzle || {};
             const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
             $(`pzp-${idx}`).textContent = p.prompt || "Puzzle";
-            const input = $(`pzin-${idx}`); const btn = $(`pzbtn-${idx}`); const status = $(`pzstatus-${idx}`);
+
+            const inputRow = $(`pzinrow-${idx}`);
+            const input = $(`pzin-${idx}`);
+            const btn = $(`pzbtn-${idx}`);
+            const status = $(`pzstatus-${idx}`);
             const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
             const glossBox = $(`gloss-${idx}`);
 
-            // Glossary by puzzle type
+            // Glossary
             const typ = (p.type || p.archetype || "").toLowerCase();
-            const G = GLOSSARY[typ];
+            const G = GLOSSARY[typ] || GLOSSARY["mini"];
             if (G) { glossBox.style.display = "block"; glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`; }
+
+            // Clear previous UI + temp answers
+            state.miniAnswer[idx] = "";
+            input.value = "";
+            inputRow.style.display = "none";
+            $(`pzui-${idx}`).innerHTML = "";
+
+            // Mount per mechanic
+            const mech = (p.mechanic || "").toLowerCase();
+            if (typ === "mini") {
+                if (mech === "multiple_choice") {
+                    renderMultipleChoice(idx, p.ui_spec || {}, status);
+                } else if (mech === "sequence_input") {
+                    renderSequenceInput(idx, p.ui_spec || {}, status);
+                } else if (mech === "grid_input") {
+                    renderGridInput(idx, p.ui_spec || {}, status);
+                } else {
+                    // text_input or unknown → plain input
+                    inputRow.style.display = "flex";
+                }
+            } else {
+                // legacy types → plain input
+                inputRow.style.display = "flex";
+            }
 
             // Hint timers based on global start (+30s brisk, +60s risky)
             const extraDelay = routeId === "brisk" ? 30000 : routeId === "risky" ? 60000 : 0;
@@ -582,9 +833,15 @@
             h1btn.onclick = () => { if (h1btn.disabled) return; if (!h1Shown) { state.hintsUsedScene[idx] += 1; h1Shown = true; } h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
             h2btn.onclick = () => { if (h2btn.disabled) return; if (!h2Shown) { state.hintsUsedScene[idx] += 1; h2Shown = true; } h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
 
+            // Submit handler — gathers the right answer source for the mechanic
             btn.onclick = async () => {
-                const answer = (input.value || "").trim();
+                let answer = (input.value || "").trim();
+                if (typ === "mini") {
+                    // prefer constructed answer if available
+                    if (state.miniAnswer[idx]) answer = state.miniAnswer[idx];
+                }
                 if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
+
                 status.textContent = "Checking…"; status.className = "status";
                 state.submissionsScene[idx] += 1;
                 try {
@@ -597,13 +854,15 @@
                         const frag = (data.fragment || "").toString();
                         if (frag) {
                             state.fragments[idx] = frag;
-                            updateFragmentDisplay();                   // ← refresh the strip
+                            updateFragmentDisplay();
                             status.innerHTML = `Correct! Fragment secured: <b>${frag}</b>`;
                         } else {
                             status.textContent = "Correct! Fragment secured.";
                         }
                         status.className = "status ok";
                         input.disabled = true; btn.disabled = true;
+                        // disable mini ui
+                        const ui = $(`pzui-${idx}`); if (ui) ui.querySelectorAll("button,.choice,.chip,.cell").forEach(el => el.classList.add("disabled"));
                         clearInterval(iv);
                         state.solvedScenes[idx] = true;
 
@@ -618,7 +877,9 @@
                     status.textContent = "Network error — try again."; status.className = "status err";
                 }
             };
-            input.addEventListener("keydown", e => { if (e.key === "Enter") btn.click(); });
+
+            // Enter submits for text fields
+            input.addEventListener("keydown", e => { if (e.key === "Enter" && !btn.disabled) btn.click(); });
         }
 
         function goToScene(idx) {
@@ -651,7 +912,6 @@
                             hints_used_scene: state.hintsUsedScene,
                             submissions_scene: state.submissionsScene
                         }
-
                     })
                 });
                 const data = await res.json();
@@ -684,6 +944,7 @@
             }
         });
     </script>
+
 </body>
 
 </html>
