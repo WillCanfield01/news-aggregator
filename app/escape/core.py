@@ -301,16 +301,23 @@ def gen_acrostic(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
         paraphrases=[f"Acrostic poem hints a word about {theme or 'this place'}."]
     )
 
+# 5x5 Polybius/Tap code (I/J share a cell). We emit row-col pairs (1..5).
+_POLY = "ABCDEFGHIKLMNOPQRSTUVWXYZ"  # J merged into I
+
+def _tap_pairs_for_word(w: str) -> List[str]:
+    out = []
+    for ch in w.upper().replace("J", "I"):
+        i = _POLY.index(ch)
+        r = i // 5 + 1
+        c = i % 5 + 1
+        out.append(f"{r}-{c}")
+    return out
+
 def gen_tapcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     bl = {str(s).lower() for s in (blacklist or set())}
-
-    # themed try, normalized, with J→I merge for Polybius
     w = re.sub(r"[^A-Za-z]", "", _scene_word_from_title(rng, theme)).lower().replace("j", "i")
-
-    # reject if too short or blacklisted
     if len(w) < 4 or w in bl:
         w = _random_word(rng, bl).lower().replace("j", "i")
-
     taps = ", ".join(_tap_pairs_for_word(w.upper()))
     return Puzzle(
         id=pid, archetype="tapcode",
