@@ -4,7 +4,7 @@
 Trailroom core: daily 3 rooms -> 1 final lock.
 
 - OpenAI generates atmosphere + puzzles (strict JSON; sanitized).
-- Two routes per room; BOTH yield the same fragment (server-enforced).
+- Three routes per room; BOTH yield the same fragment (server-enforced).
 - Server verifies all answers; client never receives solutions.
 - Flat `puzzles` list kept for backward-compat with existing routes.
 """
@@ -409,6 +409,7 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
             p["id"] = p.get("id") or pid
             typ = (p.get("type") or p.get("archetype") or "").lower()
 
+            # AFTER
             if typ == "mini":
                 # ensure mechanic + ui_spec exist
                 mech = (p.get("mechanic") or "").lower()
@@ -423,6 +424,7 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 af = p.get("answer_format") or {}
                 af["pattern"] = af.get("pattern") or _default_pattern_for_answer(sol)
                 p["answer_format"] = af
+                _upgrade_minigame_hints(p)          # ← add
                 rt["puzzle"] = p
                 continue
 
@@ -570,6 +572,7 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
         p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
         if not p:
             p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}", theme=theme)
+        _upgrade_minigame_hints(p)
         if "id" not in p:
             p["id"] = f"r{r_index}_autopz_{len(cleaned)+1}"
         if "type" not in p and "archetype" in p:
@@ -580,8 +583,10 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
                     p.get("type"), (p.get("solution") or {}).get("answer", "")
                 )
             }
+        # AFTER
         if "solution" not in p or (p.get("solution") or {}).get("answer") in (None, ""):
             p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}", theme=theme)
+        _upgrade_minigame_hints(p)  # ← add
 
         cleaned.append({
             "id": (rt.get("id") or "").lower(),
@@ -708,7 +713,12 @@ def _trail_prompt(date_key: str) -> str:
         "• Each scene has EXACTLY three routes with ids: cautious, brisk, risky.\n"
         "• For every route, produce a **mini-game**: {type:'mini', mechanic, ui_spec, prompt, answer_format, solution.answer, hints}.\n"
         "• `prompt` must reference concrete props of THAT scene so it feels bespoke.\n"
-        "• Keep prompts tight (≈40–80 words). 1–2 short hints per puzzle (no spoilers).\n"
+        "• Keep prompts tight (≈40–80 words).\n"
+        "• Provide EXACTLY 2 hints per puzzle:\n"
+        "  - Hint 1 = mechanic nudge (how to interact / what to notice).\n"
+        "  - Hint 2 = concrete anchor (length, mapping example, grid size). No spoilers.\n"
+        "• sequence_input: ui_spec = {\"sequence\": [str, ...]} (tokens like 'tap','hold','left','right','rotate_left').\n"
+        "  Hints SHOULD include the exact step count and one mapping example when appropriate.\n"
         "• The three routes in the SAME scene must share **one fragment_rule** that extracts the same fragment from each answer.\n"
         "  Prefer FIRST2/LAST2; FIRST3/LAST3/IDX:i,j are allowed if thematic.\n"
         "• Final code = concatenation of the three scene fragments. Final answer must be a 4–12 char alphanumeric string.\n"
@@ -719,7 +729,6 @@ def _trail_prompt(date_key: str) -> str:
         "\n"
         "MECHANIC RULES (ui_spec):\n"
         "• multiple_choice: ui_spec = {\"options\": [str, ...]} and solution.answer must equal one of the options.\n"
-        "• sequence_input: ui_spec = {\"sequence\": [str, ...]} where tokens are simple verbs/nouns like 'tap', 'hold', 'left', 'right', 'rotate_left'.\n"
         "• grid_input: ui_spec = {\"grid\": [[str,...],...]} 2..6 rows; each cell is a 1–2 char label. Optional: start, goal, notes.\n"
         "• text_input: ui_spec = {} (freeform short token answer).\n"
         "\n"
@@ -953,7 +962,12 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
     if mech not in ALLOWED_MECHANICS:
         raise ValueError(f"Mini-game mechanic not allowed: {mech}")
 
+# AFTER
     ans = (p.get("solution") or {}).get("answer")
+    # If LLM emitted a list for sequence_input, join it.
+    if (p.get("mechanic") == "sequence_input") and isinstance(ans, list):
+        ans = ",".join(str(t).strip() for t in ans if str(t).strip())
+        p.setdefault("solution", {})["answer"] = ans
     if not ans or not normalize_answer(ans):
         raise ValueError("Mini-game has empty solution")
 
@@ -1246,6 +1260,51 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
 
 # ───────────────────────── Primary generation ─────────────────────────
 
+# core.py
+
+def _upgrade_minigame_hints(p: Dict[str, Any]) -> None:
+    if (p.get("type") != "mini"):  # only for mini-games
+        return
+    hints = [h for h in (p.get("hints") or []) if isinstance(h, str) and h.strip()]
+    mech  = (p.get("mechanic") or "").strip()
+    ui    = p.get("ui_spec") or {}
+    ans   = str((p.get("solution") or {}).get("answer", ""))
+
+    # Mechanic-specific add-ons
+    extra: List[str] = []
+    if mech == "sequence_input":
+        # Length
+        steps = [t for t in re.split(r"[,\s]+", ans) if t]
+        if steps:
+            extra.append(f"Sequence length: {len(steps)}.")
+        # Generic anchor
+        extra.append("Use only the chips above; order matters.")
+        # Light mapping helpers if words appear in prompt
+        prompt = (p.get("prompt") or "").lower()
+        if "bow" in prompt:         extra.append("Mapping tip: bow = down.")
+        if "left" in prompt:        extra.append("Mapping tip: step left = left.")
+        if "right" in prompt:       extra.append("Mapping tip: step right = right.")
+        if "don mask" in prompt or "put on" in prompt:
+            extra.append("Mapping tip: put on = rotate_right.")
+        if "remove mask" in prompt or "take off" in prompt:
+            extra.append("Mapping tip: take off = rotate_left.")
+    elif mech == "multiple_choice":
+        extra.append("Eliminate options that contradict the described props.")
+        extra.append("Look for the one that fits all details, not most.")
+    elif mech == "grid_input":
+        grid = ui.get("grid")
+        if isinstance(grid, list) and grid and isinstance(grid[0], list):
+            extra.append(f"Grid size: {len(grid)}×{len(grid[0])}. Start at top-left unless noted.")
+        extra.append("Trace as described; don’t skip or reorder steps.")
+    elif mech == "text_input":
+        if ans and ans.isalpha():
+            extra.append(f"{len(ans)} letters.")
+        else:
+            extra.append("Short single token (letters or digits).")
+
+    # Keep the first two good hints
+    p["hints"] = (hints + [h for h in extra if h not in hints])[:2]
+
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     salt = os.getenv("ESCAPE_REGEN_SALT", "")
     rng = rng_from_seed(daily_seed(date_key, server_secret + salt))
@@ -1295,12 +1354,28 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     _sanitize_trail_puzzles(blob, rng, blacklist)
 
     # Validate & standardize; if broken, fallback offline
+# AFTER
     try:
         room = validate_trailroom(blob)
-        room["source"] = "llm"                 # ← add
+        room["source"] = "llm"
+
+        # Debug: show per-room fragments and final
+        try:
+            frags = []
+            for rm in room.get("trail", {}).get("rooms", []):
+                rule = rm.get("fragment_rule")
+                p0 = (rm.get("routes", [{}])[0].get("puzzle") or {})
+                ans0 = (p0.get("solution") or {}).get("answer", "")
+                frags.append(apply_fragment_rule(ans0, rule))
+            current_app.logger.info("[escape] fragments=%s final=%s",
+                                    "-".join(frags),
+                                    (room.get("final", {}).get("solution", {}) or {}).get("answer"))
+        except Exception:
+            pass
 
     except Exception as e:
         try: current_app.logger.error(f"[escape] validate_trailroom failed: {e}")
+
         except Exception: pass
         room = generate_room_offline(date_key, server_secret)
 

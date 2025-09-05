@@ -364,6 +364,13 @@
             color: #9aa3c7;
             margin-top: 6px
         }
+
+        /* NEW: make disabled UI really inert */
+        .disabled {
+            opacity: .6;
+            pointer-events: none;
+            filter: saturate(.7);
+        }
     </style>
 </head>
 
@@ -500,6 +507,7 @@
         const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
 
         // ------- State -------
+        // AFTER
         const state = {
             dateKey: "{{ date_key }}",
             startedMs: null,
@@ -514,7 +522,10 @@
             hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
 
             // per-scene temp answers for mini mechanics
-            miniAnswer: ["", "", ""]
+            miniAnswer: ["", "", ""],
+
+            // NEW: per-scene mount timestamps (for hint gating)
+            puzzleMountedAt: [0, 0, 0]
         };
 
         const $ = id => document.getElementById(id);
@@ -602,17 +613,22 @@
                 holder.appendChild(wrap);
 
                 // Build route buttons dynamically (expecting 3)
+                // AFTER
                 const btnHolder = document.getElementById(`routebtns-${idx}`);
                 const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
                 (rm.routes || []).forEach(r => {
                     const b = document.createElement("button");
                     b.setAttribute("data-route", r.id);
                     b.textContent = `${r.label || r.id} (${mult[r.id] || "1×"})`;
+                    // Single-fire handler + nicer UX
                     b.addEventListener("click", () => {
                         state.chosenRoutes[idx] = r.id;
                         showPuzzle(idx, rm, r.id);
-                        btnHolder.querySelectorAll("button").forEach(x => x.disabled = true);
-                    });
+                        // disable all route buttons visibly
+                        btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
+                        // scroll puzzle into view
+                        document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }, { once: true });
                     btnHolder.appendChild(b);
                 });
             });
@@ -662,9 +678,11 @@
         function renderSequenceInput(idx, uiSpec, statusEl) {
             const ui = $(`pzui-${idx}`); ui.innerHTML = "";
             const chosen = [];
-            const tokens = Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length
-                ? uiSpec.tokens
-                : DEFAULT_TOKENS;
+            // NEW: prefer ui_spec.sequence (LLM), fall back to .tokens, then defaults
+            const tokens =
+                (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
+                    (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
+                        DEFAULT_TOKENS;
 
             const box = document.createElement("div");
             box.className = "chips";
@@ -814,11 +832,12 @@
                 inputRow.style.display = "flex";
             }
 
-            // Hint timers based on global start (+30s brisk, +60s risky)
+            // Hint timers based on when THIS puzzle mounted (+30s brisk, +60s risky)
+            state.puzzleMountedAt[idx] = Date.now();
             const extraDelay = routeId === "brisk" ? 30000 : routeId === "risky" ? 60000 : 0;
             function updateHints() {
-                if (!state.startedMs) return;
-                const elapsed = Date.now() - state.startedMs;
+                const mounted = state.puzzleMountedAt[idx] || Date.now();
+                const elapsed = Date.now() - mounted;
                 const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000 + extraDelay;
                 const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000 + extraDelay;
                 h1btn.disabled = elapsed < d1;
@@ -827,6 +846,7 @@
                 h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
             }
             updateHints(); const iv = setInterval(updateHints, 250);
+
 
             // Count hints once each
             let h1Shown = false, h2Shown = false;
@@ -862,7 +882,12 @@
                         status.className = "status ok";
                         input.disabled = true; btn.disabled = true;
                         // disable mini ui
-                        const ui = $(`pzui-${idx}`); if (ui) ui.querySelectorAll("button,.choice,.chip,.cell").forEach(el => el.classList.add("disabled"));
+                        // AFTER
+                        const ui = $(`pzui-${idx}`);
+                        if (ui) ui.querySelectorAll("button,.choice,.chip,.cell").forEach(el => {
+                            el.classList.add("disabled");
+                            if (el.tagName === "BUTTON") el.disabled = true;
+                        });
                         clearInterval(iv);
                         state.solvedScenes[idx] = true;
 
