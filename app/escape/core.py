@@ -769,7 +769,7 @@ def _extract_json_block(text: str) -> Optional[str]:
 def llm_generate_trailroom(date_key: str) -> Optional[Dict[str, Any]]:
     client, mode = _get_openai_client()
     if not client:
-        current_app.logger.warning("[escape] no OpenAI client; using offline")
+        current_app.logger.warning("[escape] LLM: no client (missing API key or FORCE_OFFLINE).")
         return None
 
     sys = "You are a careful game designer. Return ONE JSON object only. Follow the schema exactly. No prose."
@@ -778,163 +778,142 @@ def llm_generate_trailroom(date_key: str) -> Optional[Dict[str, Any]]:
     temp  = float(os.getenv("ESCAPE_TEMP", "0.9"))
     top_p = float(os.getenv("ESCAPE_TOP_P", "0.95"))
 
-    # Helper to parse text into JSON
     def _parse(text: str) -> Optional[Dict[str, Any]]:
         jb = _extract_json_block(text) or text
         try:
             return json.loads(jb) if jb else None
         except Exception:
-            current_app.logger.warning("[escape] JSON parse failed; raw head: %r", (text or "")[:160])
+            current_app.logger.warning("[escape] LLM: JSON parse failed. head=%r", (text or "")[:200])
             return None
 
     try:
         if mode == "modern":
-            # ── Try Responses API (SDKs differ; keep args minimal)
+            # --- Try Responses API (messages form)
             try:
                 resp = client.responses.create(
                     model=model,
-                    input=[{"role": "system", "content": sys},
-                           {"role": "user",   "content": user}],
-                    temperature=temp,
-                    top_p=top_p,
+                    messages=[{"role":"system","content":sys}, {"role":"user","content":user}],
+                    temperature=temp, top_p=top_p,
                 )
-                # Robust text extraction across SDK versions
                 text = getattr(resp, "output_text", None)
                 if not text:
-                    # Fallback path if output_text is missing
-                    try:
-                        # new-ish: resp.output[0].content[0].text
-                        text = resp.output[0].content[0].text
-                    except Exception:
-                        text = ""
+                    try: text = resp.output[0].content[0].text
+                    except Exception: text = ""
                 jr = _parse(text)
                 if jr:
+                    current_app.logger.info("[escape] LLM: responses(messages) -> OK")
                     return jr
             except TypeError as te:
-                # Older SDK may require string input; retry simply
-                current_app.logger.info("[escape] Responses.create signature mismatch; retrying with string input: %s", te)
-                try:
-                    resp = client.responses.create(
-                        model=model,
-                        input=sys + "\n\n" + user,
-                        temperature=temp,
-                        top_p=top_p,
-                    )
-                    text = getattr(resp, "output_text", "") or ""
-                    jr = _parse(text)
-                    if jr:
-                        return jr
-                except Exception:
-                    pass
+                current_app.logger.info("[escape] LLM: responses(messages) signature mismatch: %s", te)
             except Exception as e:
-                current_app.logger.exception("[escape] Responses.create failed: %s", e)
+                current_app.logger.exception("[escape] LLM: responses(messages) failed: %s", e)
 
-            # ── Fallback: Chat Completions (modern)
+            # --- Try Responses API (single string input)
+            try:
+                resp = client.responses.create(
+                    model=model,
+                    input=sys + "\n\n" + user,
+                    temperature=temp, top_p=top_p,
+                )
+                text = getattr(resp, "output_text", "") or ""
+                jr = _parse(text)
+                if jr:
+                    current_app.logger.info("[escape] LLM: responses(input=str) -> OK")
+                    return jr
+            except Exception as e:
+                current_app.logger.exception("[escape] LLM: responses(input=str) failed: %s", e)
+
+            # --- Try Chat Completions (no response_format!)
             try:
                 cc = client.chat.completions.create(
                     model=model,
                     messages=[{"role": "system", "content": sys},
                               {"role": "user",   "content": user}],
-                    temperature=temp,
-                    top_p=top_p,
+                    temperature=temp, top_p=top_p,
                 )
                 text = (cc.choices[0].message.content or "").strip()
                 jr = _parse(text)
                 if jr:
+                    current_app.logger.info("[escape] LLM: chat.completions -> OK")
                     return jr
             except Exception as e:
-                current_app.logger.exception("[escape] chat.completions.create failed: %s", e)
+                current_app.logger.exception("[escape] LLM: chat.completions failed: %s", e)
 
         else:
-            # Legacy openai.ChatCompletion path
+            # legacy
             text = client.ChatCompletion.create(  # type: ignore
                 model=model,
                 messages=[{"role": "system", "content": sys},
                           {"role": "user",   "content": user}],
                 temperature=temp,
             )["choices"][0]["message"]["content"]
-            return _parse(text)
+            jr = _parse(text)
+            if jr:
+                current_app.logger.info("[escape] LLM: legacy ChatCompletion -> OK")
+            return jr
 
     except Exception as e:
-        current_app.logger.exception("[escape] llm_generate_trailroom failed: %s", e)
+        current_app.logger.exception("[escape] llm_generate_trailroom outer failed: %s", e)
 
+    current_app.logger.warning("[escape] LLM: no usable result; falling back to offline.")
     return None
 
 # ───────────────────────── Critic (safe patch) ─────────────────────────
 
 def llm_critic_patch(room_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Optional critic that can only tweak flavor text (title/intro/npc_lines, final.prompt).
-    Never touches puzzles, trail structure, or final answer.
-    """
     client, mode = _get_openai_client()
     if not client:
         return room_json
 
     content = (
-        "You are a flavor-only editor. Improve novelty and tone of 'title', 'intro', "
-        "'npc_lines' (if present), and 'final.prompt'. Return a JSON Patch array with "
-        "operations touching only those paths. If no changes needed, return [].\n\n"
+        "You are a flavor-only editor. Improve novelty/tone of 'title', 'intro', "
+        "'npc_lines' (if present), and 'final.prompt'. Return ONLY a JSON array of "
+        "RFC6902 JSON-Patch ops. If no changes, return [].\n\n"
         f"ROOM_JSON:\n{json.dumps(room_json, ensure_ascii=False)}"
     )
 
-    patch_ops: List[Dict[str, Any]] = []
     try:
-        model = os.getenv("ESCAPE_MODEL", "gpt-4o-mini")
+        model = os.getenv("ESCAPE_MODEL", "gpt-5-mini")  # any Responses-capable model
+        text = "[]"
         if mode == "modern":
             try:
-                resp = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": content}],
-                    temperature=0.0,
-                    response_format={"type": "json_object"},
-                )
-                text = resp.choices[0].message.content or "[]"
+                r = client.responses.create(model=model, input=content, temperature=0.0)
+                text = getattr(r, "output_text", "[]") or "[]"
             except Exception:
-                resp = client.responses.create(
-                    model=model, input=[{"role":"user","content":content}], temperature=0.0
+                # last resort: chat without response_format
+                c = client.chat.completions.create(
+                    model=model, messages=[{"role":"user","content":content}], temperature=0.0
                 )
-                text = getattr(resp, "output_text", "[]")
+                text = (c.choices[0].message.content or "[]")
         else:
-            text = client.ChatCompletion.create(  # type: ignore
+            c = client.ChatCompletion.create(  # type: ignore
                 model=model, messages=[{"role":"user","content":content}], temperature=0.0
-            )["choices"][0]["message"]["content"]
+            )
+            text = c["choices"][0]["message"]["content"] or "[]"
+
         jb = _extract_json_block(text) or text
-        parsed = json.loads(jb)
-        if isinstance(parsed, dict) and "patch" in parsed:
-            patch_ops = parsed["patch"]
-        elif isinstance(parsed, list):
-            patch_ops = parsed
-        else:
-            patch_ops = []
-    except Exception:
-        return room_json
+        ops = json.loads(jb)
+        if not isinstance(ops, list):
+            return room_json
 
-    def _allowed(parts: List[str]) -> bool:
-        if not parts: return False
-        # disallow structural/puzzle changes
-        if parts[0] in {"trail","puzzles","final_code"}: return False
-        # allow title/intro/npc_lines and final.prompt
-        if parts[0] in {"title","intro","npc_lines"}: return True
-        if parts[0]=="final" and (len(parts)>1 and parts[1]=="prompt"): return True
-        return False
+        # Apply very narrow patch
+        def _allowed(parts):
+            if not parts: return False
+            if parts[0] in {"title","intro","npc_lines"}: return True
+            return parts[0]=="final" and len(parts)>1 and parts[1]=="prompt"
 
-    try:
-        blob = json.loads(json.dumps(room_json))  # deep copy
-        for op in patch_ops:
+        blob = json.loads(json.dumps(room_json))
+        for op in ops:
             path = op.get("path","")
             parts = [p for p in path.split("/") if p]
             if not _allowed(parts): continue
-            if op.get("op") in ("replace","add"):
+            if op.get("op") in {"replace","add"}:
                 cur = blob
                 for i,p in enumerate(parts):
-                    is_last = i == len(parts)-1
-                    if is_last:
+                    if i == len(parts)-1:
                         cur[p] = op.get("value")
                     else:
-                        if p not in cur or not isinstance(cur[p], dict):
-                            cur[p] = {}
-                        cur = cur[p]
+                        cur = cur.setdefault(p, {})
         return blob
     except Exception:
         return room_json
@@ -1276,6 +1255,7 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     rng = rng_from_seed(daily_seed(date_key, server_secret))
     blob = llm_generate_trailroom(date_key)
     if not isinstance(blob, dict):
+        current_app.logger.warning("[escape] compose: LLM returned no blob; using offline for %s (model=%s)", date_key, os.getenv("ESCAPE_MODEL"))
         return generate_room_offline(date_key, server_secret)
 
     if "trail" not in blob and "rooms" in blob:
