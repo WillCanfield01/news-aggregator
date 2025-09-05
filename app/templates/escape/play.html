@@ -420,241 +420,245 @@
                 <div class="rule">
                     <div style="font-weight:700;margin-bottom:4px;">How it works</div>
                     <div class="muted">Solve 3 scenes to collect fragments, then combine them — in order — to unlock the
-                        final code.</div>
+                        final code.
+                    </div>
                 </div>
+
                 <div class="rule">
-                    <div class="rule">
-                        <div style="font-weight:700;margin-bottom:4px;">Routes</div>
-                        <div class="muted" id="ovRoutesText">
-                            Routes are scene themed. Today’s examples will load here…
-                        </div>
-                    </div>
-
-                    <div class="rule">
-                        <div style="font-weight:700;margin-bottom:4px;">Hints & timing</div>
-                        <div class="muted">
-                            Hints unlock after a short delay. Choosing faster routes delays hints a bit more
-                            (<b>+30s</b> for quick, <b>+60s</b> for risky). Finishing a scene on your first try without
-                            hints can earn a
-                            time bonus on brisk/risky routes.
-                        </div>
-                    </div>
-
-                    <div class="rule">
-                        <div style="font-weight:700;margin-bottom:4px;">Tips</div>
-                        <div class="muted">Notes save locally per day. Press <b>Cmd/Ctrl+Enter</b> to submit an answer
-                            quickly.</div>
+                    <div style="font-weight:700;margin-bottom:4px;">Routes</div>
+                    <div class="muted" id="ovRoutesText">
+                        Each scene offers three scene-themed routes (1× / 2× / 3×). Faster routes delay hints (+30s /
+                        +60s) and may
+                        reward a clean first try.
                     </div>
                 </div>
 
-                <div class="row" style="justify-content:center;margin-top:12px;">
-                    <button id="startBtn" style="background:#1b7bc0;border-color:#2f8bd5">Start Today’s Escape</button>
-                    <a class="badge" href="/escape/leaderboard?date={{ date_key }}" target="_blank" rel="noopener">View
-                        Leaderboard</a>
+                <div class="rule">
+                    <div style="font-weight:700;margin-bottom:4px;">Hints & timing</div>
+                    <div class="muted">
+                        Hints unlock after a short delay. Choosing faster routes delays hints a bit more (+30s for
+                        quick, +60s for
+                        risky). Finishing a scene on your first try without hints can earn a time bonus on brisk/risky
+                        routes.
+                    </div>
                 </div>
-                <div class="muted" style="margin-top:6px;">Date: <b id="ovDate">{{ date_key }}</b> • Difficulty: <b
-                        id="ovDiff">{{ difficulty|default('medium')|title }}</b></div>
+
+                <div class="rule">
+                    <div style="font-weight:700;margin-bottom:4px;">Tips</div>
+                    <div class="muted">Notes save locally per day. Press <b>Cmd/Ctrl+Enter</b> to submit an answer
+                        quickly.</div>
+                </div>
             </div>
+            <div class="row" style="justify-content:center;margin-top:12px;">
+                <button id="startBtn" style="background:#1b7bc0;border-color:#2f8bd5">Start Today’s Escape</button>
+                <a class="badge" href="/escape/leaderboard?date={{ date_key }}" target="_blank" rel="noopener">View
+                    Leaderboard</a>
+            </div>
+            <div class="muted" style="margin-top:6px;">Date: <b id="ovDate">{{ date_key }}</b> • Difficulty: <b
+                    id="ovDiff">{{ difficulty|default('medium')|title }}</b></div>
         </div>
+    </div>
 
-        <div class="wrap">
-            <header>
-                <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
-                <span class="badge">Difficulty: <b id="difficulty">{{ difficulty|default('medium')|title }}</b></span>
-                <span class="badge" id="sceneBadge">Scene 1 of 3</span>
-                <div id="timer" class="timer">00:00.000</div>
-            </header>
+    <div class="wrap">
+        <header>
+            <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
+            <span class="badge">Difficulty: <b id="difficulty">{{ difficulty|default('medium')|title }}</b></span>
+            <span class="badge" id="sceneBadge">Scene 1 of 3</span>
+            <div id="timer" class="timer">00:00.000</div>
+        </header>
 
-            <div class="two-col">
-                <main>
-                    <section class="intro panel">
-                        <div id="roomTitle" style="font-weight:800;margin-bottom:6px;">Loading…</div>
-                        <div id="roomIntro" style="color:#c8d4ff">Please wait…</div>
-                    </section>
+        <div class="two-col">
+            <main>
+                <section class="intro panel">
+                    <div id="roomTitle" style="font-weight:800;margin-bottom:6px;">Loading…</div>
+                    <div id="roomIntro" style="color:#c8d4ff">Please wait…</div>
+                </section>
 
-                    <!-- Scenes (sequential reveal) -->
-                    <section id="scenes"></section>
+                <!-- Scenes (sequential reveal) -->
+                <section id="scenes"></section>
 
-                    <section class="footer panel final" id="finalGate">
-                        <div><strong>Final Code</strong> — Combine the three fragments <em>in order</em> (Scene 1 +
-                            Scene 2
-                            + Scene 3).
-                        </div>
+                <section class="footer panel final" id="finalGate">
+                    <div><strong>Final Code</strong> — Combine the three fragments <em>in order</em> (Scene 1 +
+                        Scene 2
+                        + Scene 3).
+                    </div>
 
-                        <!-- NEW: live fragment display -->
-                        <div id="fragBag" class="status" style="margin-top:6px;"></div>
+                    <!-- NEW: live fragment display -->
+                    <div id="fragBag" class="status" style="margin-top:6px;"></div>
 
-                        <div class="row" style="margin-top:6px;">
-                            <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
-                            <button id="finishBtn">Finish & Submit Time</button>
-                        </div>
-                        <div id="finalStatus" class="status"></div>
+                    <div class="row" style="margin-top:6px;">
+                        <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
+                        <button id="finishBtn">Finish & Submit Time</button>
+                    </div>
+                    <div id="finalStatus" class="status"></div>
 
-                        <div id="share"
-                            style="display:none;margin-top:10px;border:1px dashed #2a3769;border-radius:12px;padding:10px;color:#b6c4ff">
-                            <div id="shareText">Share your time!</div>
-                            <div class="row" style="margin-top:8px;">
-                                <button id="copyBtn">Copy Result</button>
-                                <a class="btn" href="/escape/leaderboard?date={{ date_key }}" target="_blank"
-                                    rel="noopener">View Leaderboard</a>
-                            </div>
-                        </div>
-                    </section>
-                </main>
-
-                <!-- Notes panel -->
-                <aside class="notes">
-                    <div class="panel" style="padding:12px;">
-                        <div style="font-weight:700;margin-bottom:6px;">Notes</div>
-                        <textarea id="notesBox" placeholder="Jot down letters, codes, fragments…"></textarea>
+                    <div id="share"
+                        style="display:none;margin-top:10px;border:1px dashed #2a3769;border-radius:12px;padding:10px;color:#b6c4ff">
+                        <div id="shareText">Share your time!</div>
                         <div class="row" style="margin-top:8px;">
-                            <button id="clearNotes">Clear</button>
-                            <span id="saveStamp" class="status" style="margin-left:auto;">Autosaved</span>
+                            <button id="copyBtn">Copy Result</button>
+                            <a class="btn" href="/escape/leaderboard?date={{ date_key }}" target="_blank"
+                                rel="noopener">View Leaderboard</a>
                         </div>
                     </div>
-                </aside>
-            </div>
+                </section>
+            </main>
+
+            <!-- Notes panel -->
+            <aside class="notes">
+                <div class="panel" style="padding:12px;">
+                    <div style="font-weight:700;margin-bottom:6px;">Notes</div>
+                    <textarea id="notesBox" placeholder="Jot down letters, codes, fragments…"></textarea>
+                    <div class="row" style="margin-top:8px;">
+                        <button id="clearNotes">Clear</button>
+                        <span id="saveStamp" class="status" style="margin-left:auto;">Autosaved</span>
+                    </div>
+                </div>
+            </aside>
         </div>
+    </div>
 
-        <div id="toast" class="toast">Saved</div>
+    <div id="toast" class="toast">Saved</div>
 
-        <script>
-            // ------- Glossary (legacy types) -------
-            const GLOSSARY = {
-                acrostic: {
-                    label: "What’s an acrostic?",
-                    text: "Read the FIRST letter of each line vertically to spell a single word."
-                },
-                tapcode: {
-                    label: "What’s tap code?",
-                    text: "Use a 5×5 Polybius square (I/J share a cell). Each pair like 3-2 is row-col."
-                },
-                pathcode: {
-                    label: "What’s a path code?",
-                    text: "Follow the given moves (R/D) on the grid from top-left, collecting letters."
-                },
-                mini: {
-                    label: "What’s a mini-game?",
-                    text: "A short, scene-themed challenge. Controls change daily: buttons, chips, grid, or text."
-                }
-            };
-            const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
-            // --- Thematic labeling fallback (client-side) ---
-            const STOP = new Set(["the", "a", "an", "and", "of", "to", "in", "on", "at", "for", "with", "into", "across", "over", "under", "hall", "room", "scene", "chamber"]);
-            function pickNoun(text = "") {
-                const words = (text || "").toLowerCase().match(/[a-z]{4,}/g) || [];
-                const w = words.find(w => !STOP.has(w)) || "device";
-                return w;
+    <script>
+        // ------- Glossary (legacy types) -------
+        const GLOSSARY = {
+            acrostic: {
+                label: "What’s an acrostic?",
+                text: "Read the FIRST letter of each line vertically to spell a single word."
+            },
+            tapcode: {
+                label: "What’s tap code?",
+                text: "Use a 5×5 Polybius square (I/J share a cell). Each pair like 3-2 is row-col."
+            },
+            pathcode: {
+                label: "What’s a path code?",
+                text: "Follow the given moves (R/D) on the grid from top-left, collecting letters."
+            },
+            mini: {
+                label: "What’s a mini-game?",
+                text: "A short, scene-themed challenge. Controls change daily: buttons, chips, grid, or text."
             }
-            function isGenericLabel(s = "") { return /^(proceed carefully|move quickly|take a risk)$/i.test(s.trim()); }
-            function themedRouteCopy(rm, rid, route) {
-                const noun = pickNoun(`${rm.title || ""} ${rm.text || ""}`);
-                const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
-                const defaults = {
-                    cautious: { label: `Inspect the ${noun}`, sub: "Safer path — hints unlock sooner." },
-                    brisk: { label: `Weave past the ${noun}`, sub: "Faster path — hints unlock +30s; small time bonus if clean." },
-                    risky: { label: `Tamper with the ${noun}`, sub: "Bold path — hints unlock +60s; bigger bonus if first try." }
-                };
-                const fromApi = {
-                    label: (route.label && !isGenericLabel(route.label)) ? route.label : null,
-                    sub: route.sub || null
-                };
-                return {
-                    label: fromApi.label || defaults[rid].label,
-                    sub: fromApi.sub || defaults[rid].sub,
-                    mult: mult[rid] || "1×"
-                };
-            }
-
-            // ------- State -------
-            // AFTER
-            const state = {
-                dateKey: "{{ date_key }}",
-                startedMs: null,
-                tickHandle: null,
-                room: null,
-                currentScene: 0,
-                solvedScenes: [false, false, false],
-                chosenRoutes: [null, null, null],
-                hintsUsedScene: [0, 0, 0],
-                submissionsScene: [0, 0, 0],
-                fragments: ["", "", ""],
-                hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
-                miniAnswer: ["", "", ""],
-                routeLocked: [false, false, false],
-                // 👇 NEW — avoids runtime error in hint timers
-                puzzleMountedAt: [0, 0, 0]
+        };
+        const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
+        // --- Thematic labeling fallback (client-side) ---
+        const STOP = new Set(["the", "a", "an", "and", "of", "to", "in", "on", "at", "for", "with", "into", "across", "over", "under", "hall", "room", "scene", "chamber"]);
+        function pickNoun(text = "") {
+            const words = (text || "").toLowerCase().match(/[a-z]{4,}/g) || [];
+            const w = words.find(w => !STOP.has(w)) || "device";
+            return w;
+        }
+        function isGenericLabel(s = "") { return /^(proceed carefully|move quickly|take a risk)$/i.test(s.trim()); }
+        function themedRouteCopy(rm, rid, route) {
+            const noun = pickNoun(`${rm.title || ""} ${rm.text || ""}`);
+            const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
+            const defaults = {
+                cautious: { label: `Inspect the ${noun}`, sub: "Safer path — hints unlock sooner." },
+                brisk: { label: `Weave past the ${noun}`, sub: "Faster path — hints unlock +30s; small time bonus if clean." },
+                risky: { label: `Tamper with the ${noun}`, sub: "Bold path — hints unlock +60s; bigger bonus if first try." }
             };
-
-            const $ = id => document.getElementById(id);
-            const fmtTime = ms => {
-                const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
-                return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
+            const fromApi = {
+                label: (route.label && !isGenericLabel(route.label)) ? route.label : null,
+                sub: route.sub || null
             };
-            function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1600); }
+            return {
+                label: fromApi.label || defaults[rid].label,
+                sub: fromApi.sub || defaults[rid].sub,
+                mult: mult[rid] || "1×"
+            };
+        }
 
-            // ------- Notes (localStorage per day) -------
-            const NOTES_KEY = d => `trail-notes-${d}`;
-            function loadNotes() { $("notesBox").value = localStorage.getItem(NOTES_KEY(state.dateKey)) || ""; }
-            function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 1000); }
+        // ------- State -------
+        // AFTER
+        const state = {
+            dateKey: "{{ date_key }}",
+            startedMs: null,
+            tickHandle: null,
+            room: null,
+            currentScene: 0,
+            solvedScenes: [false, false, false],
+            chosenRoutes: [null, null, null],
+            hintsUsedScene: [0, 0, 0],
+            submissionsScene: [0, 0, 0],
+            fragments: ["", "", ""],
+            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
+            miniAnswer: ["", "", ""],
+            routeLocked: [false, false, false],
+            // 👇 NEW — avoids runtime error in hint timers
+            puzzleMountedAt: [0, 0, 0]
+        };
 
-            // ------- Prefetch room for intro modal -------
-            window.addEventListener("DOMContentLoaded", async () => { await prefetchRoom(); loadNotes(); });
+        const $ = id => document.getElementById(id);
+        const fmtTime = ms => {
+            const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
+            return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
+        };
+        function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1600); }
 
-            async function prefetchRoom() {
-                try {
-                    const res = await fetch(`/escape/api/today?date=${encodeURIComponent(state.dateKey)}`, { cache: "no-store" });
-                    const room = await res.json();
-                    state.room = room;
-                    state.hintPolicy = room.server_hint_policy || state.hintPolicy;
-                    $("ovTitle").textContent = room.title || "Today’s Puzzle";
-                    $("ovIntro").textContent = room.intro || "";
-                    $("roomTitle").textContent = room.title || "Today’s Puzzle";
-                    $("roomIntro").textContent = room.intro || "";
+        // ------- Notes (localStorage per day) -------
+        const NOTES_KEY = d => `trail-notes-${d}`;
+        function loadNotes() { $("notesBox").value = localStorage.getItem(NOTES_KEY(state.dateKey)) || ""; }
+        function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 1000); }
 
-                    // Safe dynamic routes blurb
-                    const routesEl = document.getElementById("ovRoutesText");
-                    if (routesEl) {
-                        let txt = `Each scene offers three themed routes (1× / 2× / 3×).
+        // ------- Prefetch room for intro modal -------
+        window.addEventListener("DOMContentLoaded", async () => { await prefetchRoom(); loadNotes(); });
+
+        async function prefetchRoom() {
+            try {
+                const res = await fetch(`/escape/api/today?date=${encodeURIComponent(state.dateKey)}`, { cache: "no-store" });
+                const room = await res.json();
+                state.room = room;
+                state.hintPolicy = room.server_hint_policy || state.hintPolicy;
+                $("ovTitle").textContent = room.title || "Today’s Puzzle";
+                $("ovIntro").textContent = room.intro || "";
+                $("roomTitle").textContent = room.title || "Today’s Puzzle";
+                $("roomIntro").textContent = room.intro || "";
+
+                // Safe dynamic routes blurb
+                // in prefetchRoom(), after setting ovTitle/ovIntro
+                const routesEl = document.getElementById("ovRoutesText");
+                if (routesEl) {
+                    let txt = `Each scene offers three scene-themed routes (1× / 2× / 3×).
   Faster routes delay hints (<b>+30s</b> for 2×, <b>+60s</b> for 3×).`;
-                        const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
-                        if (rooms.length) {
-                            const map = Object.fromEntries((rooms[0].routes || []).map(r => [r.id, r]));
-                            const l1 = map.cautious?.label || "Proceed carefully";
-                            const l2 = map.brisk?.label || "Move quickly";
-                            const l3 = map.risky?.label || "Take a risk";
-                            txt = `Each scene offers three <b>scene-themed</b> routes:
+                    const rooms = (state.room?.trail?.rooms) || [];
+                    if (rooms.length) {
+                        const byId = Object.fromEntries((rooms[0].routes || []).map(r => [r.id, r]));
+                        const l1 = byId.cautious?.label || "Proceed carefully";
+                        const l2 = byId.brisk?.label || "Move quickly";
+                        const l3 = byId.risky?.label || "Take a risk";
+                        txt = `Each scene offers three <b>scene-themed</b> routes:
       <b>${l1}</b> (1×), <b>${l2}</b> (2×), <b>${l3}</b> (3×).
       Faster routes delay hints (<b>+30s</b> / <b>+60s</b>) and may reward a clean first try.`;
-                        }
-                        routesEl.innerHTML = txt;
                     }
-
-                } catch (e) {
-                    $("ovTitle").textContent = "Mini Escape — Daily Trail";
-                    $("ovIntro").textContent = "Three scenes, one final lock. Pick routes and solve.";
+                    routesEl.innerHTML = txt;
                 }
+
+
+            } catch (e) {
+                $("ovTitle").textContent = "Mini Escape — Daily Trail";
+                $("ovIntro").textContent = "Three scenes, one final lock. Pick routes and solve.";
             }
+        }
 
-            // ------- Start / Timer -------
-            $("startBtn").addEventListener("click", async () => {
-                $("overlay").classList.add("hidden");
-                if (!state.room) { await prefetchRoom(); }
-                renderScenes(state.room);
-                startTimer();
-            });
-            function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
-            function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
+        // ------- Start / Timer -------
+        $("startBtn").addEventListener("click", async () => {
+            $("overlay").classList.add("hidden");
+            if (!state.room) { await prefetchRoom(); }
+            renderScenes(state.room);
+            startTimer();
+        });
+        function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
+        function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
 
-            // ------- Render scenes (one-at-a-time) -------
-            function renderScenes(room) {
-                const holder = $("scenes"); holder.innerHTML = "";
-                const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
-                rooms.forEach((rm, idx) => {
-                    const wrap = document.createElement("section");
-                    wrap.className = "scene panel" + (idx === 0 ? " active" : "");
-                    wrap.id = `scene-${idx}`;
-                    wrap.innerHTML = `
+        // ------- Render scenes (one-at-a-time) -------
+        function renderScenes(room) {
+            const holder = $("scenes"); holder.innerHTML = "";
+            const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
+            rooms.forEach((rm, idx) => {
+                const wrap = document.createElement("section");
+                wrap.className = "scene panel" + (idx === 0 ? " active" : "");
+                wrap.id = `scene-${idx}`;
+                wrap.innerHTML = `
             <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
             <div style="color:#c8d4ff">${rm.text || ""}</div>
             <div class="route-btns" id="routebtns-${idx}" style="margin-top:8px;"></div>
@@ -687,378 +691,378 @@
               <button class="btn" id="next-${idx}" style="display:none;">Next scene →</button>
             </div>
           `;
-                    holder.appendChild(wrap);
+                holder.appendChild(wrap);
 
-                    // Build route buttons dynamically (works + themed)
-                    const btnHolder = document.getElementById(`routebtns-${idx}`);
-                    btnHolder.innerHTML = "";
-                    state.routeLocked[idx] = false;
+                // Build route buttons dynamically (works + themed)
+                const btnHolder = document.getElementById(`routebtns-${idx}`);
+                btnHolder.innerHTML = "";
+                state.routeLocked[idx] = false;
 
-                    (rm.routes || []).forEach((r) => {
-                        const rid = r.id;
-                        const copy = themedRouteCopy(rm, rid, r);
+                (rm.routes || []).forEach((r) => {
+                    const rid = r.id;
+                    const copy = themedRouteCopy(rm, rid, r);
 
-                        const b = document.createElement("button");
-                        b.type = "button";
-                        b.className = "route-btn";
-                        b.setAttribute("data-route", rid);
-                        b.innerHTML = `
+                    const b = document.createElement("button");
+                    b.type = "button";
+                    b.className = "route-btn";
+                    b.setAttribute("data-route", rid);
+                    b.innerHTML = `
     <span class="route-title">${copy.label} <span class="badge">${copy.mult}</span></span>
     <span class="route-sub">${copy.sub}</span>
   `;
 
-                        b.addEventListener("click", () => {
-                            if (state.routeLocked[idx]) return;
-                            state.routeLocked[idx] = true;
-                            state.chosenRoutes[idx] = rid;
+                    b.addEventListener("click", () => {
+                        if (state.routeLocked[idx]) return;
+                        state.routeLocked[idx] = true;
+                        state.chosenRoutes[idx] = rid;
 
-                            // Visually disable all three
-                            btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
+                        // Visually disable all three
+                        btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
 
-                            // Mount the puzzle and scroll to it
-                            showPuzzle(idx, rm, rid);
-                            document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                        });
-
-                        btnHolder.appendChild(b);
+                        // Mount the puzzle and scroll to it
+                        showPuzzle(idx, rm, rid);
+                        document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
                     });
-                });
-            }
 
-            function updateFragmentDisplay() {
-                const parts = state.fragments.map((f, i) => f ? `Scene ${i + 1}: <b>${f}</b>` : `Scene ${i + 1}: _ _`);
-                $("fragBag").innerHTML = `Fragments — ${parts.join("  •  ")}`;
-                if (state.fragments.every(Boolean)) {
-                    $("finalInput").placeholder = state.fragments.join("");
-                }
-            }
-
-            // ------- Mini-game renderers -------
-            function renderMultipleChoice(idx, uiSpec, statusEl) {
-                const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-                const wrap = document.createElement("div");
-                const opts = Array.isArray(uiSpec?.options) ? uiSpec.options : [];
-                if (!opts.length) {
-                    wrap.innerHTML = `<div class="helper">No options provided — type your choice below.</div>`;
-                    $(`pzinrow-${idx}`).style.display = "flex";
-                    ui.appendChild(wrap);
-                    return;
-                }
-                opts.forEach(opt => {
-                    const btn = document.createElement("div");
-                    btn.className = "choice";
-                    btn.textContent = String(opt);
-                    btn.addEventListener("click", () => {
-                        // toggle selection (single-select)
-                        wrap.querySelectorAll(".choice").forEach(x => x.classList.remove("selected"));
-                        btn.classList.add("selected");
-                        state.miniAnswer[idx] = String(opt);
-                        statusEl.textContent = `Selected: ${opt}`;
-                        statusEl.className = "status";
-                    });
-                    wrap.appendChild(btn);
+                    btnHolder.appendChild(b);
                 });
+            });
+        }
+
+        function updateFragmentDisplay() {
+            const parts = state.fragments.map((f, i) => f ? `Scene ${i + 1}: <b>${f}</b>` : `Scene ${i + 1}: _ _`);
+            $("fragBag").innerHTML = `Fragments — ${parts.join("  •  ")}`;
+            if (state.fragments.every(Boolean)) {
+                $("finalInput").placeholder = state.fragments.join("");
+            }
+        }
+
+        // ------- Mini-game renderers -------
+        function renderMultipleChoice(idx, uiSpec, statusEl) {
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const wrap = document.createElement("div");
+            const opts = Array.isArray(uiSpec?.options) ? uiSpec.options : [];
+            if (!opts.length) {
+                wrap.innerHTML = `<div class="helper">No options provided — type your choice below.</div>`;
+                $(`pzinrow-${idx}`).style.display = "flex";
                 ui.appendChild(wrap);
-                // show submit row as well, pre-fill on submit
-                $(`pzinrow-${idx}`).style.display = "flex";
+                return;
             }
-
-            const DEFAULT_TOKENS = ["tap", "hold", "left", "right", "up", "down", "rotate_left", "rotate_right", "press", "wait"];
-            function renderSequenceInput(idx, uiSpec, statusEl) {
-                const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-                const chosen = [];
-                // NEW: prefer ui_spec.sequence (LLM), fall back to .tokens, then defaults
-                const tokens =
-                    (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
-                        (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
-                            DEFAULT_TOKENS;
-
-                const box = document.createElement("div");
-                box.className = "chips";
-                tokens.forEach(tok => {
-                    const chip = document.createElement("div");
-                    chip.className = "chip";
-                    chip.textContent = tok;
-                    chip.addEventListener("click", () => {
-                        chosen.push(tok);
-                        state.miniAnswer[idx] = chosen.join(",");
-                        statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
-                        statusEl.className = "status";
-                        $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                    });
-                    box.appendChild(chip);
+            opts.forEach(opt => {
+                const btn = document.createElement("div");
+                btn.className = "choice";
+                btn.textContent = String(opt);
+                btn.addEventListener("click", () => {
+                    // toggle selection (single-select)
+                    wrap.querySelectorAll(".choice").forEach(x => x.classList.remove("selected"));
+                    btn.classList.add("selected");
+                    state.miniAnswer[idx] = String(opt);
+                    statusEl.textContent = `Selected: ${opt}`;
+                    statusEl.className = "status";
                 });
-                ui.appendChild(box);
+                wrap.appendChild(btn);
+            });
+            ui.appendChild(wrap);
+            // show submit row as well, pre-fill on submit
+            $(`pzinrow-${idx}`).style.display = "flex";
+        }
 
-                const controls = document.createElement("div");
-                controls.className = "row";
-                controls.style.marginTop = "6px";
-                const undo = document.createElement("button");
-                undo.textContent = "Undo";
-                undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`; };
-                const clear = document.createElement("button");
-                clear.textContent = "Clear";
-                clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
-                controls.appendChild(undo); controls.appendChild(clear);
-                ui.appendChild(controls);
+        const DEFAULT_TOKENS = ["tap", "hold", "left", "right", "up", "down", "rotate_left", "rotate_right", "press", "wait"];
+        function renderSequenceInput(idx, uiSpec, statusEl) {
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const chosen = [];
+            // NEW: prefer ui_spec.sequence (LLM), fall back to .tokens, then defaults
+            const tokens =
+                (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
+                    (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
+                        DEFAULT_TOKENS;
 
-                // free-type is allowed too
-                $(`pzinrow-${idx}`).style.display = "flex";
-                $(`pzin-${idx}`).placeholder = "e.g., tap,hold,left,right";
+            const box = document.createElement("div");
+            box.className = "chips";
+            tokens.forEach(tok => {
+                const chip = document.createElement("div");
+                chip.className = "chip";
+                chip.textContent = tok;
+                chip.addEventListener("click", () => {
+                    chosen.push(tok);
+                    state.miniAnswer[idx] = chosen.join(",");
+                    statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
+                    statusEl.className = "status";
+                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                });
+                box.appendChild(chip);
+            });
+            ui.appendChild(box);
+
+            const controls = document.createElement("div");
+            controls.className = "row";
+            controls.style.marginTop = "6px";
+            const undo = document.createElement("button");
+            undo.textContent = "Undo";
+            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`; };
+            const clear = document.createElement("button");
+            clear.textContent = "Clear";
+            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
+            controls.appendChild(undo); controls.appendChild(clear);
+            ui.appendChild(controls);
+
+            // free-type is allowed too
+            $(`pzinrow-${idx}`).style.display = "flex";
+            $(`pzin-${idx}`).placeholder = "e.g., tap,hold,left,right";
+        }
+
+        function renderGridInput(idx, uiSpec, statusEl) {
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const grid = Array.isArray(uiSpec?.grid) ? uiSpec.grid : [];
+            if (!grid.length) {
+                ui.innerHTML = `<div class="helper">Grid missing — type the answer below.</div>`;
+                $(`pzinrow-${idx}`).style.display = "flex"; return;
             }
 
-            function renderGridInput(idx, uiSpec, statusEl) {
-                const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-                const grid = Array.isArray(uiSpec?.grid) ? uiSpec.grid : [];
-                if (!grid.length) {
-                    ui.innerHTML = `<div class="helper">Grid missing — type the answer below.</div>`;
-                    $(`pzinrow-${idx}`).style.display = "flex"; return;
-                }
+            const nCols = Math.max(...grid.map(r => r.length));
+            const g = document.createElement("div");
+            g.className = "grid";
+            g.style.gridTemplateColumns = `repeat(${nCols}, minmax(36px, auto))`;
 
-                const nCols = Math.max(...grid.map(r => r.length));
-                const g = document.createElement("div");
-                g.className = "grid";
-                g.style.gridTemplateColumns = `repeat(${nCols}, minmax(36px, auto))`;
-
-                const path = [];
-                grid.forEach((row, r) => row.forEach((val, c) => {
-                    const cell = document.createElement("div");
-                    cell.className = "cell";
-                    cell.textContent = String(val);
-                    cell.addEventListener("click", () => {
-                        cell.classList.toggle("on");
-                        if (cell.classList.contains("on")) {
-                            path.push(String(val));
-                        } else {
-                            // remove the last occurrence of this value (simple heuristic)
-                            const i = path.lastIndexOf(String(val));
-                            if (i >= 0) path.splice(i, 1);
-                        }
-                        state.miniAnswer[idx] = path.join("");
-                        $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                        statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
-                    });
-                    g.appendChild(cell);
-                }));
-                ui.appendChild(g);
-
-                const controls = document.createElement("div");
-                controls.className = "row";
-                controls.style.marginTop = "6px";
-                const undo = document.createElement("button");
-                undo.textContent = "Undo";
-                undo.onclick = () => {
-                    // un-toggle the last selected label if visible
-                    const last = path.pop();
-                    if (last !== undefined) {
-                        // try to un-highlight a matching visible cell (best-effort)
-                        const cells = g.querySelectorAll(".cell.on");
-                        for (let i = cells.length - 1; i >= 0; i--) {
-                            if (cells[i].textContent === last) { cells[i].classList.remove("on"); break; }
-                        }
+            const path = [];
+            grid.forEach((row, r) => row.forEach((val, c) => {
+                const cell = document.createElement("div");
+                cell.className = "cell";
+                cell.textContent = String(val);
+                cell.addEventListener("click", () => {
+                    cell.classList.toggle("on");
+                    if (cell.classList.contains("on")) {
+                        path.push(String(val));
+                    } else {
+                        // remove the last occurrence of this value (simple heuristic)
+                        const i = path.lastIndexOf(String(val));
+                        if (i >= 0) path.splice(i, 1);
                     }
                     state.miniAnswer[idx] = path.join("");
                     $(`pzin-${idx}`).value = state.miniAnswer[idx];
                     statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
-                };
-                const clear = document.createElement("button");
-                clear.textContent = "Clear";
-                clear.onclick = () => {
-                    g.querySelectorAll(".cell.on").forEach(c => c.classList.remove("on"));
-                    path.splice(0, path.length);
-                    state.miniAnswer[idx] = "";
-                    $(`pzin-${idx}`).value = "";
-                    statusEl.textContent = "Path cleared.";
-                };
-                controls.appendChild(undo); controls.appendChild(clear);
-                ui.appendChild(controls);
+                });
+                g.appendChild(cell);
+            }));
+            ui.appendChild(g);
 
-                // allow manual edit too
-                $(`pzinrow-${idx}`).style.display = "flex";
-                $(`pzin-${idx}`).placeholder = "Your collected letters…";
-            }
-
-            // ------- Puzzle mount / hints / submit -------
-            function showPuzzle(idx, rm, routeId) {
-                const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
-                const p = route.puzzle || {};
-                const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
-                $(`pzp-${idx}`).textContent = p.prompt || "Puzzle";
-
-                const inputRow = $(`pzinrow-${idx}`);
-                const input = $(`pzin-${idx}`);
-                const btn = $(`pzbtn-${idx}`);
-                const status = $(`pzstatus-${idx}`);
-                const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
-                const glossBox = $(`gloss-${idx}`);
-
-                // Glossary
-                const typ = (p.type || p.archetype || "").toLowerCase();
-                const G = GLOSSARY[typ] || GLOSSARY["mini"];
-                if (G) { glossBox.style.display = "block"; glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`; }
-
-                // Clear previous UI + temp answers
-                state.miniAnswer[idx] = "";
-                input.value = "";
-                inputRow.style.display = "none";
-                $(`pzui-${idx}`).innerHTML = "";
-
-                // Mount per mechanic
-                const mech = (p.mechanic || "").toLowerCase();
-                if (typ === "mini") {
-                    if (mech === "multiple_choice") {
-                        renderMultipleChoice(idx, p.ui_spec || {}, status);
-                    } else if (mech === "sequence_input") {
-                        renderSequenceInput(idx, p.ui_spec || {}, status);
-                    } else if (mech === "grid_input") {
-                        renderGridInput(idx, p.ui_spec || {}, status);
-                    } else {
-                        // text_input or unknown → plain input
-                        inputRow.style.display = "flex";
+            const controls = document.createElement("div");
+            controls.className = "row";
+            controls.style.marginTop = "6px";
+            const undo = document.createElement("button");
+            undo.textContent = "Undo";
+            undo.onclick = () => {
+                // un-toggle the last selected label if visible
+                const last = path.pop();
+                if (last !== undefined) {
+                    // try to un-highlight a matching visible cell (best-effort)
+                    const cells = g.querySelectorAll(".cell.on");
+                    for (let i = cells.length - 1; i >= 0; i--) {
+                        if (cells[i].textContent === last) { cells[i].classList.remove("on"); break; }
                     }
+                }
+                state.miniAnswer[idx] = path.join("");
+                $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
+            };
+            const clear = document.createElement("button");
+            clear.textContent = "Clear";
+            clear.onclick = () => {
+                g.querySelectorAll(".cell.on").forEach(c => c.classList.remove("on"));
+                path.splice(0, path.length);
+                state.miniAnswer[idx] = "";
+                $(`pzin-${idx}`).value = "";
+                statusEl.textContent = "Path cleared.";
+            };
+            controls.appendChild(undo); controls.appendChild(clear);
+            ui.appendChild(controls);
+
+            // allow manual edit too
+            $(`pzinrow-${idx}`).style.display = "flex";
+            $(`pzin-${idx}`).placeholder = "Your collected letters…";
+        }
+
+        // ------- Puzzle mount / hints / submit -------
+        function showPuzzle(idx, rm, routeId) {
+            const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
+            const p = route.puzzle || {};
+            const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
+            $(`pzp-${idx}`).textContent = p.prompt || "Puzzle";
+
+            const inputRow = $(`pzinrow-${idx}`);
+            const input = $(`pzin-${idx}`);
+            const btn = $(`pzbtn-${idx}`);
+            const status = $(`pzstatus-${idx}`);
+            const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
+            const glossBox = $(`gloss-${idx}`);
+
+            // Glossary
+            const typ = (p.type || p.archetype || "").toLowerCase();
+            const G = GLOSSARY[typ] || GLOSSARY["mini"];
+            if (G) { glossBox.style.display = "block"; glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`; }
+
+            // Clear previous UI + temp answers
+            state.miniAnswer[idx] = "";
+            input.value = "";
+            inputRow.style.display = "none";
+            $(`pzui-${idx}`).innerHTML = "";
+
+            // Mount per mechanic
+            const mech = (p.mechanic || "").toLowerCase();
+            if (typ === "mini") {
+                if (mech === "multiple_choice") {
+                    renderMultipleChoice(idx, p.ui_spec || {}, status);
+                } else if (mech === "sequence_input") {
+                    renderSequenceInput(idx, p.ui_spec || {}, status);
+                } else if (mech === "grid_input") {
+                    renderGridInput(idx, p.ui_spec || {}, status);
                 } else {
-                    // legacy types → plain input
+                    // text_input or unknown → plain input
                     inputRow.style.display = "flex";
                 }
+            } else {
+                // legacy types → plain input
+                inputRow.style.display = "flex";
+            }
 
-                // Hint timers based on when THIS puzzle mounted (+30s brisk, +60s risky)
-                if (!state.puzzleMountedAt) state.puzzleMountedAt = [];
-                state.puzzleMountedAt[idx] = Date.now();
-                const extraDelay = routeId === "brisk" ? 30000 : routeId === "risky" ? 60000 : 0;
-                function updateHints() {
-                    const mounted = state.puzzleMountedAt[idx] || Date.now();
-                    const elapsed = Date.now() - mounted;
-                    const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000 + extraDelay;
-                    const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000 + extraDelay;
-                    h1btn.disabled = elapsed < d1;
-                    h2btn.disabled = elapsed < d2;
-                    h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
-                    h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
+            // Hint timers based on when THIS puzzle mounted (+30s brisk, +60s risky)
+            if (!state.puzzleMountedAt) state.puzzleMountedAt = [];
+            state.puzzleMountedAt[idx] = Date.now();
+            const extraDelay = routeId === "brisk" ? 30000 : routeId === "risky" ? 60000 : 0;
+            function updateHints() {
+                const mounted = state.puzzleMountedAt[idx] || Date.now();
+                const elapsed = Date.now() - mounted;
+                const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000 + extraDelay;
+                const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000 + extraDelay;
+                h1btn.disabled = elapsed < d1;
+                h2btn.disabled = elapsed < d2;
+                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
+                h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
+            }
+            updateHints(); const iv = setInterval(updateHints, 250);
+
+
+            // Count hints once each
+            let h1Shown = false, h2Shown = false;
+            h1btn.onclick = () => { if (h1btn.disabled) return; if (!h1Shown) { state.hintsUsedScene[idx] += 1; h1Shown = true; } h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
+            h2btn.onclick = () => { if (h2btn.disabled) return; if (!h2Shown) { state.hintsUsedScene[idx] += 1; h2Shown = true; } h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
+
+            // Submit handler — gathers the right answer source for the mechanic
+            btn.onclick = async () => {
+                let answer = (input.value || "").trim();
+                if (typ === "mini") {
+                    // prefer constructed answer if available
+                    if (state.miniAnswer[idx]) answer = state.miniAnswer[idx];
                 }
-                updateHints(); const iv = setInterval(updateHints, 250);
+                if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
 
-
-                // Count hints once each
-                let h1Shown = false, h2Shown = false;
-                h1btn.onclick = () => { if (h1btn.disabled) return; if (!h1Shown) { state.hintsUsedScene[idx] += 1; h1Shown = true; } h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
-                h2btn.onclick = () => { if (h2btn.disabled) return; if (!h2Shown) { state.hintsUsedScene[idx] += 1; h2Shown = true; } h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
-
-                // Submit handler — gathers the right answer source for the mechanic
-                btn.onclick = async () => {
-                    let answer = (input.value || "").trim();
-                    if (typ === "mini") {
-                        // prefer constructed answer if available
-                        if (state.miniAnswer[idx]) answer = state.miniAnswer[idx];
-                    }
-                    if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
-
-                    status.textContent = "Checking…"; status.className = "status";
-                    state.submissionsScene[idx] += 1;
-                    try {
-                        const res = await fetch(`/escape/api/submit`, {
-                            method: "POST", headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ date_key: state.dateKey, puzzle_id: p.id, answer })
-                        });
-                        const data = await res.json();
-                        if (data && data.correct) {
-                            const frag = (data.fragment || "").toString();
-                            if (frag) {
-                                state.fragments[idx] = frag;
-                                updateFragmentDisplay();
-                                status.innerHTML = `Correct! Fragment secured: <b>${frag}</b>`;
-                            } else {
-                                status.textContent = "Correct! Fragment secured.";
-                            }
-                            status.className = "status ok";
-                            input.disabled = true; btn.disabled = true;
-                            // disable mini ui
-                            // AFTER
-                            const ui = $(`pzui-${idx}`);
-                            if (ui) ui.querySelectorAll("button,.choice,.chip,.cell").forEach(el => {
-                                el.classList.add("disabled");
-                                if (el.tagName === "BUTTON") el.disabled = true;
-                            });
-                            clearInterval(iv);
-                            state.solvedScenes[idx] = true;
-
-                            const nextBtn = $(`next-${idx}`);
-                            if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); }
-                            else { revealFinal(); }
-                        } else {
-                            status.textContent = "Not yet. Try another angle."; status.className = "status err";
-                        }
-
-                    } catch (e) {
-                        status.textContent = "Network error — try again."; status.className = "status err";
-                    }
-                };
-
-                // Enter submits for text fields
-                input.addEventListener("keydown", e => { if (e.key === "Enter" && !btn.disabled) btn.click(); });
-            }
-
-            function goToScene(idx) {
-                document.querySelectorAll(".scene").forEach(s => s.classList.remove("active"));
-                $(`scene-${idx}`).classList.add("active");
-                state.currentScene = idx;
-                updateSceneBadge();
-            }
-            function updateSceneBadge() { $("sceneBadge").textContent = `Scene ${state.currentScene + 1} of 3`; }
-            function revealFinal() { if (state.solvedScenes.every(Boolean)) { $("finalGate").style.display = "block"; updateFragmentDisplay(); goToScene(2); } }
-
-            // ------- Finish flow -------
-            $("finishBtn").addEventListener("click", async () => {
-                if (!state.solvedScenes.every(Boolean)) { toast("Solve all scenes first."); return; }
-                const finalVal = ($("finalInput").value || "").trim();
-                if (!finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
+                status.textContent = "Checking…"; status.className = "status";
+                state.submissionsScene[idx] += 1;
                 try {
-                    const res = await fetch(`/escape/api/finish`, {
+                    const res = await fetch(`/escape/api/submit`, {
                         method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            date_key: state.dateKey,
-                            started_ms: state.startedMs,
-                            success: true,
-                            final_code: finalVal,
-                            meta: {
-                                ua: navigator.userAgent,
-                                tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                                width: window.innerWidth, height: window.innerHeight,
-                                routes: state.chosenRoutes.map(r => ROUTE_TO_APPROACH[r] || r),
-                                hints_used_scene: state.hintsUsedScene,
-                                submissions_scene: state.submissionsScene
-                            }
-                        })
+                        body: JSON.stringify({ date_key: state.dateKey, puzzle_id: p.id, answer })
                     });
                     const data = await res.json();
-                    if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
-                    if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check your fragments."; $("finalStatus").className = "status err"; return; }
-                    stopTimer();
-                    $("finalStatus").textContent = "Escaped! Time submitted."; $("finalStatus").className = "status ok";
-                    const timeMs = data.time_ms || (Date.now() - state.startedMs);
-                    const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
-                    $("shareText").textContent = shareTxt;
-                    $("copyBtn").onclick = async () => {
-                        try { await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`); toast("Copied!"); }
-                        catch (e) { toast("Copy failed"); }
-                    };
-                    $("share").style.display = "block";
+                    if (data && data.correct) {
+                        const frag = (data.fragment || "").toString();
+                        if (frag) {
+                            state.fragments[idx] = frag;
+                            updateFragmentDisplay();
+                            status.innerHTML = `Correct! Fragment secured: <b>${frag}</b>`;
+                        } else {
+                            status.textContent = "Correct! Fragment secured.";
+                        }
+                        status.className = "status ok";
+                        input.disabled = true; btn.disabled = true;
+                        // disable mini ui
+                        // AFTER
+                        const ui = $(`pzui-${idx}`);
+                        if (ui) ui.querySelectorAll("button,.choice,.chip,.cell").forEach(el => {
+                            el.classList.add("disabled");
+                            if (el.tagName === "BUTTON") el.disabled = true;
+                        });
+                        clearInterval(iv);
+                        state.solvedScenes[idx] = true;
+
+                        const nextBtn = $(`next-${idx}`);
+                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); }
+                        else { revealFinal(); }
+                    } else {
+                        status.textContent = "Not yet. Try another angle."; status.className = "status err";
+                    }
+
                 } catch (e) {
-                    $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err";
+                    status.textContent = "Network error — try again."; status.className = "status err";
                 }
-            });
+            };
 
-            // Notes events
-            $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
-            $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
+            // Enter submits for text fields
+            input.addEventListener("keydown", e => { if (e.key === "Enter" && !btn.disabled) btn.click(); });
+        }
 
-            // Cmd/Ctrl+Enter submits active scene’s puzzle
-            document.addEventListener("keydown", (e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                    const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`);
-                    if (btn && !btn.disabled) btn.click();
-                }
-            });
-        </script>
+        function goToScene(idx) {
+            document.querySelectorAll(".scene").forEach(s => s.classList.remove("active"));
+            $(`scene-${idx}`).classList.add("active");
+            state.currentScene = idx;
+            updateSceneBadge();
+        }
+        function updateSceneBadge() { $("sceneBadge").textContent = `Scene ${state.currentScene + 1} of 3`; }
+        function revealFinal() { if (state.solvedScenes.every(Boolean)) { $("finalGate").style.display = "block"; updateFragmentDisplay(); goToScene(2); } }
+
+        // ------- Finish flow -------
+        $("finishBtn").addEventListener("click", async () => {
+            if (!state.solvedScenes.every(Boolean)) { toast("Solve all scenes first."); return; }
+            const finalVal = ($("finalInput").value || "").trim();
+            if (!finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
+            try {
+                const res = await fetch(`/escape/api/finish`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        date_key: state.dateKey,
+                        started_ms: state.startedMs,
+                        success: true,
+                        final_code: finalVal,
+                        meta: {
+                            ua: navigator.userAgent,
+                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                            width: window.innerWidth, height: window.innerHeight,
+                            routes: state.chosenRoutes.map(r => ROUTE_TO_APPROACH[r] || r),
+                            hints_used_scene: state.hintsUsedScene,
+                            submissions_scene: state.submissionsScene
+                        }
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
+                if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check your fragments."; $("finalStatus").className = "status err"; return; }
+                stopTimer();
+                $("finalStatus").textContent = "Escaped! Time submitted."; $("finalStatus").className = "status ok";
+                const timeMs = data.time_ms || (Date.now() - state.startedMs);
+                const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
+                $("shareText").textContent = shareTxt;
+                $("copyBtn").onclick = async () => {
+                    try { await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`); toast("Copied!"); }
+                    catch (e) { toast("Copy failed"); }
+                };
+                $("share").style.display = "block";
+            } catch (e) {
+                $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err";
+            }
+        });
+
+        // Notes events
+        $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
+        $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
+
+        // Cmd/Ctrl+Enter submits active scene’s puzzle
+        document.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`);
+                if (btn && !btn.disabled) btn.click();
+            }
+        });
+    </script>
 
 </body>
 
