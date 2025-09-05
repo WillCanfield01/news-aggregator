@@ -568,25 +568,22 @@
 
             // ------- State -------
             // AFTER
-            // AFTER
             const state = {
                 dateKey: "{{ date_key }}",
                 startedMs: null,
                 tickHandle: null,
                 room: null,
-                currentScene: 0, // 0..2
+                currentScene: 0,
                 solvedScenes: [false, false, false],
-                chosenRoutes: [null, null, null], // "cautious" | "brisk" | "risky"
+                chosenRoutes: [null, null, null],
                 hintsUsedScene: [0, 0, 0],
                 submissionsScene: [0, 0, 0],
                 fragments: ["", "", ""],
                 hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
-
-                // per-scene temp answers for mini mechanics
                 miniAnswer: ["", "", ""],
-                puzzleMountedAt: [0, 0, 0],
-                // NEW: lock a scene after a route is chosen (prevents double fires)
-                routeLocked: [false, false, false]
+                routeLocked: [false, false, false],
+                // 👇 NEW — avoids runtime error in hint timers
+                puzzleMountedAt: [0, 0, 0]
             };
 
             const $ = id => document.getElementById(id);
@@ -615,27 +612,23 @@
                     $("roomTitle").textContent = room.title || "Today’s Puzzle";
                     $("roomIntro").textContent = room.intro || "";
 
-                    // NEW: make the Routes blurb match today's scene-specific labels
-                    const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
-                    let routesText = `Each scene offers three themed routes (1× / 2× / 3×).
-Faster routes delay hint unlocks (<b>+30s</b> for 2×, <b>+60s</b> for 3×) but may grant a small bonus for a clean first try.`;
-
-                    if (rooms.length && Array.isArray(rooms[0].routes)) {
-                        const rmap = {};
-                        rooms[0].routes.forEach(r => { rmap[r.id] = r; });
-                        const lab1 = (rmap.cautious?.label || "Proceed carefully");
-                        const lab2 = (rmap.brisk?.label || "Move quickly");
-                        const lab3 = (rmap.risky?.label || "Take a risk");
-                        routesText = `Each scene offers three <b>scene-themed</b> routes: <b>${lab1}</b> (1×),
-    <b>${lab2}</b> (2×), <b>${lab3}</b> (3×). Choosing faster routes delays hints
-    (<b>+30s</b> for 2×, <b>+60s</b> for 3×) and may reward a clean first try.`;
-                    }
+                    // Safe dynamic routes blurb
                     const routesEl = document.getElementById("ovRoutesText");
                     if (routesEl) {
-                        routesEl.innerHTML = `Each scene offers three themed routes (1× / 2× / 3×).
-  Faster routes delay hints (<b>+30s</b> / <b>+60s</b>).`;
+                        let txt = `Each scene offers three themed routes (1× / 2× / 3×).
+  Faster routes delay hints (<b>+30s</b> for 2×, <b>+60s</b> for 3×).`;
+                        const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
+                        if (rooms.length) {
+                            const map = Object.fromEntries((rooms[0].routes || []).map(r => [r.id, r]));
+                            const l1 = map.cautious?.label || "Proceed carefully";
+                            const l2 = map.brisk?.label || "Move quickly";
+                            const l3 = map.risky?.label || "Take a risk";
+                            txt = `Each scene offers three <b>scene-themed</b> routes:
+      <b>${l1}</b> (1×), <b>${l2}</b> (2×), <b>${l3}</b> (3×).
+      Faster routes delay hints (<b>+30s</b> / <b>+60s</b>) and may reward a clean first try.`;
+                        }
+                        routesEl.innerHTML = txt;
                     }
-
 
                 } catch (e) {
                     $("ovTitle").textContent = "Mini Escape — Daily Trail";
