@@ -348,27 +348,25 @@ def _get_or_404(date_key: str) -> EscapeRoom:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
         return abort(_abort_json(404, "Room not found"))
 
-def _apply_approach_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int, int]:
+def _apply_approach_bonus(dur_ms: int, meta: Dict[str, Any]) -> (int, int):
     """
-    Risk/reward per scene.
-    Supports both old route ids ("cautious","brisk","risky") and new labels
-    ("observe","listen","traverse"). Bonus only if (no hints AND first try).
-    Penalty if >=3 tries.
+    Applies time bonus/penalty based on chosen route per scene.
+    Expect meta.routes to contain: "cautious" | "brisk" | "risky".
+    Bonus = first try with no hints; Penalty = 3+ tries.
     """
     routes = meta.get("routes") or []
     hints  = meta.get("hints_used_scene") or []
     tries  = meta.get("submissions_scene") or []
 
-    MAP = {"cautious": "observe", "brisk": "listen", "risky": "traverse"}
     TUNE = {
-        "observe":  {"bonus": 0,    "penalty": 0},
-        "listen":   {"bonus": 1500, "penalty": 2000},
-        "traverse": {"bonus": 3000, "penalty": 5000},
+        "cautious": {"bonus": 0,    "penalty": 0},     # steady, no time swing
+        "brisk":    {"bonus": 1500, "penalty": 2000},  # medium risk/reward
+        "risky":    {"bonus": 3000, "penalty": 5000},  # big swing
     }
 
     bonus = penalty = 0
     for i, r in enumerate(routes[:3]):
-        key = MAP.get((r or "").lower(), (r or "").lower())
+        key = (r or "").lower()
         h = int(hints[i]) if i < len(hints) else 0
         t = int(tries[i]) if i < len(tries) else 0
         tune = TUNE.get(key, {"bonus": 0, "penalty": 0})
@@ -378,7 +376,7 @@ def _apply_approach_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int, 
             penalty += tune["penalty"]
 
     eff = max(0, dur_ms - bonus + penalty)
-    return eff, bonus, penalty
+    return eff, (bonus - penalty)
 
 def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
     """

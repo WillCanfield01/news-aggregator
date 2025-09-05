@@ -1117,8 +1117,11 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
     return harden(room, rng)
 
 def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
-    seed = daily_seed(date_key, server_secret); rng = rng_from_seed(seed)
-    return _offline_trail(date_key, rng)
+    seed = daily_seed(date_key, server_secret)
+    rng = rng_from_seed(seed)
+    room = _offline_trail(date_key, rng)
+    room["source"] = "offline"            # ← add
+    return room
 
 # ───────────────────────── Primary generation ─────────────────────────
 
@@ -1170,6 +1173,7 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     # Validate & standardize; if broken, fallback offline
     try:
         room = validate_trailroom(blob)
+        room["source"] = "llm"                 # ← add
 
     except Exception as e:
         try: current_app.logger.error(f"[escape] validate_trailroom failed: {e}")
