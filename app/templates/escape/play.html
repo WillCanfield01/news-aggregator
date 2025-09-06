@@ -882,12 +882,47 @@
             $(`pzin-${idx}`).placeholder = "Your collected letters…";
         }
 
+        function gridEndpoints(uiSpec) {
+            const g = Array.isArray(uiSpec?.grid) ? uiSpec.grid : null;
+            if (!g || !g.length) return { startLabel: null, endLabel: null };
+
+            const startLabel = g?.[0]?.[0] != null ? String(g[0][0]) : null;
+
+            const lastRow = g[g.length - 1] || [];
+            let endLabel = null;
+            for (let i = lastRow.length - 1; i >= 0; i--) {
+                if (lastRow[i] != null) { endLabel = String(lastRow[i]); break; }
+            }
+            return { startLabel, endLabel };
+        }
+
+        function normalizePromptForGrid(promptText, uiSpec) {
+            let t = String(promptText || "");
+            const { startLabel, endLabel } = gridEndpoints(uiSpec);
+            if (!startLabel || !endLabel) return t;
+
+            const replaced = t
+                .replace(/\btop[- ]left\b/gi, startLabel)
+                .replace(/\bbottom[- ]right\b/gi, endLabel);
+
+            // If author used directional words but nothing replaced, add a clarifier.
+            if (replaced === t && /top[- ]left|bottom[- ]right/i.test(t)) {
+                return `${t} (Start at ${startLabel}; finish at ${endLabel}.)`;
+            }
+            return replaced;
+        }
+
         // ------- Puzzle mount / hints / submit -------
         function showPuzzle(idx, rm, routeId) {
             const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
             const p = route.puzzle || {};
             const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
-            $(`pzp-${idx}`).textContent = p.prompt || "Puzzle";
+            let promptText = p.prompt || "Puzzle";
+            if ((p.type || p.archetype || "").toLowerCase() === "mini" &&
+                (p.mechanic || "").toLowerCase() === "grid_input") {
+                promptText = normalizePromptForGrid(promptText, p.ui_spec || {});
+            }
+            $(`pzp-${idx}`).textContent = promptText;
 
             const inputRow = $(`pzinrow-${idx}`);
             const input = $(`pzin-${idx}`);
