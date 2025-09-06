@@ -616,22 +616,24 @@
 
                 // Safe dynamic routes blurb
                 // in prefetchRoom(), after setting ovTitle/ovIntro
+                // Scene-themed routes blurb (use today's labels, with explicit trade-offs)
                 const routesEl = document.getElementById("ovRoutesText");
                 if (routesEl) {
-                    let txt = `Each scene offers three scene-themed routes (1× / 2× / 3×).
-  Faster routes delay hints (<b>+30s</b> for 2×, <b>+60s</b> for 3×).`;
-                    const rooms = (state.room?.trail?.rooms) || [];
-                    if (rooms.length) {
-                        const byId = Object.fromEntries((rooms[0].routes || []).map(r => [r.id, r]));
-                        const l1 = byId.cautious?.label || "Proceed carefully";
-                        const l2 = byId.brisk?.label || "Move quickly";
-                        const l3 = byId.risky?.label || "Take a risk";
-                        txt = `Each scene offers three <b>scene-themed</b> routes:
-      <b>${l1}</b> (1×), <b>${l2}</b> (2×), <b>${l3}</b> (3×).
-      Faster routes delay hints (<b>+30s</b> / <b>+60s</b>) and may reward a clean first try.`;
-                    }
-                    routesEl.innerHTML = txt;
+                    const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
+                    const rts = (rooms[0]?.routes) || [];
+                    const map = Object.fromEntries(rts.map(r => [r.id, r]));
+                    const l1 = map.cautious?.label || "Proceed carefully";
+                    const l2 = map.brisk?.label || "Move quickly";
+                    const l3 = map.risky?.label || "Take a risk";
+
+                    routesEl.innerHTML =
+                        `Routes are <b>scene-themed</b>. In each scene you’ll choose one path:<br>
+    • <b>${l1}</b> (1×) — safer; hints unlock sooner.<br>
+    • <b>${l2}</b> (2×) — faster; hints unlock <b>+30s</b>; small bonus if first try.<br>
+    • <b>${l3}</b> (3×) — bold; hints unlock <b>+60s</b>; bigger first-try bonus.<br>
+    Faster routes demand speed — mistakes can erase the benefit.`;
                 }
+
 
 
             } catch (e) {

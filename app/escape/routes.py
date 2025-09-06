@@ -364,35 +364,53 @@ def _get_or_404(date_key: str) -> EscapeRoom:
         current_app.logger.error(f"[escape] unable to load room for {date_key}: {e}")
         return abort(_abort_json(404, "Room not found"))
 
-def _apply_approach_bonus(dur_ms: int, meta: Dict[str, Any]) -> (int, int):
+def _apply_approach_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int, int]:
     """
-    Applies time bonus/penalty based on chosen route per scene.
-    Expect meta.routes to contain: "cautious" | "brisk" | "risky".
-    Bonus = first try with no hints; Penalty = 3+ tries.
+    Apply time adjustments based on the chosen route per scene.
+
+    Accepts either:
+      - meta['route_ids']: canonical ids like ["cautious","brisk","risky"], or
+      - meta['routes']: same as above OR themed synonyms (e.g., "observe","listen","traverse").
+
+    Returns: (effective_time_ms, total_bonus_ms, total_penalty_ms)
     """
-    routes = meta.get("routes") or []
-    hints  = meta.get("hints_used_scene") or []
-    tries  = meta.get("submissions_scene") or []
+    # Prefer canonical route ids; fall back to routes list.
+    raw_routes = meta.get("route_ids") or meta.get("routes") or []
+
+    def _norm(val: Any) -> str:
+        v = str(val or "").lower().strip()
+        if ("caut" in v) or ("care" in v) or ("observe" in v) or ("inspect" in v) or ("safe" in v):
+            return "cautious"
+        if ("brisk" in v) or ("quick" in v) or ("fast" in v) or ("listen" in v) or ("weave" in v):
+            return "brisk"
+        if ("risk" in v) or ("bold" in v) or ("traverse" in v) or ("tamper" in v):
+            return "risky"
+        return v
+
+    routes = [_norm(r) for r in list(raw_routes)[:3]]
+    hints  = list(meta.get("hints_used_scene") or [])
+    tries  = list(meta.get("submissions_scene") or [])
 
     TUNE = {
-        "cautious": {"bonus": 0,    "penalty": 0},     # steady, no time swing
-        "brisk":    {"bonus": 1500, "penalty": 2000},  # medium risk/reward
-        "risky":    {"bonus": 3000, "penalty": 5000},  # big swing
+        "cautious": {"bonus": 0,    "penalty": 0},     # steady, no swing
+        "brisk":    {"bonus": 1500, "penalty": 2000},  # medium swing
+        "risky":    {"bonus": 3000, "penalty": 5000},  # large swing
     }
 
-    bonus = penalty = 0
-    for i, r in enumerate(routes[:3]):
-        key = (r or "").lower()
+    bonus = 0
+    penalty = 0
+    for i, r in enumerate(routes):
+        tune = TUNE.get(r, {"bonus": 0, "penalty": 0})
         h = int(hints[i]) if i < len(hints) else 0
         t = int(tries[i]) if i < len(tries) else 0
-        tune = TUNE.get(key, {"bonus": 0, "penalty": 0})
         if h == 0 and t == 1:
             bonus += tune["bonus"]
         elif t >= 3:
             penalty += tune["penalty"]
 
-    eff = max(0, dur_ms - bonus + penalty)
-    return eff, (bonus - penalty)
+    eff = max(0, int(dur_ms) - bonus + penalty)
+    return eff, bonus, penalty
+
 
 def _apply_chip_bonus(dur_ms: int, meta: Dict[str, Any]) -> Tuple[int, int]:
     """

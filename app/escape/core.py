@@ -316,6 +316,68 @@ def gen_acrostic(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
 # 5x5 Polybius/Tap code (I/J share a cell). We emit row-col pairs (1..5).
 _POLY = "ABCDEFGHIKLMNOPQRSTUVWXYZ"  # J merged into I
 
+# --- Variety: minimize repeating the same mechanic on the same route id
+def _pz_mechanic_key(pz: Dict[str, Any]) -> str:
+    """Normalize a puzzle's mechanic/type for comparison."""
+    if not isinstance(pz, dict):
+        return ""
+    # Prefer explicit mechanic; fall back to legacy type/archetype
+    m = (pz.get("mechanic") or pz.get("type") or pz.get("archetype") or "").lower()
+    return m
+
+def _reshuffle_mechanics_for_variety(room_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    For each scene, permute the three routes so that across scenes the same route id
+    (cautious/brisk/risky) sees different mechanics when possible.
+    This only affects the API payload; DB remains unchanged.
+    """
+    out = json.loads(json.dumps(room_json))  # deep copy of already-stripped payload
+    trail = out.get("trail") or {}
+    rooms = trail.get("rooms") or []
+
+    # Track which mechanics each route id has already shown in prior scenes
+    seen_by_route: Dict[str, set] = {"cautious": set(), "brisk": set(), "risky": set()}
+
+    import itertools
+    for rm in rooms:
+        routes = list(rm.get("routes") or [])
+        n = len(routes)
+        if n < 2:
+            # nothing to do
+            for rt in routes:
+                seen_by_route.setdefault(rt.get("id"), set()).add(_pz_mechanic_key((rt.get("puzzle") or {})))
+            continue
+
+        # Score all permutations by how many repeats they cause vs. seen_by_route
+        perms = itertools.permutations(range(n))
+        best_perm = None
+        best_score = 10**9
+
+        def score_perm(perm):
+            score = 0
+            for dest_idx, src_idx in enumerate(perm):
+                dest_route_id = routes[dest_idx].get("id")
+                mech = _pz_mechanic_key((routes[src_idx].get("puzzle") or {}))
+                if mech in seen_by_route.get(dest_route_id, set()):
+                    score += 1  # penalize repeating the same mechanic on the same route id
+            return score
+
+        for perm in perms:
+            sc = score_perm(perm)
+            if sc < best_score:
+                best_score = sc
+                best_perm = perm
+
+        # Apply the best permutation (keeps the same 3 puzzles, just reassigns to the 3 route ids)
+        if best_perm is not None:
+            rm["routes"] = [routes[i] for i in best_perm]
+
+        # Update seen set with what this scene now shows for each route id
+        for rt in (rm.get("routes") or []):
+            seen_by_route.setdefault(rt.get("id"), set()).add(_pz_mechanic_key((rt.get("puzzle") or {})))
+
+    return out
+
 def _tap_pairs_for_word(w: str) -> List[str]:
     out = []
     for ch in w.upper().replace("J", "I"):
@@ -1283,6 +1345,9 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
                   "solution":{"answer": final}},
         "anti_spoiler": {"paraphrase_variants": 3, "decoys": 2},
     }
+
+    room = _reshuffle_mechanics_for_variety(room)
+
     room = validate_trailroom(room)
     return harden(room, rng)
 
@@ -1342,6 +1407,7 @@ def _upgrade_minigame_hints(p: Dict[str, Any]) -> None:
     p["hints"] = (hints + [h for h in extra if h not in hints])[:2]
 
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
+    
     salt = os.getenv("ESCAPE_REGEN_SALT", "")
     rng = rng_from_seed(daily_seed(date_key, server_secret + salt))
     if os.getenv("ESCAPE_MODEL","").lower()=="off" or os.getenv("ESCAPE_FORCE_OFFLINE","").lower() in ("1","true","yes"):
@@ -1389,8 +1455,13 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     # Sanitize/repair LLM puzzles in-place (or regenerate deterministically)
     _sanitize_trail_puzzles(blob, rng, blacklist)
 
+    # 🔁 NEW: reduce “same route → same mechanic” across scenes
+    try:
+        blob = _reshuffle_mechanics_for_variety(blob)
+    except Exception as e:
+        current_app.logger.warning("[escape] variety reshuffle skipped: %s", e)
+
     # Validate & standardize; if broken, fallback offline
-# AFTER
     try:
         room = validate_trailroom(blob)
         room["source"] = "llm"
