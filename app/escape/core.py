@@ -98,8 +98,15 @@ def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, A
         "type": "mini",
         "mechanic": "sequence_input",
         "ui_spec": {"sequence": tokens},
-        "prompt": (f"Clockwork in the {theme or 'room'} clicks a repeating pattern. "
-                   "Reproduce the sequence using the chips."),
+        "prompt": (
+            f"Clockwork in the {theme or 'room'} clicks a repeating pattern. "
+            "Reproduce the sequence using the chips.\n"
+            "Controls:\n"
+            "- tap = press the brass button\n"
+            "- hold = keep the button pressed\n"
+            "- left/right/up/down = nudge the lever\n"
+            "- rotate_left/right = turn the crank counter/clockwise"
+        ),
         "answer_format": {"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
         "solution": {"answer": ",".join(seq)},
         "hints": [f"Sequence length: {k}.", "Use only the chips above; order matters."]
@@ -701,6 +708,48 @@ def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set, 
 
 _ANAGRAM_TOKEN_RE = re.compile(r"(?:'|\*\*)([A-Za-z]{3,12})(?:'|\*\*)")
 
+# NEW: ensure sequence minis explain what the chips mean in-world
+def _inject_sequence_legend(p: Dict[str, Any], theme: str = "") -> None:
+    if (p.get("type") != "mini") or (p.get("mechanic") != "sequence_input"):
+        return
+    prompt = p.get("prompt") or ""
+    # if author already provided a legend/controls, keep it
+    if re.search(r"\blegend\b|\bcontrols?:", prompt, re.I):
+        return
+    legend_lines = (
+        "Controls:\n"
+        "- tap = press the brass button\n"
+        "- hold = keep the button pressed\n"
+        "- left/right = nudge the lever left/right\n"
+        "- up/down = raise/lower the slider\n"
+        "- rotate_left/right = turn the crank counter/clockwise"
+    )
+    p["prompt"] = (prompt.rstrip() + "\n" + legend_lines).strip()
+
+# NEW: For grid_input "collect letters" puzzles, force a single-letter grid
+# that actually contains the word answer at least once.
+def _force_letter_grid_for_answer(rng: random.Random, p: Dict[str, Any], answer: str) -> None:
+    ans = re.sub(r"[^A-Za-z]", "", str(answer or "")).upper()
+    if not (4 <= len(ans) <= 12):
+        return
+    n = 3 if len(ans) <= 5 else 4
+    grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
+
+    # Place each letter of the answer somewhere in the grid.
+    coords = [(r, c) for r in range(n) for c in range(n)]
+    rng.shuffle(coords)
+    for ch in ans[: min(len(coords), len(ans))]:
+        r, c = coords.pop()
+        grid[r][c] = ch
+
+    ui = p.setdefault("ui_spec", {})
+    ui["grid"] = grid
+
+    # Make the prompt explicit and add clear, non-spoiler hints.
+    hints = [h for h in (p.get("hints") or []) if isinstance(h, str) and h.strip()]
+    extra = [f"Grid size: {n}×{n}.", f"Collect exactly {len(ans)} letters."]
+    p["hints"] = (hints + [h for h in extra if h not in hints])[:2]
+
 def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist: set) -> None:
     trail = room.get("trail") or {}
     rooms = trail.get("rooms") or []
@@ -724,38 +773,50 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 mech = (p.get("mechanic") or "").lower()
                 if mech not in ALLOWED_MECHANICS:
                     p["mechanic"] = "text_input"
-                p.setdefault("ui_spec", {})
-                ui = p["ui_spec"]
+                ui = p.setdefault("ui_spec", {})
 
-                # Normalize & repair sequence minis
-                if p["mechanic"] == "sequence_input":
-                    default_tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
-                    if not isinstance(ui.get("sequence"), list) or not ui.get("sequence"):
-                        ui["sequence"] = default_tokens
+                sol = (p.get("solution") or {}).get("answer", "")
 
-                    # join list → csv if needed
-                    ans = (p.get("solution") or {}).get("answer", "")
-                    if isinstance(ans, list):
-                        ans = ",".join(str(t).strip() for t in ans if str(t).strip())
-                        p.setdefault("solution", {})["answer"] = ans
-
-                    steps = [t for t in re.split(r"[,\s]+", str((p.get("solution") or {}).get("answer",""))) if t]
-                    # Regenerate if too short or contains unknown tokens
-                    if (len(steps) < 5) or any(s not in ui["sequence"] for s in steps):
-                        rt["puzzle"] = _make_sequence_mini(rng, pid, theme)
+                # --- Sequence minis: guarantee tokens, length ≥5, and a matching pattern
+                if p.get("mechanic") == "sequence_input":
+                    if not ui.get("sequence"):
+                        ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+                    # LLM sometimes emits a short sequence; if <5, replace with a safe generator
+                    steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
+                    if len(steps) < 5:
+                        rt["puzzle"] = gen_signal_translate(rng, p.get("id") or pid, blacklist, theme).to_json()
                         continue
 
-                    # enforce permissive CSV pattern
-                    af = p.get("answer_format") or {}
-                    af["pattern"] = r"^[A-Za-z0-9,\-]{5,24}$"
-                    p["answer_format"] = af
+                # --- Grid minis: if prompt says letters/word but cells are multi-char, repair
+                if p.get("mechanic") == "grid_input":
+                    grid = ui.get("grid")
+                    prompt_txt = p.get("prompt") or ""
+                    needs_letters = bool(re.search(r"\b(letter|letters|spell|word|collect)\b", prompt_txt, re.I))
+                    bad_grid = not (isinstance(grid, list) and grid and all(isinstance(r, list) for r in grid))
+                    long_tokens = any(len(str(cell)) > 1 for row in (grid or []) for cell in row) if not bad_grid else False
+                    if bad_grid or (needs_letters and long_tokens):
+                        # If the answer is a word, rebuild as a valid single-letter grid that contains it.
+                        if re.fullmatch(r"^[A-Za-z]{4,12}$", re.sub(r"[^A-Za-z]", "", str(sol))):
+                            _force_letter_grid_for_answer(rng, p, sol)
+                            # Also make the instruction unambiguous
+                            p["prompt"] = (prompt_txt.rstrip() + "\nTap tiles to collect letters that spell the word.").strip()
+                        else:
+                            # fallback: use a safe path mini instead
+                            rt["puzzle"] = gen_knightword(rng, p.get("id") or pid, blacklist, theme).to_json()
+                            continue
 
-                # Ensure pattern sane for all other minis
-                sol = (p.get("solution") or {}).get("answer", "")
+                # --- Coerce/repair pattern so it actually matches the solution
                 af = p.get("answer_format") or {}
-                af["pattern"] = af.get("pattern") or _default_pattern_for_answer(sol)
+                pat = (af.get("pattern") or "").strip()
+                need = _default_pattern_for_answer(sol)
+                if (not pat) or (not re.fullmatch(r"^\^.*\$$", pat)) or not (
+                    re.fullmatch(pat, str(sol)) or re.fullmatch(pat, normalize_answer(str(sol)))
+                ):
+                    af["pattern"] = need
                 p["answer_format"] = af
 
+                # add context so the sequence feels grounded in the scene
+                _inject_sequence_legend(p, theme)
                 _upgrade_minigame_hints(p)
                 rt["puzzle"] = p
                 continue
@@ -1374,14 +1435,12 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
         grid = ui.get("grid")
         if not (isinstance(grid, list) and 2 <= len(grid) <= 6 and all(isinstance(r, list) for r in grid)):
             raise ValueError("grid_input requires ui_spec.grid as 2..6 rows")
-        # Heuristic: ensure the submitted answer implies ≥4 taps/cells
         if len(str(ans)) < 4:
             raise ValueError("grid_input answer must require at least 4 taps")
-
-        # optional start/goal, directions spec, etc. are for client only
-    elif mech == "text_input":
-        # nothing special
-        pass
+        # NEW: if the prompt talks about letters/words, demand single-char cells
+        if re.search(r"\b(letter|letters|spell|word|collect)\b", (p.get("prompt") or ""), re.I):
+            if any(len(str(cell)) > 1 for row in grid for cell in row):
+                raise ValueError("grid_input uses multi-char cells for a letter-collection puzzle")
 
     # Pattern must be anchored and match answer (normalized accepted)
     pat = ((p.get("answer_format") or {}).get("pattern")) or _default_pattern_for_answer(ans)
