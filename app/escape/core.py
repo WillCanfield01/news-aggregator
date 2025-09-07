@@ -207,37 +207,81 @@ class Puzzle:
     hints: List[str]
     decoys: List[str]
     paraphrases: List[str]
+    # NEW: optional fields for mini-games and richer UIs
+    mechanic: Optional[str] = None
+    ui_spec: Optional[Dict[str, Any]] = None
+
     def to_json(self) -> Dict[str, Any]:
-        return {
-            "id": self.id, "type": self.archetype, "archetype": self.archetype,
-            "prompt": self.prompt, "answer_format": self.answer_format,
-            "solution": self.solution, "hints": self.hints,
-            "decoys": self.decoys, "paraphrases": self.paraphrases
+        out = {
+            "id": self.id,
+            "type": self.archetype,
+            "archetype": self.archetype,
+            "prompt": self.prompt,
+            "answer_format": self.answer_format,
+            "solution": self.solution,
+            "hints": self.hints,
+            "decoys": self.decoys,
+            "paraphrases": self.paraphrases,
         }
+        if self.mechanic:
+            out["mechanic"] = self.mechanic
+        if self.ui_spec:
+            out["ui_spec"] = self.ui_spec
+        return out
 
 def _random_word(rng: random.Random, blacklist: set) -> str:
     pool = [w for w in ANAGRAM_WORDS if w not in blacklist]
     return rng.choice(pool) if pool else rng.choice(ANAGRAM_WORDS)
 
-def gen_anagram(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
-    w = _random_word(rng, blacklist)
-    letters = list(w)
-    while True:
-        rng.shuffle(letters)
-        if "".join(letters) != w: break
-    scrambled = "".join(letters)
-    decoys = []
-    for _ in range(2):
-        l2 = letters[:]; i, j = rng.randrange(len(l2)), rng.randrange(len(l2))
-        l2[i], l2[j] = l2[j], l2[i]; decoys.append("".join(l2))
+def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+    k = rng.randrange(7, 11)  # 7–10 steps
+
+    cues = [("short beep","tap"), ("long beep","hold"),
+            ("hiss","left"), ("clank","right"),
+            ("gust","up"), ("drip","down"),
+            ("rumble","rotate_left"), ("chime","rotate_right")]
+    rng.shuffle(cues)
+    legend = cues[:5]
+    legend_map = {name: action for name, action in legend}
+
+    seq_actions = [rng.choice(list(legend_map.values())) for _ in range(k)]
+    seq_cues    = [rng.choice([n for n,a in legend if a == act]) for act in seq_actions]
+
+    ans = ",".join(seq_actions)
+    rev = ",".join(reversed(seq_actions))
+    rot = ",".join(seq_actions[1:] + seq_actions[:1])
+    tweak_idx = rng.randrange(0, k)
+    alt_token_choices = [t for t in legend_map.values() if t != seq_actions[tweak_idx]]
+    tweaked = seq_actions[:]
+    if alt_token_choices:
+        tweaked[tweak_idx] = rng.choice(alt_token_choices)
+    tweak = ",".join(tweaked)
+    decoys = [rev, rot, tweak]
+
+    legend_lines = "\n".join([f"- {n} → {a}" for n,a in legend])
+    ex_name, ex_action = legend[0]
+    paraphrases = [
+        "The panel repeats audio cues; translate each into its action.",
+        "Use the legend to map every sound to a control input.",
+        "Convert cues to actions one-for-one; order matters."
+    ]
+
     return Puzzle(
-        id=pid, archetype="anagram",
-        prompt=f"The note shows a scrambled word: **{scrambled}**. Unscramble it.",
-        answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
-        solution={"answer": w}, hints=["Look for clusters.","Think materials or objects."],
-        decoys=decoys, paraphrases=[f"Anagram on the desk: {scrambled}.",
-                                    f"Jumbled letters read {scrambled}.",
-                                    f"A scrap shows {scrambled}. Unscramble it."]
+        id=pid,
+        archetype="mini",
+        prompt=(f"From the {theme or 'consoles'}, signals repeat:\n"
+                f"{', '.join(seq_cues)}\n"
+                "Use this legend to translate each cue into an action:\n"
+                f"{legend_lines}\n"
+                "Enter the exact action sequence using the chips."),
+        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
+        solution={"answer": ans, "legend": legend, "length": k},
+        hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
+        decoys=decoys,
+        paraphrases=paraphrases,
+        mechanic="sequence_input",
+        ui_spec={"sequence": tokens}
     )
 
 def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
@@ -526,10 +570,6 @@ def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
     )
 
 def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    """
-    5x5/6x6 letter grid. Start at a marked square. Move like a knight (2 then 1)
-    to collect a themed word. Answer is the word itself.
-    """
     bl = {str(s).lower() for s in (blacklist or set())}
     cand = [w for w in ANAGRAM_WORDS if 5 <= len(w) <= 8 and w not in bl]
     word = rng.choice(cand) if cand else _random_word(rng, bl)
@@ -562,8 +602,6 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
     row_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     sr, sc = path[0]
     start_label = f"{row_labels[sr]}{sc+1}"
-
-    # NEW: decoys + paraphrases
     ans = word.upper()
     decoys = [ans[::-1], "".join(sorted(ans)), (ans[1:]+ans[:1])]
     paraphrases = [
@@ -573,7 +611,8 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
     ]
 
     return Puzzle(
-        id=pid, archetype="mini",
+        id=pid,
+        archetype="mini",
         prompt=(f"A tiled board in the {theme or 'room'} shows letters:\n{grid_str}\n"
                 f"Start at {start_label}, moving like a knight (two then one). "
                 "Collect the letters you land on and submit the word."),
@@ -582,7 +621,9 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
         hints=["Move pattern: 2 then 1 at right angles.",
                f"Exactly {len(word)} letters; begin at {start_label}."],
         decoys=decoys,
-        paraphrases=paraphrases
+        paraphrases=paraphrases,
+        mechanic="grid_input",
+        ui_spec={"grid": grid, "start": start_label, "notes": "Knight moves (2,1)."}
     )
 
 def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
