@@ -65,6 +65,46 @@ FINAL_CODE_MAX_LEN = 12
 ALLOWED_TYPES = {"mini", "acrostic", "tapcode", "pathcode", "anagram", "caesar", "vigenere", "numeric_lock"}
 ALLOWED_MECHANICS = {"multiple_choice", "sequence_input", "grid_input", "text_input"}
 
+NUM_WORDS = {
+    "zero","one","two","three","four","five","six","seven","eight","nine",
+    "ten","eleven","twelve"
+}
+
+def _looks_trivial_multiple_choice(p: Dict[str, Any]) -> bool:
+    if (p.get("type") != "mini") or (p.get("mechanic") != "multiple_choice"):
+        return False
+    ui = p.get("ui_spec") or {}
+    opts = ui.get("options") or []
+    prompt = (p.get("prompt") or "").lower()
+    # Too few options or “name that number”-style wording
+    if len(opts) < 4:
+        return True
+    if re.search(r"(which|what).*(name|names|word).*(number|digit)", prompt):
+        return True
+    # All options are simple number words or digits
+    def _is_num_token(x: Any) -> bool:
+        s = str(x).strip().lower()
+        return bool(re.fullmatch(r"\d{1,2}", s) or s in NUM_WORDS)
+    if opts and all(_is_num_token(o) for o in opts):
+        return True
+    return False
+
+def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, Any]:
+    tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+    k = rng.randrange(7, 10)  # 7–9 steps (slightly harder)
+    seq = [rng.choice(tokens) for _ in range(k)]
+    return {
+        "id": pid,
+        "type": "mini",
+        "mechanic": "sequence_input",
+        "ui_spec": {"sequence": tokens},
+        "prompt": (f"Clockwork in the {theme or 'room'} clicks a repeating pattern. "
+                   "Reproduce the sequence using the chips."),
+        "answer_format": {"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
+        "solution": {"answer": ",".join(seq)},
+        "hints": [f"Sequence length: {k}.", "Use only the chips above; order matters."]
+    }
+
 # ───────────────────────── Utilities ─────────────────────────
 
 def _is_numeric(s: str) -> bool:
@@ -301,14 +341,19 @@ def gen_acrostic(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
             "whisper", "copper", "fog", "vault", "console", "runes"
         ])
         lines.append(f"{ch.upper()}{ch.lower()}—{frag} tied to {theme or 'the room'}...")
-    poem = "\n".join(lines)
+    # 50% of the time, invert reading order (players start from bottom)
+    bottom_start = rng.random() < 0.5
+    poem = "\n".join(lines if not bottom_start else list(reversed(lines)))
 
     return Puzzle(
         id=pid, archetype="acrostic",
-        prompt=f"A scrap of verse is pinned to the wall:\n{poem}\nWhat single word do the first letters spell?",
+        prompt=(f"A scrap of verse is pinned to the wall:\n{poem}\n"
+                + ("The scribbler inverted the stanza—start from the bottom line.\n" if bottom_start else "")
+                + "What single word do the first letters spell?"),
         answer_format={"pattern": r"^[A-Za-z]{4,12}$"},
         solution={"answer": ans},
-        hints=["Read the FIRST letters vertically.", "Each line begins with a letter of the word."],
+        hints=["Read the FIRST letters vertically.",
+               ("Start from the bottom line." if bottom_start else "Top line first, then down.")],
         decoys=[ans[::-1], "".join(sorted(ans)), ans[:-1]+ans[-1]*2],
         paraphrases=[f"Acrostic poem hints a word about {theme or 'this place'}."]
     )
@@ -378,13 +423,26 @@ def _reshuffle_mechanics_for_variety(room_json: Dict[str, Any]) -> Dict[str, Any
 
     return out
 
-def _tap_pairs_for_word(w: str) -> List[str]:
+def _tap_pairs_for_word(
+    w: str,
+    row_first: bool = True,
+    row_labels: Optional[List[int]] = None,
+    col_labels: Optional[List[int]] = None
+) -> List[str]:
+    """Encode a word into Polybius pairs with optional orientation/label tweaks."""
     out = []
+    row_labels = row_labels or [1,2,3,4,5]
+    col_labels = col_labels or [1,2,3,4,5]
     for ch in w.upper().replace("J", "I"):
         i = _POLY.index(ch)
-        r = i // 5 + 1
-        c = i % 5 + 1
-        out.append(f"{r}-{c}")
+        r = i // 5 + 1  # 1..5
+        c = i % 5 + 1   # 1..5
+        rr = row_labels[r-1]
+        cc = col_labels[c-1]
+        if row_first:
+            out.append(f"{rr}-{cc}")
+        else:
+            out.append(f"{cc}-{rr}")
     return out
 
 def gen_tapcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
@@ -392,11 +450,21 @@ def gen_tapcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -
     w = re.sub(r"[^A-Za-z]", "", _scene_word_from_title(rng, theme)).lower().replace("j", "i")
     if len(w) < 4 or w in bl:
         w = _random_word(rng, bl).lower().replace("j", "i")
-    taps = ", ".join(_tap_pairs_for_word(w.upper()))
+    # Mild twists: sometimes column–row, and/or reversed counting
+    row_first = rng.random() < 0.7          # 30% use column–row
+    rev_rows  = rng.random() < 0.4
+    rev_cols  = rng.random() < 0.4
+    row_labels = [5,4,3,2,1] if rev_rows else [1,2,3,4,5]
+    col_labels = [5,4,3,2,1] if rev_cols else [1,2,3,4,5]
+    taps = ", ".join(_tap_pairs_for_word(w.upper(), row_first, row_labels, col_labels))
+    mode_line = ("Pairs are ROW–COLUMN. " if row_first else "Pairs are COLUMN–ROW. ")
+    row_line  = ("Rows count bottom→top (5→1). " if rev_rows else "Rows count top→bottom (1→5). ")
+    col_line  = ("Cols count right→left (5→1). " if rev_cols else "Cols count left→right (1→5). ")
     return Puzzle(
         id=pid, archetype="tapcode",
         prompt=(f"From the {theme or 'pipes'}, you hear rhythmic taps: {taps}.\n"
-                "Decode them using a 5×5 Polybius square (I/J share a cell). Enter the word."),
+                f"Decode with a 5×5 Polybius (I/J share a cell). {mode_line}{row_line}{col_line}"
+                "Enter the word."),
         answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
         solution={"answer": w.upper()},
         hints=["Map 1–5 row/col to letters in a 5×5 grid.", "Remember I/J share the same cell."],
@@ -414,34 +482,150 @@ def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
 
     n = 3 if len(word) <= 5 else 4
     grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
-    r, c = 0, 0
+    # Start can be anywhere for variety
+    r, c = rng.randrange(0, n), rng.randrange(0, n)
     grid[r][c] = word[0].upper()
-    path = []
+    # Allow L/U occasionally; optional wrap
+    allow_LU = rng.random() < 0.6
+    wrap = rng.random() < 0.35
+    dirs = ["R","D"] + (["L","U"] if allow_LU else [])
+    path: List[str] = []
     for ch in word[1:]:
-        if rng.random() < 0.5 and c+1 < n:
-            c += 1; path.append("R")
-        elif r+1 < n:
-            r += 1; path.append("D")
+        moves = []
+        for d in rng.sample(dirs, k=len(dirs)):
+            rr, cc = r, c
+            if d == "R": cc = cc+1 if cc+1 < n else (0 if wrap else cc)
+            if d == "L": cc = cc-1 if cc-1 >= 0 else (n-1 if wrap else cc)
+            if d == "D": rr = rr+1 if rr+1 < n else (0 if wrap else rr)
+            if d == "U": rr = rr-1 if rr-1 >= 0 else (n-1 if wrap else rr)
+            if (rr, cc) != (r, c):
+                moves.append((d, rr, cc))
+        if not moves:
+            # fallback: force right or down within bounds
+            if c+1 < n: d, r, c = "R", r, c+1
+            elif r+1 < n: d, r, c = "D", r+1, c
+            else: d, r, c = "R", r, (c+1) % n
         else:
-            c = (c+1) % n; path.append("R")
+            d, r, c = rng.choice(moves)
+        path.append(d)
         grid[r][c] = ch.upper()
     grid_str = "\n".join(" ".join(row) for row in grid)
 
     return Puzzle(
         id=pid, archetype="pathcode",
         prompt=(f"A glowing tile grid is etched on the floor:\n{grid_str}\n"
-                f"Starting at the top-left, follow the path {', '.join(path)} to collect letters. What word do you read?"),
+                f"Start at the marked letter (first in the word), then follow the path {', '.join(path)} to collect letters.\n"
+                f"Directions are {''.join(sorted(set(path)))}"
+                f"{' (wrapping allowed)' if wrap else ''}. What word do you read?"),
         answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
         solution={"answer": word.upper(), "grid": grid, "path": path},
-        hints=["Trace the moves on the grid, recording each letter you land on.",
-               "Start at top-left. Directions are R=right, D=down (wrapping if needed)."],
+        hints=["Trace each step; record the letter you land on.",
+               f"Grid size: {n}×{n}. Directions shown in the prompt."],
         decoys=[word.upper()[::-1], "".join(sorted(word.upper()))],
         paraphrases=[f"A path puzzle carved into {theme or 'the chamber'}."]
     )
 
+def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    """
+    5x5/6x6 letter grid. Start at a marked square. Move like a knight (2 then 1)
+    to collect a themed word. Answer is the word itself.
+    """
+    # pick an unused word length 5–8
+    bl = {str(s).lower() for s in (blacklist or set())}
+    cand = [w for w in ANAGRAM_WORDS if 5 <= len(w) <= 8 and w not in bl]
+    word = rng.choice(cand) if cand else _random_word(rng, bl)
+    n = 6 if len(word) >= 7 else 5
+
+    # knight moves
+    K = [(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)]
+
+    # random start
+    start = (rng.randrange(0,n), rng.randrange(0,n))
+    path = [start]
+    for _ in word[1:]:
+        r, c = path[-1]
+        moves = [(r+dr, c+dc) for (dr,dc) in K
+                 if 0 <= r+dr < n and 0 <= c+dc < n and (r+dr, c+dc) not in path]
+        if not moves:
+            # restart from a new random start if stuck
+            start = (rng.randrange(0,n), rng.randrange(0,n))
+            path = [start]
+            continue
+        path.append(rng.choice(moves))
+
+    # if still short, pad by hopping within bounds
+    while len(path) < len(word):
+        r, c = path[-1]
+        moves = [(r+dr, c+dc) for (dr,dc) in K if 0 <= r+dr < n and 0 <= c+dc < n]
+        path.append(rng.choice(moves))
+
+    # build grid with path letters placed
+    grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
+    for (ch, (r,c)) in zip(word.upper(), path):
+        grid[r][c] = ch
+    grid_str = "\n".join(" ".join(row) for row in grid)
+    # label start for the player (A1 top-left style)
+    row_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    sr, sc = path[0]
+    start_label = f"{row_labels[sr]}{sc+1}"
+
+    return Puzzle(
+        id=pid, archetype="mini",
+        prompt=(f"A tiled board in the {theme or 'room'} shows letters:\n{grid_str}\n"
+                f"Start at {start_label}, moving like a knight (two then one in an L-shape). "
+                "Collect the letters you land on to form a word, then submit that word."),
+        answer_format={"pattern": r"^[A-Za-z]{5,12}$"},
+        solution={"answer": word.upper(), "grid": grid, "start": start_label, "rule": "knight", "size": n},
+        hints=["Move pattern: 2 then 1 at right angles.",
+               f"Exactly {len(word)} letters; begin at {start_label}."]
+    )
+
+def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+    k = rng.randrange(7, 11)  # 7–10 steps
+
+    # make a tiny legend players can read, no outside knowledge
+    cues = [("short beep","tap"), ("long beep","hold"),
+            ("hiss","left"), ("clank","right"),
+            ("gust","up"), ("drip","down"),
+            ("rumble","rotate_left"), ("chime","rotate_right")]
+    rng.shuffle(cues)
+    legend = cues[:5]  # 5-item legend (slightly harder but still learnable)
+    legend_map = {name: action for name, action in legend}
+
+    seq_actions = [rng.choice(list(legend_map.values())) for _ in range(k)]
+    seq_cues    = [rng.choice([n for n,a in legend if a == act]) for act in seq_actions]
+
+    legend_lines = "\n".join([f"- {n} → {a}" for n,a in legend])
+    # Concrete mapping example in hint: pick one legend entry
+    ex_name, ex_action = legend[0]
+
+    return Puzzle(
+        id=pid, archetype="mini",
+        prompt=(f"From the {theme or 'consoles'}, signals repeat:\n"
+                f"{', '.join(seq_cues)}\n"
+                "Use this legend to translate each cue into an action:\n"
+                f"{legend_lines}\n"
+                "Enter the exact action sequence using the chips."),
+        mechanic="sequence_input",
+        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
+        solution={"answer": ",".join(seq_actions),
+                  "legend": legend, "length": k},
+        hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."]
+    )
+
 def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    g = rng.choice([gen_acrostic, gen_tapcode, gen_pathcode])
-    return g(rng, pid, blacklist, theme)
+    # Weighted pick (newer, more interactive games get higher weight)
+    choices = [
+        (gen_knightword,          3),
+        (gen_signal_translate,    3),
+        (gen_pathcode,            2),
+        (gen_tapcode,             2),
+        (gen_acrostic,            1),
+    ]
+    funcs, w = zip(*choices)
+    f = rng.choices(funcs, weights=w, k=1)[0]
+    return f(rng, pid, blacklist, theme)
 
 # --- Sanitizer helpers -------------------------------------------------
 
@@ -820,6 +1004,10 @@ def _trail_prompt(date_key: str) -> str:
         "• The three routes in the SAME scene must share **one fragment_rule** that extracts the same fragment from each answer.\n"
         "  Prefer FIRST2/LAST2; FIRST3/LAST3/IDX:i,j are allowed if thematic.\n"
         "• Final code = concatenation of the three scene fragments. Final answer must be a 4–12 char alphanumeric string.\n"
+        "and thematically tied to the scene. Prefer **grid_input** and **sequence_input**.\n"
+        "At most **one** multiple_choice across all three scenes, and only if it requires deduction from ≥2 clues.\n"
+        "Minimum interaction: grid_input must require ≥4 taps; sequence_input length must be 5–9.\n"
+        "Never ask for a raw fact (e.g., “Which word names that number?”).\n"
         "• DO NOT use or hint at any words in BAN_ANSWERS. Avoid stock riddle answers entirely (echo, time, shadow, piano, etc.).\n"
         "\n"
         f"RECENT_TITLES (avoid similarity): {recent_titles_s}\n"
@@ -1073,6 +1261,10 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
     ui = p.get("ui_spec") or {}
     if mech == "multiple_choice":
         opts = ui.get("options")
+        if not (isinstance(opts, list) and len(opts) >= 4):
+            raise ValueError("multiple_choice requires ≥4 options")
+        if _looks_trivial_multiple_choice(p):
+            raise ValueError("multiple_choice puzzle too trivial")
         if not isinstance(opts, list) or len(opts) < 2:
             raise ValueError("multiple_choice requires >=2 options in ui_spec.options")
         if str(ans) not in [str(x) for x in opts]:
@@ -1081,13 +1273,21 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
                 raise ValueError("answer must be one of options for multiple_choice")
     elif mech == "sequence_input":
         seq = ui.get("sequence")
-        if not isinstance(seq, list) or not seq:
+        if not (isinstance(seq, list) and seq):
             raise ValueError("sequence_input requires non-empty ui_spec.sequence")
-        # sequences are validated by pattern only; keep tokens simple
+        # Require a reasonably interactive answer (5–24 tokens)
+        steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
+        if len(steps) < 5:
+            raise ValueError("sequence_input answer must be at least 5 steps")
+
     elif mech == "grid_input":
         grid = ui.get("grid")
         if not (isinstance(grid, list) and 2 <= len(grid) <= 6 and all(isinstance(r, list) for r in grid)):
-            raise ValueError("grid_input requires ui_spec.grid as 2..6 rows of lists")
+            raise ValueError("grid_input requires ui_spec.grid as 2..6 rows")
+        # Heuristic: ensure the submitted answer implies ≥4 taps/cells
+        if len(str(ans)) < 4:
+            raise ValueError("grid_input answer must require at least 4 taps")
+
         # optional start/goal, directions spec, etc. are for client only
     elif mech == "text_input":
         # nothing special
