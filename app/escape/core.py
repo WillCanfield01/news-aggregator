@@ -64,6 +64,8 @@ FINAL_CODE_MAX_LEN = 12
 # Allowed puzzle archetypes (LLM and offline)
 ALLOWED_TYPES = {"mini", "acrostic", "tapcode", "pathcode", "anagram", "caesar", "vigenere", "numeric_lock"}
 ALLOWED_MECHANICS = {"multiple_choice", "sequence_input", "grid_input", "text_input"}
+# Shared control chips for sequence minis
+SEQ_TOKENS = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
 
 NUM_WORDS = {
     "zero","one","two","three","four","five","six","seven","eight","nine",
@@ -90,7 +92,7 @@ def _looks_trivial_multiple_choice(p: Dict[str, Any]) -> bool:
     return False
 
 def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, Any]:
-    tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+    tokens = SEQ_TOKENS[:]
     k = rng.randrange(7, 10)  # 7–9 steps (slightly harder)
     seq = [rng.choice(tokens) for _ in range(k)]
     return {
@@ -118,30 +120,12 @@ def _is_numeric(s: str) -> bool:
     return bool(re.fullmatch(r"\d+", str(s or "")))
 
 def _default_pattern_for_answer(answer: str) -> str:
-    """
-    Choose a sane, anchored regex that actually fits the concrete answer.
-    We allow long comma/dash separated sequences (e.g., rotate_left,...).
-    """
+    # Compact, anchored patterns; allow underscores for tokens like rotate_left
     a = str(answer or "")
-
-    # numeric only
-    if _is_numeric(a):
-        # up to 12 digits covers our current use cases (incl. numeric_lock=4)
-        return r"^\d{1,12}$"
-
-    # letters only (words)
-    if re.fullmatch(r"[A-Za-z]+", a):
-        # allow up to 32 to be generous for themed words
-        return r"^[A-Za-z]{2,32}$"
-
-    # sequences / mixed tokens → allow commas and dashes; size based on actual answer
-    if ("," in a) or ("-" in a):
-        max_len = max(24, min(160, len(a) + 4))   # headroom without being unbounded
-        return rf"^[A-Za-z0-9,\-]{{5,{max_len}}}$"
-
-    # very generic fallback (letters/digits/commas/dashes/spaces)
-    max_len = max(16, min(120, len(a) + 8))
-    return rf"^[A-Za-z0-9, \-]{{1,{max_len}}}$"
+    if _is_numeric(a): return r"^\d{1,12}$"
+    if re.fullmatch(r"[A-Za-z]+", a): return r"^[A-Za-z]{2,16}$"
+    # allow short tokens with commas/dashes/underscores (e.g., sequences)
+    return r"^[A-Za-z0-9,_\-]{1,64}$"
 
 def daily_seed(date_key: str, secret: str) -> int:
     digest = hmac.new(secret.encode("utf-8"), date_key.encode("utf-8"), hashlib.sha256).digest()
@@ -259,7 +243,7 @@ def _random_word(rng: random.Random, blacklist: set) -> str:
     return rng.choice(pool) if pool else rng.choice(ANAGRAM_WORDS)
 
 def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+    tokens = SEQ_TOKENS[:]
     k = rng.randrange(7, 11)  # 7–10 steps
 
     cues = [("short beep","tap"), ("long beep","hold"),
@@ -695,7 +679,7 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
                 f"{legend_lines}\n"
                 "Enter the exact action sequence using the chips."),
         mechanic="sequence_input",
-        ui_spec={"sequence": ["tap","hold","left","right","up","down","rotate_left","rotate_right"]},
+        ui_spec={"sequence": SEQ_TOKENS[:]},
         answer_format={"pattern": rf"^[A-Za-z0-9,\-]{{5,{min(160, len(ans) + 4)}}}$"},
         solution={"answer": ans, "legend": legend, "length": k},
         hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
@@ -796,14 +780,19 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 sol = (p.get("solution") or {}).get("answer", "")
 
                 # --- Sequence minis: guarantee tokens, length ≥5, and a matching pattern
-                if p.get("mechanic") == "sequence_input":
-                    if not ui.get("sequence"):
-                        ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
-                    # LLM sometimes emits a short sequence; if <5, replace with a safe generator
+            if p.get("mechanic") == "sequence_input":
+                if not ui.get("sequence"):
+                    ui["sequence"] = SEQ_TOKENS[:]
+                else:
+                    # If author mistakenly set the palette to the exact answer sequence, restore real palette
                     steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
-                    if len(steps) < 5:
-                        rt["puzzle"] = gen_signal_translate(rng, p.get("id") or pid, blacklist, theme).to_json()
-                        continue
+                    if isinstance(ui.get("sequence"), list) and ui["sequence"] == steps:
+                        ui["sequence"] = SEQ_TOKENS[:]
+                # Ensure the stored answer is interactive enough; if <5, regenerate safely
+                steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
+                if len(steps) < 5:
+                    rt["puzzle"] = gen_signal_translate(rng, p.get("id") or pid, blacklist, theme).to_json()
+                    continue
 
                 # --- Grid minis: if prompt says letters/word but cells are multi-char, repair
                 if p.get("mechanic") == "grid_input":
@@ -1708,7 +1697,7 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
         "npc_lines": [], "difficulty": DEFAULT_DIFFICULTY,
         "trail": trail,
         "final": {"id":"final", "prompt":"Assemble the three fragments to form the PASSCODE.",
-                  "answer_format":{"pattern": r"^[A-Za-z]{4,12}$"},
+        "answer_format":{"pattern": r"^[A-Za-z0-9]{4,12}$"},
                   "solution":{"answer": final}},
         "anti_spoiler": {"paraphrase_variants": 3, "decoys": 2},
     }
@@ -1823,7 +1812,11 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
             # Sequence: guarantee tokens, join lists, enforce length ≥5
             if mech == "sequence_input":
                 if not ui.get("sequence"):
-                    ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+                    ui["sequence"] = SEQ_TOKENS[:]
+                else:
+                    asteps = [t for t in re.split(r"[,\s]+", str((p.get("solution") or {}).get("answer",""))) if t]
+                    if isinstance(ui["sequence"], list) and ui["sequence"] == asteps:
+                        ui["sequence"] = SEQ_TOKENS[:]
                 ans = (p.get("solution") or {}).get("answer", "")
                 if isinstance(ans, list):
                     ans = ",".join(str(t).strip() for t in ans if str(t).strip())
@@ -1865,12 +1858,13 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
     return blob
 
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
-    
     salt = os.getenv("ESCAPE_REGEN_SALT", "")
-    rng = rng_from_seed(daily_seed(date_key, server_secret + salt))
+    rng_seed = daily_seed(date_key, server_secret + salt)
+    rng = rng_from_seed(rng_seed)
     if os.getenv("ESCAPE_MODEL","").lower()=="off" or os.getenv("ESCAPE_FORCE_OFFLINE","").lower() in ("1","true","yes"):
         return generate_room_offline(date_key, server_secret)
 
+    # Do NOT reseed here; keep the salted RNG for the whole compose step
     blob = llm_generate_trailroom(date_key)
     if not isinstance(blob, dict):
         current_app.logger.warning("[escape] compose: LLM returned no blob; using offline for %s (model=%s)", date_key, os.getenv("ESCAPE_MODEL"))

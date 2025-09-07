@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <title>Mini Escape — {{ date_key }}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <style>
         :root {
             --bg: #0f1220;
@@ -15,7 +15,8 @@
             --brand: #58bbff;
             --ok: #55d38e;
             --err: #ff6b6b;
-            --shadow: rgba(0, 0, 0, .35)
+            --shadow: rgba(0, 0, 0, .35);
+            --vh: 1vh
         }
 
         * {
@@ -227,7 +228,11 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 50
+            z-index: 50;
+            height: calc(var(--vh) * 100);
+            padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .start {
@@ -236,7 +241,10 @@
             border: 1px solid #24305b;
             border-radius: 20px;
             padding: 22px;
-            box-shadow: 0 20px 60px var(--shadow)
+            box-shadow: 0 20px 60px var(--shadow);
+            max-height: calc(var(--vh) * 100 - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .hidden {
@@ -521,6 +529,35 @@
     <div id="toast" class="toast">Saved</div>
 
     <script>
+        // ----- Mobile viewport + scroll lock helpers -----
+        function setVHVar() {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+        setVHVar();
+        window.addEventListener('resize', setVHVar);
+        window.addEventListener('orientationchange', setVHVar);
+
+        const body = document.body;
+        function lockScroll() {
+            body.dataset.scrollY = String(window.scrollY);
+            body.style.position = 'fixed';
+            body.style.top = `-${body.dataset.scrollY}px`;
+            body.style.left = '0';
+            body.style.right = '0';
+        }
+        function unlockScroll() {
+            const y = parseInt(body.dataset.scrollY || '0', 10);
+            body.style.position = '';
+            body.style.top = '';
+            body.style.left = '';
+            body.style.right = '';
+            window.scrollTo(0, y);
+        }
+
+        // Modal is open by default → lock background scroll
+        document.addEventListener('DOMContentLoaded', lockScroll);
+
         // ------- Glossary (legacy types) -------
         const GLOSSARY = {
             acrostic: {
@@ -642,9 +679,15 @@
             }
         }
 
+        // Close the instructions by tapping the shaded backdrop
+        $("overlay").addEventListener("click", (e) => {
+            if (e.target === $("overlay")) { $("startBtn").click(); }
+        });
+
         // ------- Start / Timer -------
         $("startBtn").addEventListener("click", async () => {
             $("overlay").classList.add("hidden");
+            unlockScroll();                 // <— add this line
             if (!state.room) { await prefetchRoom(); }
             renderScenes(state.room);
             startTimer();
