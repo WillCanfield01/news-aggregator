@@ -530,16 +530,13 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
     5x5/6x6 letter grid. Start at a marked square. Move like a knight (2 then 1)
     to collect a themed word. Answer is the word itself.
     """
-    # pick an unused word length 5–8
     bl = {str(s).lower() for s in (blacklist or set())}
     cand = [w for w in ANAGRAM_WORDS if 5 <= len(w) <= 8 and w not in bl]
     word = rng.choice(cand) if cand else _random_word(rng, bl)
     n = 6 if len(word) >= 7 else 5
 
-    # knight moves
     K = [(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)]
 
-    # random start
     start = (rng.randrange(0,n), rng.randrange(0,n))
     path = [start]
     for _ in word[1:]:
@@ -547,58 +544,82 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
         moves = [(r+dr, c+dc) for (dr,dc) in K
                  if 0 <= r+dr < n and 0 <= c+dc < n and (r+dr, c+dc) not in path]
         if not moves:
-            # restart from a new random start if stuck
             start = (rng.randrange(0,n), rng.randrange(0,n))
             path = [start]
             continue
         path.append(rng.choice(moves))
 
-    # if still short, pad by hopping within bounds
     while len(path) < len(word):
         r, c = path[-1]
         moves = [(r+dr, c+dc) for (dr,dc) in K if 0 <= r+dr < n and 0 <= c+dc < n]
         path.append(rng.choice(moves))
 
-    # build grid with path letters placed
     grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
     for (ch, (r,c)) in zip(word.upper(), path):
         grid[r][c] = ch
     grid_str = "\n".join(" ".join(row) for row in grid)
-    # label start for the player (A1 top-left style)
+
     row_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     sr, sc = path[0]
     start_label = f"{row_labels[sr]}{sc+1}"
 
+    # NEW: decoys + paraphrases
+    ans = word.upper()
+    decoys = [ans[::-1], "".join(sorted(ans)), (ans[1:]+ans[:1])]
+    paraphrases = [
+        "L-shaped leaps collect letters; begin from the marked square.",
+        "Move like a chess knight to pick out a hidden word.",
+        "Hop 2 then 1 at right angles; record the letters you land on."
+    ]
+
     return Puzzle(
         id=pid, archetype="mini",
         prompt=(f"A tiled board in the {theme or 'room'} shows letters:\n{grid_str}\n"
-                f"Start at {start_label}, moving like a knight (two then one in an L-shape). "
-                "Collect the letters you land on to form a word, then submit that word."),
+                f"Start at {start_label}, moving like a knight (two then one). "
+                "Collect the letters you land on and submit the word."),
         answer_format={"pattern": r"^[A-Za-z]{5,12}$"},
-        solution={"answer": word.upper(), "grid": grid, "start": start_label, "rule": "knight", "size": n},
+        solution={"answer": ans, "grid": grid, "start": start_label, "rule": "knight", "size": n},
         hints=["Move pattern: 2 then 1 at right angles.",
-               f"Exactly {len(word)} letters; begin at {start_label}."]
+               f"Exactly {len(word)} letters; begin at {start_label}."],
+        decoys=decoys,
+        paraphrases=paraphrases
     )
 
 def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
     k = rng.randrange(7, 11)  # 7–10 steps
 
-    # make a tiny legend players can read, no outside knowledge
     cues = [("short beep","tap"), ("long beep","hold"),
             ("hiss","left"), ("clank","right"),
             ("gust","up"), ("drip","down"),
             ("rumble","rotate_left"), ("chime","rotate_right")]
     rng.shuffle(cues)
-    legend = cues[:5]  # 5-item legend (slightly harder but still learnable)
+    legend = cues[:5]  # 5-item legend
     legend_map = {name: action for name, action in legend}
 
     seq_actions = [rng.choice(list(legend_map.values())) for _ in range(k)]
     seq_cues    = [rng.choice([n for n,a in legend if a == act]) for act in seq_actions]
 
+    # Build decoys from the true sequence
+    ans = ",".join(seq_actions)
+    rev = ",".join(reversed(seq_actions))
+    rot = ",".join(seq_actions[1:] + seq_actions[:1])
+    # single-token tweak
+    tweak_idx = rng.randrange(0, k)
+    alt_token_choices = [t for t in legend_map.values() if t != seq_actions[tweak_idx]]
+    tweaked = seq_actions[:]
+    if alt_token_choices:
+        tweaked[tweak_idx] = rng.choice(alt_token_choices)
+    tweak = ",".join(tweaked)
+    decoys = [rev, rot, tweak]
+
     legend_lines = "\n".join([f"- {n} → {a}" for n,a in legend])
-    # Concrete mapping example in hint: pick one legend entry
     ex_name, ex_action = legend[0]
+    paraphrases = [
+        "The panel repeats audio cues; translate each into its action.",
+        "Use the legend to map every sound to a control input.",
+        "Convert cues to actions one-for-one; order matters."
+    ]
 
     return Puzzle(
         id=pid, archetype="mini",
@@ -609,9 +630,10 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
                 "Enter the exact action sequence using the chips."),
         mechanic="sequence_input",
         answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
-        solution={"answer": ",".join(seq_actions),
-                  "legend": legend, "length": k},
-        hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."]
+        solution={"answer": ans, "legend": legend, "length": k},
+        hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
+        decoys=decoys,
+        paraphrases=paraphrases
     )
 
 def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
