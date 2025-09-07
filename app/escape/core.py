@@ -118,12 +118,30 @@ def _is_numeric(s: str) -> bool:
     return bool(re.fullmatch(r"\d+", str(s or "")))
 
 def _default_pattern_for_answer(answer: str) -> str:
-    # Compact, anchored patterns that still allow short tokens
+    """
+    Choose a sane, anchored regex that actually fits the concrete answer.
+    We allow long comma/dash separated sequences (e.g., rotate_left,...).
+    """
     a = str(answer or "")
-    if _is_numeric(a): return r"^\d{1,12}$"
-    if re.fullmatch(r"[A-Za-z]+", a): return r"^[A-Za-z]{2,16}$"
-    # allow short tokens with commas/dashes (e.g., sequences)
-    return r"^[A-Za-z0-9,\-]{1,24}$"
+
+    # numeric only
+    if _is_numeric(a):
+        # up to 12 digits covers our current use cases (incl. numeric_lock=4)
+        return r"^\d{1,12}$"
+
+    # letters only (words)
+    if re.fullmatch(r"[A-Za-z]+", a):
+        # allow up to 32 to be generous for themed words
+        return r"^[A-Za-z]{2,32}$"
+
+    # sequences / mixed tokens → allow commas and dashes; size based on actual answer
+    if ("," in a) or ("-" in a):
+        max_len = max(24, min(160, len(a) + 4))   # headroom without being unbounded
+        return rf"^[A-Za-z0-9,\-]{{5,{max_len}}}$"
+
+    # very generic fallback (letters/digits/commas/dashes/spaces)
+    max_len = max(16, min(120, len(a) + 8))
+    return rf"^[A-Za-z0-9, \-]{{1,{max_len}}}$"
 
 def daily_seed(date_key: str, secret: str) -> int:
     digest = hmac.new(secret.encode("utf-8"), date_key.encode("utf-8"), hashlib.sha256).digest()
@@ -282,7 +300,7 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
                 "Use this legend to translate each cue into an action:\n"
                 f"{legend_lines}\n"
                 "Enter the exact action sequence using the chips."),
-        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
+        answer_format={"pattern": rf"^[A-Za-z0-9,\-]{{5,{min(160, len(ans) + 4)}}}$"},
         solution={"answer": ans, "legend": legend, "length": k},
         hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
         decoys=decoys,
@@ -678,7 +696,7 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
                 "Enter the exact action sequence using the chips."),
         mechanic="sequence_input",
         ui_spec={"sequence": ["tap","hold","left","right","up","down","rotate_left","rotate_right"]},
-        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
+        answer_format={"pattern": rf"^[A-Za-z0-9,\-]{{5,{min(160, len(ans) + 4)}}}$"},
         solution={"answer": ans, "legend": legend, "length": k},
         hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
         decoys=decoys,
@@ -1099,7 +1117,7 @@ def _sanitize_llm_blob(blob: Dict[str, Any], rng: random.Random, date_key: str) 
     final.setdefault("prompt", "Assemble the three fragments to form the PASSCODE.")
     af = final.get("answer_format")
     if not isinstance(af, dict): af = {}
-    af.setdefault("pattern", r"^[A-Za-z]{4,12}$")
+    af.setdefault("pattern", r"^[A-Za-z0-9]{4,12}$")
     final["answer_format"] = af
     blob["final"] = final
 
@@ -1694,8 +1712,14 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
                   "solution":{"answer": final}},
         "anti_spoiler": {"paraphrase_variants": 3, "decoys": 2},
     }
-
     room = _reshuffle_mechanics_for_variety(room)
+
+    # 🔧 Make sure minis are self-consistent before validation (offline flow too)
+    try:
+        room = _fixup_minigames(room, rng)
+    except Exception as e:
+        try: current_app.logger.warning("[escape] offline mini fixup skipped: %s", e)
+        except Exception: pass
 
     room = validate_trailroom(room)
     return harden(room, rng)
@@ -1847,7 +1871,6 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     if os.getenv("ESCAPE_MODEL","").lower()=="off" or os.getenv("ESCAPE_FORCE_OFFLINE","").lower() in ("1","true","yes"):
         return generate_room_offline(date_key, server_secret)
 
-    rng = rng_from_seed(daily_seed(date_key, server_secret))
     blob = llm_generate_trailroom(date_key)
     if not isinstance(blob, dict):
         current_app.logger.warning("[escape] compose: LLM returned no blob; using offline for %s (model=%s)", date_key, os.getenv("ESCAPE_MODEL"))
