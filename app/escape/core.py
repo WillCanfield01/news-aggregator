@@ -1755,6 +1755,91 @@ def _upgrade_minigame_hints(p: Dict[str, Any]) -> None:
     # Keep the first two good hints
     p["hints"] = (hints + [h for h in extra if h not in hints])[:2]
 
+# NEW: last-mile hardening so minis can't fail validation due to pattern/answer drift
+def _force_pattern_match(p: Dict[str, Any]) -> None:
+    ans = (p.get("solution") or {}).get("answer", "")
+    mech = (p.get("mechanic") or "").strip()
+
+    # If the LLM emitted a list for sequence_input, join it now.
+    if mech == "sequence_input" and isinstance(ans, list):
+        ans = ",".join(str(t).strip() for t in ans if str(t).strip())
+        p.setdefault("solution", {})["answer"] = ans
+
+    need = _default_pattern_for_answer(str(ans))
+    af = p.get("answer_format") or {}
+    pat = (af.get("pattern") or need).strip()
+
+    # If unanchored or mismatch, coerce to a pattern that matches the answer we actually store.
+    if (not re.fullmatch(r"^\^.*\$$", pat)) or not (
+        re.fullmatch(pat, str(ans)) or re.fullmatch(pat, normalize_answer(str(ans)))
+    ):
+        af["pattern"] = need
+    p["answer_format"] = af
+
+
+def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
+    trail = blob.get("trail") or {}
+    rooms = trail.get("rooms") or []
+    for rm in rooms:
+        theme = rm.get("title","") or rm.get("text","")
+        for rt in (rm.get("routes") or []):
+            p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
+            if (p.get("type") or p.get("archetype")) != "mini":
+                continue
+
+            pid = p.get("id") or f"{rm.get('id','room')}_{rt.get('id','route')}_pz"
+            mech = (p.get("mechanic") or "").strip().lower()
+            ui = p.setdefault("ui_spec", {})
+
+            # Ensure valid mechanic
+            if mech not in ALLOWED_MECHANICS:
+                p["mechanic"] = "text_input"
+                mech = "text_input"
+
+            # Sequence: guarantee tokens, join lists, enforce length ≥5
+            if mech == "sequence_input":
+                if not ui.get("sequence"):
+                    ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+                ans = (p.get("solution") or {}).get("answer", "")
+                if isinstance(ans, list):
+                    ans = ",".join(str(t).strip() for t in ans if str(t).strip())
+                    p.setdefault("solution", {})["answer"] = ans
+                steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
+                if len(steps) < 5:
+                    # regenerate a safe, valid sequence mini in-place
+                    rt["puzzle"] = gen_signal_translate(rng, pid, set(), theme).to_json()
+                    p = rt["puzzle"]  # continue fixing on the new one
+                    mech = (p.get("mechanic") or "").strip().lower()
+                    ui = p.setdefault("ui_spec", {})
+
+            # Grid: if invalid or uses multi-char cells for a "letters/word" prompt, fix or swap
+            if mech == "grid_input":
+                grid = ui.get("grid")
+                bad_grid = not (isinstance(grid, list) and grid and all(isinstance(r, list) for r in grid))
+                prompt_txt = p.get("prompt") or ""
+                needs_letters = bool(re.search(r"\b(letter|letters|spell|word|collect)\b", prompt_txt, re.I))
+                long_tokens = any(len(str(cell)) > 1 for row in (grid or []) for cell in row) if not bad_grid else False
+                sol = (p.get("solution") or {}).get("answer", "")
+
+                if bad_grid or (needs_letters and long_tokens):
+                    if re.fullmatch(r"^[A-Za-z]{4,12}$", re.sub(r"[^A-Za-z]", "", str(sol)) or ""):
+                        _force_letter_grid_for_answer(rng, p, sol)
+                        p["prompt"] = (prompt_txt.rstrip() + "\nTap tiles to collect letters that spell the word.").strip()
+                    else:
+                        # fallback to a guaranteed-valid grid mini
+                        rt["puzzle"] = gen_knightword(rng, pid, set(), theme).to_json()
+                        p = rt["puzzle"]
+                        mech = (p.get("mechanic") or "").strip().lower()
+                        ui = p.setdefault("ui_spec", {})
+
+            # Finally, force the pattern to match whatever solution is stored
+            _force_pattern_match(p)
+            _upgrade_minigame_hints(p)
+
+            # write back in case we mutated
+            rt["puzzle"] = p
+    return blob
+
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     
     salt = os.getenv("ESCAPE_REGEN_SALT", "")
@@ -1805,15 +1890,21 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     _sanitize_trail_puzzles(blob, rng, blacklist)
 
     # 🔁 NEW: reduce “same route → same mechanic” across scenes
+    # 🔁 NEW: reduce “same route → same mechanic” across scenes
     try:
         blob = _reshuffle_mechanics_for_variety(blob)
     except Exception as e:
         current_app.logger.warning("[escape] variety reshuffle skipped: %s", e)
 
+    # NEW: last-mile fix so minis can't fail on pattern/answer mismatches
+    try:
+        blob = _fixup_minigames(blob, rng)
+    except Exception as e:
+        current_app.logger.warning("[escape] mini fixup skipped: %s", e)
+
     # Validate & standardize; if broken, fallback offline
     try:
         room = validate_trailroom(blob)
-        room["source"] = "llm"
 
         # Debug: show per-room fragments and final
         try:
