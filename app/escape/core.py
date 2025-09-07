@@ -670,6 +670,7 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
                 f"{legend_lines}\n"
                 "Enter the exact action sequence using the chips."),
         mechanic="sequence_input",
+        ui_spec={"sequence": ["tap","hold","left","right","up","down","rotate_left","rotate_right"]},
         answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
         solution={"answer": ans, "legend": legend, "length": k},
         hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
@@ -718,22 +719,44 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
             p["id"] = p.get("id") or pid
             typ = (p.get("type") or p.get("archetype") or "").lower()
 
-            # AFTER
             if typ == "mini":
                 # ensure mechanic + ui_spec exist
                 mech = (p.get("mechanic") or "").lower()
                 if mech not in ALLOWED_MECHANICS:
-                    # fallback to simple text_input
                     p["mechanic"] = "text_input"
-                    p.setdefault("ui_spec", {})
-                else:
-                    p.setdefault("ui_spec", {})
-                # ensure pattern sane
+                p.setdefault("ui_spec", {})
+                ui = p["ui_spec"]
+
+                # Normalize & repair sequence minis
+                if p["mechanic"] == "sequence_input":
+                    default_tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+                    if not isinstance(ui.get("sequence"), list) or not ui.get("sequence"):
+                        ui["sequence"] = default_tokens
+
+                    # join list → csv if needed
+                    ans = (p.get("solution") or {}).get("answer", "")
+                    if isinstance(ans, list):
+                        ans = ",".join(str(t).strip() for t in ans if str(t).strip())
+                        p.setdefault("solution", {})["answer"] = ans
+
+                    steps = [t for t in re.split(r"[,\s]+", str((p.get("solution") or {}).get("answer",""))) if t]
+                    # Regenerate if too short or contains unknown tokens
+                    if (len(steps) < 5) or any(s not in ui["sequence"] for s in steps):
+                        rt["puzzle"] = _make_sequence_mini(rng, pid, theme)
+                        continue
+
+                    # enforce permissive CSV pattern
+                    af = p.get("answer_format") or {}
+                    af["pattern"] = r"^[A-Za-z0-9,\-]{5,24}$"
+                    p["answer_format"] = af
+
+                # Ensure pattern sane for all other minis
                 sol = (p.get("solution") or {}).get("answer", "")
                 af = p.get("answer_format") or {}
                 af["pattern"] = af.get("pattern") or _default_pattern_for_answer(sol)
                 p["answer_format"] = af
-                _upgrade_minigame_hints(p)          # ← add
+
+                _upgrade_minigame_hints(p)
                 rt["puzzle"] = p
                 continue
 
@@ -861,14 +884,18 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
                 rt["puzzle"] = new_p
 
         # re-coerce fragments across all routes
+        # re-coerce fragments across all routes (tolerant; sanitize happens later)
         puzzles = []
         for r in routes:
             q = r.get("puzzle") if isinstance(r.get("puzzle"), dict) else {}
-            if q: _validate_puzzle(q); puzzles.append(q)
+            if q:
+                # Do NOT validate here; LLM output may be unsanitized yet.
+                puzzles.append(q)
         if puzzles:
             fr_rule = rm.get("fragment_rule") or "FIRST2"
             fr_rule, _ = _coerce_same_fragment_or_const_all(fr_rule, puzzles)
             rm["fragment_rule"] = fr_rule
+
 
     blob["trail"] = {**trail, "rooms": rooms}
     return blob
