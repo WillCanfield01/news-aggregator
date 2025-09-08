@@ -564,18 +564,23 @@ def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
         grid[r][c] = ch.upper()
     grid_str = "\n".join(" ".join(row) for row in grid)
 
+    # Expose the start to the UI so we can visually mark it.
+    ui_spec = {"grid": grid, "start": [r, c], "notes": "Follow the listed directions from the start."}
+
     return Puzzle(
         id=pid, archetype="pathcode",
         prompt=(f"A glowing tile grid is etched on the floor:\n{grid_str}\n"
-                f"Start at the marked letter (first in the word), then follow the path {', '.join(path)} to collect letters.\n"
+                f"Start at the glowing letter (first in the word), then follow the path {', '.join(path)} to collect letters.\n"
                 f"Directions are {''.join(sorted(set(path)))}"
                 f"{' (wrapping allowed)' if wrap else ''}. What word do you read?"),
         answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
-        solution={"answer": word.upper(), "grid": grid, "path": path},
+        solution={"answer": word.upper(), "grid": grid, "path": path, "start": [r, c]},
         hints=["Trace each step; record the letter you land on.",
                f"Grid size: {n}×{n}. Directions shown in the prompt."],
         decoys=[word.upper()[::-1], "".join(sorted(word.upper()))],
-        paraphrases=[f"A path puzzle carved into {theme or 'the chamber'}."]
+        paraphrases=[f"A path puzzle carved into {theme or 'the chamber'}."],
+        mechanic="grid_input",
+        ui_spec=ui_spec
     )
 
 def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
@@ -1812,20 +1817,30 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
             # Sequence: guarantee tokens, join lists, enforce length ≥5
             if mech == "sequence_input":
                 if not ui.get("sequence"):
-                    ui["sequence"] = SEQ_TOKENS[:]
-                else:
-                    asteps = [t for t in re.split(r"[,\s]+", str((p.get("solution") or {}).get("answer",""))) if t]
-                    if isinstance(ui["sequence"], list) and ui["sequence"] == asteps:
-                        ui["sequence"] = SEQ_TOKENS[:]
+                    ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+
+                # Join list-style answers
                 ans = (p.get("solution") or {}).get("answer", "")
                 if isinstance(ans, list):
                     ans = ",".join(str(t).strip() for t in ans if str(t).strip())
                     p.setdefault("solution", {})["answer"] = ans
+
                 steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
-                if len(steps) < 5:
-                    # regenerate a safe, valid sequence mini in-place
+
+                # Detect if the prompt actually exposes a series/cues (not just our injected "Controls:")
+                def _has_explicit_series(txt: str, tokens: List[str]) -> bool:
+                    t = re.sub(r"(?is)controls:\s*[-•].*$", "", txt or "")  # strip any appended legend
+                    token_pat = r"(?:%s)" % "|".join(re.escape(x) for x in tokens)
+                    # either digit pairs like 5-4, 2-3 ... or 3+ comma-separated action tokens
+                    return bool(re.search(r"\b\d\s*-\s*\d\b", t)) or bool(re.search(
+                        rf"\b{token_pat}\b(?:\s*,\s*\b{token_pat}\b){{2,}}", t))
+
+                has_series = _has_explicit_series(p.get("prompt",""), ui["sequence"])
+
+                # If too short OR doesn't reveal any cues, swap in a guaranteed-playable generator
+                if (len(steps) < 5) or (not has_series):
                     rt["puzzle"] = gen_signal_translate(rng, pid, set(), theme).to_json()
-                    p = rt["puzzle"]  # continue fixing on the new one
+                    p  = rt["puzzle"]
                     mech = (p.get("mechanic") or "").strip().lower()
                     ui = p.setdefault("ui_spec", {})
 
