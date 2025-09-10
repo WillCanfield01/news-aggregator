@@ -897,37 +897,27 @@
             const ui = $(`pzui-${idx}`); ui.innerHTML = "";
             const chosen = [];
 
-            const tokens =
-                (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
-                    (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
-                        DEFAULT_TOKENS;
-
-            // Legend & cues (provided by generator for richer UI)
-            const legendPairs = Array.isArray(uiSpec?.legend) ? uiSpec.legend
-                : (Array.isArray(puzzle?.solution?.legend) ? puzzle.solution.legend : []);
-            const legendMap = Object.fromEntries(legendPairs || []);
+            // Cues from server (preferred), with fallback to solution
             const cues = Array.isArray(uiSpec?.cues) ? uiSpec.cues
                 : (Array.isArray(puzzle?.solution?.cues) ? puzzle.solution.cues : []);
+            const hideChips = !!uiSpec?.hide_chips;
 
-            // 1) Cue strip (click cues to append mapped action)
-            if (cues.length && Object.keys(legendMap).length) {
-                const strip = document.createElement("div");
-                strip.className = "cue-strip";
+            // ---- Cue strip + audio playback (unchanged synth helpers) ----
+            const actx = makeSynth?.();
 
-                // Play control
+            if (cues.length) {
+                const stripWrap = document.createElement("div");
+
                 const playBtn = document.createElement("button");
                 playBtn.textContent = "▶ Play sequence";
                 playBtn.style.marginRight = "8px";
-
-                const actx = makeSynth();
                 playBtn.onclick = async () => {
                     playBtn.disabled = true;
                     for (const cue of cues) {
-                        // Highlight current cue bubble
-                        const node = [...strip.querySelectorAll(".cue")].find(x => x.dataset.cue === cue);
+                        const node = stripWrap.querySelector(`.cue[data-cue="${cue}"]`);
                         if (node) node.classList.add("playing");
 
-                        // Sound design (minimal but distinct)
+                        // simple sound design
                         if (/short beep/i.test(cue)) { await playTone(actx, "sine", 880, 160); }
                         else if (/long beep/i.test(cue)) { await playTone(actx, "sine", 660, 420); }
                         else if (/rumble/i.test(cue)) { await playTone(actx, "sine", 120, 280, 0.06); }
@@ -942,46 +932,51 @@
                     playBtn.disabled = false;
                 };
 
-                ui.appendChild(playBtn);
-
+                const strip = document.createElement("div");
+                strip.className = "cue-strip";
                 cues.forEach(cue => {
                     const b = document.createElement("div");
                     b.className = "cue";
                     b.dataset.cue = cue;
                     b.textContent = cue;
-                    b.title = legendMap[cue] ? `→ ${legendMap[cue]}` : "";
                     b.onclick = () => {
-                        const mapped = legendMap[cue];
-                        if (!mapped) return;
-                        chosen.push(mapped);
+                        chosen.push(cue);
                         state.miniAnswer[idx] = chosen.join(",");
                         $(`pzin-${idx}`).value = state.miniAnswer[idx];
                         statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
                     };
                     strip.appendChild(b);
                 });
-                ui.appendChild(strip);
+
+                ui.appendChild(playBtn);
+                stripWrap.appendChild(strip);
+                ui.appendChild(stripWrap);
             }
 
-            // 2) Action chips (fallback / power user)
-            const box = document.createElement("div");
-            box.className = "chips";
-            tokens.forEach(tok => {
-                const chip = document.createElement("div");
-                chip.className = "chip";
-                chip.textContent = tok;
-                chip.addEventListener("click", () => {
-                    chosen.push(tok);
-                    state.miniAnswer[idx] = chosen.join(",");
-                    statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
-                    statusEl.className = "status";
-                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
+            // Optional lever chips — only if explicitly allowed
+            if (!hideChips) {
+                const tokens =
+                    (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
+                        (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
+                            DEFAULT_TOKENS;
+                const box = document.createElement("div");
+                box.className = "chips";
+                tokens.forEach(tok => {
+                    const chip = document.createElement("div");
+                    chip.className = "chip";
+                    chip.textContent = tok;
+                    chip.addEventListener("click", () => {
+                        chosen.push(tok);
+                        state.miniAnswer[idx] = chosen.join(",");
+                        $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                        statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
+                    });
+                    box.appendChild(chip);
                 });
-                box.appendChild(chip);
-            });
-            ui.appendChild(box);
+                ui.appendChild(box);
+            }
 
-            // 3) Undo/Clear + free-type
+            // Undo/Clear + free-type
             const controls = document.createElement("div");
             controls.className = "row";
             controls.style.marginTop = "6px";
@@ -1004,9 +999,9 @@
             controls.appendChild(undo); controls.appendChild(clear);
             ui.appendChild(controls);
 
-            // text input also available
+            // keep manual entry
             $(`pzinrow-${idx}`).style.display = "flex";
-            $(`pzin-${idx}`).placeholder = "Tap cues or chips — e.g., tap,hold,left,right";
+            $(`pzin-${idx}`).placeholder = "Tap cues — e.g., clank,chime,long beep";
         }
 
         function renderGridInput(idx, uiSpec, statusEl) {

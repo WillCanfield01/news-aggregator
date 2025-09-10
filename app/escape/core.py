@@ -648,59 +648,51 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
     )
 
 def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    tokens = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+    """
+    Audio-only memory mini.
+    Player hears/reads a repeating list of CUES (e.g., clank, hiss, long beep)
+    and must reproduce the exact cue sequence by tapping the cue bubbles.
+    The stored answer is the comma-joined cue list (NOT mapped to actions).
+    """
+    # cue vocabulary
+    cue_vocab = ["short beep","long beep","hiss","gust","rumble","chime","clank","drip"]
     k = rng.randrange(7, 11)  # 7–10 steps
-
-    cues = [("short beep","tap"), ("long beep","hold"),
-            ("hiss","left"), ("clank","right"),
-            ("gust","up"), ("drip","down"),
-            ("rumble","rotate_left"), ("chime","rotate_right")]
-    rng.shuffle(cues)
-    legend = cues[:5]  # 5-item legend
-    legend_map = {name: action for name, action in legend}
-
-    seq_actions = [rng.choice(list(legend_map.values())) for _ in range(k)]
-    seq_cues    = [rng.choice([n for n,a in legend if a == act]) for act in seq_actions]
+    seq_cues = [rng.choice(cue_vocab) for _ in range(k)]
 
     # Build decoys from the true sequence
-    ans = ",".join(seq_actions)
-    rev = ",".join(reversed(seq_actions))
-    rot = ",".join(seq_actions[1:] + seq_actions[:1])
-    # single-token tweak
+    ans = ",".join(seq_cues)
+    rev = ",".join(reversed(seq_cues))
+    rot = ",".join(seq_cues[1:] + seq_cues[:1])
     tweak_idx = rng.randrange(0, k)
-    alt_token_choices = [t for t in legend_map.values() if t != seq_actions[tweak_idx]]
-    tweaked = seq_actions[:]
-    if alt_token_choices:
-        tweaked[tweak_idx] = rng.choice(alt_token_choices)
+    tweaked = seq_cues[:]
+    # choose an alternative cue that differs
+    alt = rng.choice([c for c in cue_vocab if c != seq_cues[tweak_idx]]) if cue_vocab else seq_cues[tweak_idx]
+    tweaked[tweak_idx] = alt
     tweak = ",".join(tweaked)
     decoys = [rev, rot, tweak]
 
-    legend_lines = "\n".join([f"- {n} → {a}" for n,a in legend])
-    ex_name, ex_action = legend[0]
-    paraphrases = [
-        "The panel repeats audio cues; translate each into its action.",
-        "Use the legend to map every sound to a control input.",
-        "Convert cues to actions one-for-one; order matters."
-    ]
+    legend_lines = "\n".join([f"- {c}" for c in sorted(set(seq_cues))])  # flavour (no mapping)
 
     return Puzzle(
         id=pid, archetype="mini",
-        prompt=(f"From the {theme or 'consoles'}, signals repeat:\n"
+        prompt=(f"From the {theme or 'hall'}, signals repeat:\n"
                 f"{', '.join(seq_cues)}\n"
-                "Use this legend to translate each cue into an action:\n"
-                f"{legend_lines}\n"
-                "Enter the exact action sequence using the chips."),
+                "Listen and reproduce the exact cue sequence by tapping the cue bubbles. "
+                "Use the ▶ Play button to hear them again."),
         mechanic="sequence_input",
         ui_spec={
-            "sequence": ["tap","hold","left","right","up","down","rotate_left","rotate_right"],
-            "legend": legend,           # <- allow UI to render a mapping
-            "cues": seq_cues            # <- allow UI to render/play the cue strip
+            "cues": seq_cues,
+            "hide_chips": True  # UI should not render lever/action chips
         },
-        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
-        solution={"answer": ans, "legend": legend, "length": k, "cues": seq_cues},
-        hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
+        # Longer pattern so multi-word cues fit comfortably
+        answer_format={"pattern": r"^[A-Za-z0-9 ,_\-]{5,200}$"},
+        solution={"answer": ans, "length": k, "cues": seq_cues},
+        hints=[f"Sequence length: {k}.", "Tap cue bubbles in order; use ▶ Play as needed."],
         decoys=decoys,
-        paraphrases=paraphrases
+        paraphrases=[
+            "Hear the pattern and mirror it exactly.",
+            "An audio memory test—repeat the cues in order."
+        ]
     )
 
 def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
@@ -796,19 +788,17 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 sol = (p.get("solution") or {}).get("answer", "")
 
                 # --- Sequence minis: guarantee tokens, length ≥5, and a matching pattern
-            if p.get("mechanic") == "sequence_input":
-                if not ui.get("sequence"):
-                    ui["sequence"] = SEQ_TOKENS[:]
-                else:
-                    # If author mistakenly set the palette to the exact answer sequence, restore real palette
+                if p.get("mechanic") == "sequence_input":
+                    # If this is a cue-only mini (has cues + hide_chips), do NOT inject lever chips.
+                    is_cue_only = bool(ui.get("cues")) and bool(ui.get("hide_chips"))
+                    if not ui.get("sequence") and not is_cue_only:
+                        ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+
+                    # Ensure it’s interactive enough
                     steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
-                    if isinstance(ui.get("sequence"), list) and ui["sequence"] == steps:
-                        ui["sequence"] = SEQ_TOKENS[:]
-                # Ensure the stored answer is interactive enough; if <5, regenerate safely
-                steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
-                if len(steps) < 5:
-                    rt["puzzle"] = gen_signal_translate(rng, p.get("id") or pid, blacklist, theme).to_json()
-                    continue
+                    if len(steps) < 5:
+                        rt["puzzle"] = gen_signal_translate(rng, p.get("id") or pid, blacklist, theme).to_json()
+                        continue
 
                 # --- Grid minis: if prompt says letters/word but cells are multi-char, repair
                 if p.get("mechanic") == "grid_input":
