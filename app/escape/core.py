@@ -1749,24 +1749,26 @@ def _upgrade_minigame_hints(p: Dict[str, Any]) -> None:
 
 def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     """
-    Audio memory: play a sequence of *cues* (short beep, hiss, clank, …).
-    Player taps the cue chips in the same order. No legend; the cues ARE the inputs.
+    Audio memory: play a sequence of cues (3 distinct kinds). Player taps the same
+    cues in order. No legend; the cues ARE the inputs.
     """
-    # Cue bank (UI chips + audio labels); keep them human-friendly
+    # Full bank (kept for variety)
     cue_bank = ["short beep", "long beep", "hiss", "clank", "drip", "gust", "rumble", "chime"]
 
-    # Build 7–9 cue sequence
-    k = rng.randrange(7, 10)
-    seq = [rng.choice(cue_bank) for _ in range(k)]
+    # Use exactly 3 distinct cues to keep the surface simple
+    cues = rng.sample(cue_bank, 3)
 
-    # Decoys for anti-spoiler
-    rev = list(reversed(seq))
-    rot = seq[1:] + seq[:1]
+    # Build a 7–9 step sequence using ONLY those 3 cues
+    k = rng.randrange(7, 10)
+    seq = [rng.choice(cues) for _ in range(k)]
+
+    # Decoys
+    rev   = list(reversed(seq))
+    rot   = seq[1:] + seq[:1]
     tweak = seq[:]
     ti = rng.randrange(0, k)
-    tweak[ti] = rng.choice([c for c in cue_bank if c != seq[ti]])
+    tweak[ti] = rng.choice([c for c in cues if c != seq[ti]])
 
-    # Tight prompt: do NOT print the sequence; players must listen
     prompt = (
         f"From the {theme or 'hall'}, signals repeat. Listen and reproduce the exact cue "
         "sequence by tapping the cue bubbles. Use the ▶ Play button to hear them again."
@@ -1785,7 +1787,8 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
             "Replay the audio and tap the same cues."
         ],
         mechanic="sequence_input",
-        ui_spec={"cue_set": sorted(set(cue_bank)), "cues_audio": seq},
+        # Only show the 3 buttons needed for this round
+        ui_spec={"cue_set": cues, "cues_audio": seq},
     )
 
 # NEW: last-mile hardening so minis can't fail validation due to pattern/answer drift
