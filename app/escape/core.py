@@ -596,44 +596,58 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
         ui_spec={"grid": grid, "start": start_label, "notes": "Knight moves (2,1)."}
     )
 
-def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    cue_vocab = ["short beep","long beep","hiss","gust","rumble","chime","clank","drip"]
+def gen_translate_with_legend(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+    tokens = SEQ_TOKENS[:]
     k = rng.randrange(7, 11)
-    seq_cues = [rng.choice(cue_vocab) for _ in range(k)]
-    ans = ",".join(seq_cues)
+    cues = [("short beep","tap"), ("long beep","hold"),
+            ("hiss","left"), ("clank","right"),
+            ("gust","up"), ("drip","down"),
+            ("rumble","rotate_left"), ("chime","rotate_right")]
+    rng.shuffle(cues)
+    legend = cues[:5]
+    legend_map = {name: action for name, action in legend}
 
-    # three plausible decoys
-    rev   = ",".join(reversed(seq_cues))
-    rot   = ",".join(seq_cues[1:] + seq_cues[:1])
-    tweak = seq_cues[:]
+    seq_actions = [rng.choice(list(legend_map.values())) for _ in range(k)]
+    seq_cues    = [rng.choice([n for n,a in legend if a == act]) for act in seq_actions]
+
+    ans = ",".join(seq_actions)
+    rev = ",".join(reversed(seq_actions))
+    rot = ",".join(seq_actions[1:] + seq_actions[:1])
+    tweaked = seq_actions[:]
     tweak_idx = rng.randrange(0, k)
-    tweak[tweak_idx] = rng.choice([c for c in cue_vocab if c != seq_cues[tweak_idx]])
-    decoys = [rev, rot, ",".join(tweak)]
+    alt = rng.choice([t for t in legend_map.values() if t != seq_actions[tweak_idx]])
+    tweaked[tweak_idx] = alt
 
-    # Unique set for chip vocabulary (no duplicates like the screenshot)
-    cue_set = sorted({c for c in seq_cues})
+    legend_lines = "\n".join([f"- {n} → {a}" for n,a in legend])
 
     return Puzzle(
-        id=pid, archetype="mini",
-        prompt=(f"From the {theme or 'hall'}, a pattern of tones plays. "
-                "Press ▶ Play to hear it, then tap the matching cue chips in the same order."),
+        id=pid,
+        archetype="mini",
+        prompt=(f"From the {theme or 'consoles'}, signals repeat:\n"
+                f"{', '.join(seq_cues)}\n"
+                "Use this legend to translate each cue into an action:\n"
+                f"{legend_lines}\n"
+                "Enter the exact action sequence using the chips."),
+        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,200}$"},
+        solution={"answer": ans, "legend": legend, "length": k},
+        hints=[f"Sequence length: {k}.", f"Example: “{legend[0][0]}” = {legend[0][1]}. Order matters."],
+        decoys=[rev, rot, ",".join(tweaked)],
+        paraphrases=[
+            "The panel repeats audio cues; translate each into its action.",
+            "Use the legend to map every sound to a control input."
+        ],
         mechanic="sequence_input",
-        # We DO send the audio cue list so the client can synthesize playback,
-        # but we DO NOT print it in the prompt.
-        ui_spec={"mode": "audio", "cue_set": cue_set, "cues_audio": seq_cues},
-        answer_format={"pattern": r"^[A-Za-z0-9 ,_\-]{5,200}$"},
-        solution={"answer": ans, "length": k},
-        hints=[f"Sequence length: {k}.", "Replay with ▶ as needed; exact order matters."]
-    )
+        ui_spec={"sequence": SEQ_TOKENS[:]})
 
 def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     # Weighted pick (newer, more interactive games get higher weight)
     choices = [
-        (gen_knightword,          3),
-        (gen_signal_translate,    3),
-        (gen_pathcode,            2),
-        (gen_tapcode,             2),
-        (gen_acrostic,            1),
+        (gen_knightword,            3),
+        (gen_translate_with_legend,      3),  # ← the audio memory version later in the file
+        (gen_translate_with_legend, 1),  # ← optional, lower weight
+        (gen_pathcode,              2),
+        (gen_tapcode,               2),
+        (gen_acrostic,              1),
     ]
     funcs, w = zip(*choices)
     f = rng.choices(funcs, weights=w, k=1)[0]
@@ -728,7 +742,11 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                     # Ensure it’s interactive enough
                     steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
                     if len(steps) < 5:
-                        rt["puzzle"] = gen_signal_translate(rng, p.get("id") or pid, blacklist, theme).to_json()
+                        try:
+                            rt["puzzle"] = gen_signal_translate(rng, pid, set(), theme).to_json()
+                        except Exception as e:
+                            current_app.logger.warning("[escape] gen_signal_translate failed: %s; falling back", e)
+                            rt["puzzle"] = gen_pathcode(rng, pid, set(), theme).to_json()
                         continue
 
                 # --- Grid minis: if prompt says letters/word but cells are multi-char, repair
@@ -764,10 +782,10 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 p["answer_format"] = af
 
                 # add context so the sequence feels grounded in the scene
-            # add context (but skip lever legend for audio cue minis)
-            if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
-                _inject_sequence_legend(p, theme)
+                if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
+                    _inject_sequence_legend(p, theme)
                 _upgrade_minigame_hints(p)
+
                 rt["puzzle"] = p
                 continue
 
@@ -1348,16 +1366,17 @@ def _recent_answer_set(days: int = ANSWER_COOLDOWN_DAYS) -> set:
     for r in rows:
         blob = r.json_blob or {}
         # flat shape
-        for p in (blob.get("puzzles") or []):
-            if isinstance(p, dict):
-                sol = (p.get("solution") or {}).get("answer")
-                if sol: S.add(normalize_answer(sol))
+        for p in _as_dict_list(blob.get("puzzles")):
+            sol = (p.get("solution") or {}).get("answer")
+            if sol:
+                S.add(normalize_answer(sol))
         # trail shape
-        for rm in (blob.get("trail", {}).get("rooms") or []):
-            for rt in (rm.get("routes") or []):
-                pp = (rt.get("puzzle") or {})
+        for rm in _as_dict_list(blob.get("trail", {}).get("rooms")):
+            for rt in _as_dict_list(rm.get("routes")):
+                pp = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
                 sol = (pp.get("solution") or {}).get("answer")
-                if sol: S.add(normalize_answer(sol))
+                if sol:
+                    S.add(normalize_answer(sol))
     return S
 
 def _validate_minigame(p: Dict[str, Any]) -> None:
@@ -1396,10 +1415,10 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
             if normalize_answer(str(ans)) not in {normalize_answer(str(x)) for x in opts}:
                 raise ValueError("answer must be one of options for multiple_choice")
     elif mech == "sequence_input":
-        seq     = ui.get("sequence")
-        cue_set = ui.get("cue_set") or ui.get("cues_vocab")
-        if not ((isinstance(seq, list) and seq) or (isinstance(cue_set, list) and cue_set)):
-            raise ValueError("sequence_input requires ui_spec.sequence or ui_spec.cue_set")
+        seq = ui.get("sequence")
+        cue_ok = bool(ui.get("cue_set") or ui.get("cues_audio") or ui.get("cues"))
+        if not ((isinstance(seq, list) and seq) or cue_ok):
+            raise ValueError("sequence_input requires non-empty ui_spec.sequence or cue_set/cues_audio")
         steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
         if len(steps) < 5:
             raise ValueError("sequence_input answer must be at least 5 steps")
