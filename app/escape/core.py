@@ -484,7 +484,6 @@ def gen_tapcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -
 def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     """Tiny grid; follow directions to read the path word."""
     bl = {str(s).lower() for s in (blacklist or set())}
-    sr, sc = r, c
     word = re.sub(r"[^A-Za-z]", "", _scene_word_from_title(rng, theme, 4, 6)).lower()
     if not (4 <= len(word) <= 6) or word in bl:
         word = _random_word(rng, bl)
@@ -493,6 +492,7 @@ def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
     grid = [[rng.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
     # Start can be anywhere for variety
     r, c = rng.randrange(0, n), rng.randrange(0, n)
+    sr, sc = r, c                      # ← define sr, sc *after* picking r, c
     grid[r][c] = word[0].upper()
     # Allow L/U occasionally; optional wrap
     allow_LU = rng.random() < 0.6
@@ -727,61 +727,80 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 mech = (p.get("mechanic") or "").lower()
                 if mech not in ALLOWED_MECHANICS:
                     p["mechanic"] = "text_input"
+                    mech = "text_input"
                 ui = p.setdefault("ui_spec", {})
 
-                sol = (p.get("solution") or {}).get("answer", "")
-
-                # --- Sequence minis: guarantee tokens, length ≥5, and a matching pattern
-                if p.get("mechanic") == "sequence_input":
-                    # If this is a cue-only mini (has cues + hide_chips), do NOT inject lever chips.
-                    # inside: if mech == "sequence_input":
+                # --- Sequence minis: guarantee tokens, length ≥5, and visible cues/series
+                if mech == "sequence_input":
                     cue_only = bool(ui.get("cue_set") or ui.get("cues_audio") or ui.get("cues"))
                     if not ui.get("sequence") and not cue_only:
-                        ui["sequence"] = ["tap","hold","left","right","up","down","rotate_left","rotate_right"]
+                        ui["sequence"] = SEQ_TOKENS[:]
 
-                    # Ensure it’s interactive enough
-                    steps = [t for t in re.split(r"[,\s]+", str(sol)) if t]
-                    if len(steps) < 5:
-                        try:
-                            rt["puzzle"] = gen_signal_translate(rng, pid, set(), theme).to_json()
-                        except Exception as e:
-                            current_app.logger.warning("[escape] gen_signal_translate failed: %s; falling back", e)
-                            rt["puzzle"] = gen_pathcode(rng, pid, set(), theme).to_json()
-                        continue
+                    ans = (p.get("solution") or {}).get("answer", "")
+                    if isinstance(ans, list):
+                        ans = ",".join(str(t).strip() for t in ans if str(t).strip())
+                        p.setdefault("solution", {})["answer"] = ans
+                    steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
 
-                # --- Grid minis: if prompt says letters/word but cells are multi-char, repair
-                if p.get("mechanic") == "grid_input":
+                    def _has_explicit_series(txt: str, tokens: List[str]) -> bool:
+                        t = re.sub(r"(?is)controls:\s*[-•].*$", "", txt or "")
+                        token_pat = r"(?:%s)" % "|".join(re.escape(x) for x in tokens)
+                        return bool(re.search(r"\b\d\s*-\s*\d\b", t)) or bool(
+                            re.search(rf"\b{token_pat}\b(?:\s*,\s*\b{token_pat}\b){{2,}}", t)
+                        )
+
+                    has_series = True if cue_only else _has_explicit_series(p.get("prompt",""), ui.get("sequence", []))
+
+                    if (len(steps) < 5) or (not has_series):
+                        rt["puzzle"] = gen_signal_translate(rng, pid, set(), theme).to_json()
+                        p  = rt["puzzle"]
+                        mech = "sequence_input"
+                        ui = p.setdefault("ui_spec", {})
+                        # recompute from the NEW puzzle
+                        ans = (p.get("solution") or {}).get("answer", "")
+                        steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
+                        if len(steps) < 5:
+                            try:
+                                rt["puzzle"] = gen_signal_translate(rng, pid, set(), theme).to_json()
+                            except Exception as e:
+                                current_app.logger.warning("[escape] gen_signal_translate failed: %s; falling back", e)
+                                rt["puzzle"] = gen_pathcode(rng, pid, set(), theme).to_json()
+                            continue
+
+                # --- Grid minis: fix invalid grids / multi-char cells for letter collection
+                if mech == "grid_input":
                     grid = ui.get("grid")
                     prompt_txt = p.get("prompt") or ""
                     needs_letters = bool(re.search(r"\b(letter|letters|spell|word|collect)\b", prompt_txt, re.I))
                     bad_grid = not (isinstance(grid, list) and grid and all(isinstance(r, list) for r in grid))
                     long_tokens = any(len(str(cell)) > 1 for row in (grid or []) for cell in row) if not bad_grid else False
+                    sol = (p.get("solution") or {}).get("answer", "")
+
                     if bad_grid or (needs_letters and long_tokens):
-                        # If the answer is a word, rebuild as a valid single-letter grid that contains it.
                         if re.fullmatch(r"^[A-Za-z]{4,12}$", re.sub(r"[^A-Za-z]", "", str(sol))):
                             _force_letter_grid_for_answer(rng, p, sol)
                             p["prompt"] = (prompt_txt.rstrip() + "\nTap tiles to collect letters that spell the word.").strip()
                         else:
-                            # fallback: guaranteed-valid grid mini
                             rt["puzzle"] = gen_knightword(rng, p.get("id") or pid, blacklist, theme).to_json()
                             continue
 
-                    # NEW: enforce minimum interaction — at least 4 taps
+                    # enforce ≥4 taps
                     if len(re.sub(r"[^A-Za-z0-9]", "", str(sol) or "")) < 4:
                         rt["puzzle"] = gen_knightword(rng, p.get("id") or pid, blacklist, theme).to_json()
                         continue
 
-                # --- Coerce/repair pattern so it actually matches the solution
+                # --- Coerce/repair pattern so it actually matches the current solution
+                sol_now = (p.get("solution") or {}).get("answer", "")
                 af = p.get("answer_format") or {}
                 pat = (af.get("pattern") or "").strip()
-                need = _default_pattern_for_answer(sol)
+                need = _default_pattern_for_answer(sol_now)
                 if (not pat) or (not re.fullmatch(r"^\^.*\$$", pat)) or not (
-                    re.fullmatch(pat, str(sol)) or re.fullmatch(pat, normalize_answer(str(sol)))
+                    re.fullmatch(pat, str(sol_now)) or re.fullmatch(pat, normalize_answer(str(sol_now)))
                 ):
                     af["pattern"] = need
                 p["answer_format"] = af
 
-                # add context so the sequence feels grounded in the scene
+                # Add scene-grounding legend for sequences when no cue_set; tighten hints
                 if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
                     _inject_sequence_legend(p, theme)
                 _upgrade_minigame_hints(p)
@@ -1812,6 +1831,61 @@ def _force_pattern_match(p: Dict[str, Any]) -> None:
         af["pattern"] = need
     p["answer_format"] = af
 
+def _ensure_label_path_playable(rng: random.Random, p: Dict[str, Any]) -> None:
+    """If answer is a sequence of multi-char grid labels, make sure the grid
+    contains them in order on an adjacent path; rebuild placement if not."""
+    if (p.get("mechanic") != "grid_input"): return
+    ui = p.get("ui_spec") or {}
+    grid = ui.get("grid")
+    if not (isinstance(grid, list) and grid and all(isinstance(r, list) for r in grid)): return
+
+    labels_flat = [str(cell) for row in grid for cell in row]
+    # Extract the intended label path from the solution using existing labels
+    ans = str((p.get("solution") or {}).get("answer", ""))
+    if not ans: return
+    lab_re = re.compile("|".join(sorted(map(re.escape, set(labels_flat)), key=len, reverse=True)))
+    path = lab_re.findall(ans)
+    if len(path) < 2: return  # nothing to fix
+
+    # Map labels to coords (first occurrence)
+    coords = {}
+    for r, row in enumerate(grid):
+        for c, cell in enumerate(row):
+            coords.setdefault(str(cell), (r, c))
+
+    def adjacent(a, b):
+        (r1, c1), (r2, c2) = coords.get(a, (-9, -9)), coords.get(b, (9, 9))
+        return abs(r1 - r2) + abs(c1 - c2) == 1
+
+    have_all = all(x in coords for x in path)
+    ok = have_all and all(adjacent(path[i], path[i+1]) for i in range(len(path)-1))
+
+    if ok:
+        # Make sure prompt reflects correct count/start/end
+        taps = len(path)
+        clar = f"\nStart at {path[0]}; end at {path[-1]}. Move only to adjacent tiles (no diagonals). Exactly {taps} taps."
+        if clar.strip() not in (p.get("prompt") or ""):
+            p["prompt"] = (p.get("prompt","").rstrip() + clar).strip()
+        return
+
+    # Rebuild: place the labels along a snake path to guarantee adjacency
+    n_rows, n_cols = len(grid), len(grid[0])
+    snake = []
+    for r in range(n_rows):
+        cols = range(n_cols) if r % 2 == 0 else range(n_cols-1, -1, -1)
+        for c in cols:
+            snake.append((r, c))
+    # Place the path on the first len(path) cells of the snake
+    new_grid = [row[:] for row in grid]
+    for (lab, (r, c)) in zip(path, snake[:len(path)]):
+        new_grid[r][c] = lab
+    ui["grid"] = new_grid
+    p["ui_spec"] = ui
+
+    taps = len(path)
+    clar = f"\nStart at {path[0]}; end at {path[-1]}. Move only to adjacent tiles (no diagonals). Exactly {taps} taps."
+    if clar.strip() not in (p.get("prompt") or ""):
+        p["prompt"] = (p.get("prompt","").rstrip() + clar).strip()
 
 def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
     trail = blob.get("trail") or {}
@@ -1889,6 +1963,7 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
                     ui = p.setdefault("ui_spec", {})
 
             # Clarify ambiguous grid paths
+            _ensure_label_path_playable(rng, p)
             _annotate_grid_path_meta(p)
             # Finally, force the pattern and hints
             _force_pattern_match(p)
