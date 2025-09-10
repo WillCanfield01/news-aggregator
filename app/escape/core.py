@@ -597,51 +597,33 @@ def gen_knightword(rng: random.Random, pid: str, blacklist: set, theme: str = ""
     )
 
 def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    """
-    Audio-only memory mini.
-    Player hears/reads a repeating list of CUES (e.g., clank, hiss, long beep)
-    and must reproduce the exact cue sequence by tapping the cue bubbles.
-    The stored answer is the comma-joined cue list (NOT mapped to actions).
-    """
-    # cue vocabulary
     cue_vocab = ["short beep","long beep","hiss","gust","rumble","chime","clank","drip"]
-    k = rng.randrange(7, 11)  # 7–10 steps
+    k = rng.randrange(7, 11)
     seq_cues = [rng.choice(cue_vocab) for _ in range(k)]
-
-    # Build decoys from the true sequence
     ans = ",".join(seq_cues)
-    rev = ",".join(reversed(seq_cues))
-    rot = ",".join(seq_cues[1:] + seq_cues[:1])
-    tweak_idx = rng.randrange(0, k)
-    tweaked = seq_cues[:]
-    # choose an alternative cue that differs
-    alt = rng.choice([c for c in cue_vocab if c != seq_cues[tweak_idx]]) if cue_vocab else seq_cues[tweak_idx]
-    tweaked[tweak_idx] = alt
-    tweak = ",".join(tweaked)
-    decoys = [rev, rot, tweak]
 
-    legend_lines = "\n".join([f"- {c}" for c in sorted(set(seq_cues))])  # flavour (no mapping)
+    # three plausible decoys
+    rev   = ",".join(reversed(seq_cues))
+    rot   = ",".join(seq_cues[1:] + seq_cues[:1])
+    tweak = seq_cues[:]
+    tweak_idx = rng.randrange(0, k)
+    tweak[tweak_idx] = rng.choice([c for c in cue_vocab if c != seq_cues[tweak_idx]])
+    decoys = [rev, rot, ",".join(tweak)]
+
+    # Unique set for chip vocabulary (no duplicates like the screenshot)
+    cue_set = sorted({c for c in seq_cues})
 
     return Puzzle(
         id=pid, archetype="mini",
-        prompt=(f"From the {theme or 'hall'}, signals repeat:\n"
-                f"{', '.join(seq_cues)}\n"
-                "Listen and reproduce the exact cue sequence by tapping the cue bubbles. "
-                "Use the ▶ Play button to hear them again."),
+        prompt=(f"From the {theme or 'hall'}, a pattern of tones plays. "
+                "Press ▶ Play to hear it, then tap the matching cue chips in the same order."),
         mechanic="sequence_input",
-        ui_spec={
-            "cues": seq_cues,
-            "hide_chips": True  # UI should not render lever/action chips
-        },
-        # Longer pattern so multi-word cues fit comfortably
+        # We DO send the audio cue list so the client can synthesize playback,
+        # but we DO NOT print it in the prompt.
+        ui_spec={"mode": "audio", "cue_set": cue_set, "cues_audio": seq_cues},
         answer_format={"pattern": r"^[A-Za-z0-9 ,_\-]{5,200}$"},
-        solution={"answer": ans, "length": k, "cues": seq_cues},
-        hints=[f"Sequence length: {k}.", "Tap cue bubbles in order; use ▶ Play as needed."],
-        decoys=decoys,
-        paraphrases=[
-            "Hear the pattern and mirror it exactly.",
-            "An audio memory test—repeat the cues in order."
-        ]
+        solution={"answer": ans, "length": k},
+        hints=[f"Sequence length: {k}.", "Replay with ▶ as needed; exact order matters."]
     )
 
 def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
@@ -782,6 +764,8 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 p["answer_format"] = af
 
                 # add context so the sequence feels grounded in the scene
+            # add context (but skip lever legend for audio cue minis)
+            if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
                 _inject_sequence_legend(p, theme)
                 _upgrade_minigame_hints(p)
                 rt["puzzle"] = p
@@ -796,6 +780,28 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 rt["puzzle"] = gen_pathcode(rng, p["id"], blacklist, theme).to_json()
             else:
                 rt["puzzle"] = _synth_puzzle(rng, p["id"], blacklist, theme)
+
+def _annotate_grid_path_meta(p: Dict[str, Any]) -> None:
+    if (p.get("mechanic") != "grid_input"): return
+    ui = p.get("ui_spec") or {}
+    grid = ui.get("grid")
+    if not (isinstance(grid, list) and grid and isinstance(grid[0], list)): return
+
+    # Try to parse answers like "G5G8G9G6G3G2" into labels present on the grid
+    labels = [str(cell) for row in grid for cell in row]
+    lab_re = re.compile("|".join(sorted(map(re.escape, labels), key=len, reverse=True)))
+    ans = str((p.get("solution") or {}).get("answer", ""))
+    path = lab_re.findall(ans)
+    if len(path) < 4: return
+
+    start, end, taps = path[0], path[-1], len(path)
+    clar = f"\nStart at {start}; end at {end}. Move only to adjacent tiles (no diagonals). Exactly {taps} taps."
+    if clar.strip() not in (p.get("prompt") or ""):
+        p["prompt"] = (p.get("prompt","").rstrip() + clar).strip()
+    # Tighten hints so players aren’t guessing
+    hints = [h for h in (p.get("hints") or []) if h]
+    needed = ["Tap sequential adjacent tiles; don’t skip.", f"Path length: {taps} (from {start} to {end})."]
+    p["hints"] = (hints + [h for h in needed if h not in hints])[:2]
 
 # ───────────────────────── Fragment rules ─────────────────────────
 
@@ -1390,12 +1396,10 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
             if normalize_answer(str(ans)) not in {normalize_answer(str(x)) for x in opts}:
                 raise ValueError("answer must be one of options for multiple_choice")
     elif mech == "sequence_input":
-        seq = ui.get("sequence")
-        # Cue-only audio mini is valid without lever/action tokens
-        is_cue_only = isinstance(ui.get("cues"), list) and ui.get("cues") and bool(ui.get("hide_chips"))
-        if not is_cue_only and not (isinstance(seq, list) and seq):
-            raise ValueError("sequence_input requires non-empty ui_spec.sequence")
-        # Require a reasonably interactive answer (5–24 tokens)
+        seq     = ui.get("sequence")
+        cue_set = ui.get("cue_set") or ui.get("cues_vocab")
+        if not ((isinstance(seq, list) and seq) or (isinstance(cue_set, list) and cue_set)):
+            raise ValueError("sequence_input requires ui_spec.sequence or ui_spec.cue_set")
         steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
         if len(steps) < 5:
             raise ValueError("sequence_input answer must be at least 5 steps")
@@ -1827,7 +1831,9 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
                     mech = (p.get("mechanic") or "").strip().lower()
                     ui = p.setdefault("ui_spec", {})
 
-            # Finally, force the pattern to match whatever solution is stored
+            # Clarify ambiguous grid paths
+            _annotate_grid_path_meta(p)
+            # Finally, force the pattern and hints
             _force_pattern_match(p)
             _upgrade_minigame_hints(p)
 

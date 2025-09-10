@@ -402,6 +402,10 @@
             transform: scale(1.03)
         }
 
+        .grid .cell.near {
+            box-shadow: 0 0 0 2px rgba(88, 187, 255, .35) inset;
+        }
+
         /* NEW: visually mark the start cell the generator provides */
         .grid .cell.start {
             outline: 2px solid var(--brand);
@@ -429,23 +433,6 @@
             opacity: .6;
             pointer-events: none;
             filter: saturate(.7);
-        }
-
-        /* AFTER: add near other button styles */
-        .route-btn {
-            text-align: left;
-            min-width: 220px;
-        }
-
-        .route-title {
-            font-weight: 700;
-        }
-
-        .route-sub {
-            display: block;
-            font-size: 12px;
-            color: var(--muted);
-            margin-top: 2px;
         }
 
         /* Thematic route buttons */
@@ -893,195 +880,196 @@
             return new Promise(res => { setTimeout(() => { try { src.stop(); } catch { } res(); }, ms); });
         }
 
-        function renderSequenceInput(idx, uiSpec, statusEl, puzzle) {
+        function playCue(name, ctx) {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.connect(g).connect(ctx.destination);
+            const now = ctx.currentTime;
+
+            // simple, distinct voices
+            const W = 0.18, LONG = 0.45;
+            if (name === "short beep") { o.type = "sine"; o.frequency.value = 880; g.gain.setValueAtTime(0.9, now); g.gain.exponentialRampToValueAtTime(0.001, now + W); o.start(now); o.stop(now + W); return; }
+            if (name === "long beep") { o.type = "sine"; o.frequency.value = 440; g.gain.setValueAtTime(0.9, now); g.gain.exponentialRampToValueAtTime(0.001, now + LONG); o.start(now); o.stop(now + LONG); return; }
+            if (name === "hiss") { const n = ctx.createBufferSource(); const b = ctx.createBuffer(1, ctx.sampleRate * W, ctx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; n.buffer = b; const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 800; n.connect(f).connect(g).connect(ctx.destination); g.gain.setValueAtTime(0.6, now); g.gain.exponentialRampToValueAtTime(0.001, now + W); n.start(now); return; }
+            if (name === "gust") { const n = ctx.createBufferSource(); const b = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; n.buffer = b; const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 300; const g2 = ctx.createGain(); n.connect(f).connect(g2).connect(ctx.destination); g2.gain.setValueAtTime(0.001, now); g2.gain.exponentialRampToValueAtTime(0.8, now + 0.1); g2.gain.exponentialRampToValueAtTime(0.001, now + 0.3); n.start(now); return; }
+            if (name === "clank") { o.type = "square"; o.frequency.setValueAtTime(220, now); g.gain.setValueAtTime(0.9, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.12); o.start(now); o.stop(now + 0.12); return; }
+            if (name === "drip") { o.type = "triangle"; o.frequency.setValueAtTime(660, now); g.gain.setValueAtTime(0.8, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.16); o.start(now); o.stop(now + 0.16); return; }
+            if (name === "chime") { const o2 = ctx.createOscillator(); const g2 = ctx.createGain(); o.type = "sine"; o2.type = "sine"; o.frequency.value = 660; o2.frequency.value = 990; o.connect(g).connect(ctx.destination); o2.connect(g2).connect(ctx.destination); g.gain.setValueAtTime(0.7, now); g2.gain.setValueAtTime(0.5, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.35); g2.gain.exponentialRampToValueAtTime(0.001, now + 0.35); o.start(now); o2.start(now); o.stop(now + 0.35); o2.stop(now + 0.35); return; }
+            if (name === "rumble") { o.type = "sawtooth"; o.frequency.value = 90; g.gain.setValueAtTime(0.5, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.4); o.start(now); o.stop(now + 0.4); return; }
+        }
+
+        let AUDIO_CTX; // reuse across plays
+
+        function renderCueMemory(idx, uiSpec, statusEl) {
             const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const cueSet = Array.from(new Set(uiSpec?.cue_set || []));
+            const cues = Array.isArray(uiSpec?.cues_audio) ? uiSpec.cues_audio : [];
+
+            const row = document.createElement("div"); row.className = "row";
+            const playBtn = document.createElement("button"); playBtn.textContent = "▶ Play sequence";
+            row.appendChild(playBtn); ui.appendChild(row);
+
+            // Visual progress (doesn't reveal names)
+            const strip = document.createElement("div"); strip.className = "cue-strip";
+            const dots = cues.map(() => {
+                const d = document.createElement("div"); d.className = "cue"; d.textContent = "•"; strip.appendChild(d); return d;
+            });
+            if (dots.length) ui.appendChild(strip);
+
+            const bank = document.createElement("div"); bank.className = "chips"; ui.appendChild(bank);
             const chosen = [];
-
-            // Cues from server (preferred), with fallback to solution
-            const cues = Array.isArray(uiSpec?.cues) ? uiSpec.cues
-                : (Array.isArray(puzzle?.solution?.cues) ? puzzle.solution.cues : []);
-            const hideChips = !!uiSpec?.hide_chips;
-
-            // ---- Cue strip + audio playback (unchanged synth helpers) ----
-            const actx = makeSynth?.();
-
-            if (cues.length) {
-                const stripWrap = document.createElement("div");
-
-                const playBtn = document.createElement("button");
-                playBtn.textContent = "▶ Play sequence";
-                playBtn.style.marginRight = "8px";
-                playBtn.onclick = async () => {
-                    playBtn.disabled = true;
-                    for (const cue of cues) {
-                        const node = stripWrap.querySelector(`.cue[data-cue="${cue}"]`);
-                        if (node) node.classList.add("playing");
-
-                        // simple sound design
-                        if (/short beep/i.test(cue)) { await playTone(actx, "sine", 880, 160); }
-                        else if (/long beep/i.test(cue)) { await playTone(actx, "sine", 660, 420); }
-                        else if (/rumble/i.test(cue)) { await playTone(actx, "sine", 120, 280, 0.06); }
-                        else if (/chime/i.test(cue)) { await playTone(actx, "triangle", 1200, 220, 0.05); }
-                        else if (/hiss|gust/i.test(cue)) { await playNoise(actx, 220); }
-                        else if (/drip/i.test(cue)) { await playTone(actx, "square", 980, 120, 0.04); }
-                        else if (/clank/i.test(cue)) { await playTone(actx, "triangle", 400, 180, 0.05); }
-
-                        await new Promise(r => setTimeout(r, 70));
-                        if (node) node.classList.remove("playing");
-                    }
-                    playBtn.disabled = false;
+            cueSet.forEach(c => {
+                const chip = document.createElement("div"); chip.className = "chip"; chip.textContent = c;
+                chip.onclick = () => {
+                    chosen.push(c);
+                    state.miniAnswer[idx] = chosen.join(",");
+                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                    statusEl.textContent = `Cues: ${state.miniAnswer[idx]}`;
                 };
+                bank.appendChild(chip);
+            });
 
-                const strip = document.createElement("div");
-                strip.className = "cue-strip";
-                cues.forEach(cue => {
-                    const b = document.createElement("div");
-                    b.className = "cue";
-                    b.dataset.cue = cue;
-                    b.textContent = cue;
-                    b.onclick = () => {
-                        chosen.push(cue);
-                        state.miniAnswer[idx] = chosen.join(",");
-                        $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                        statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
-                    };
-                    strip.appendChild(b);
-                });
-
-                ui.appendChild(playBtn);
-                stripWrap.appendChild(strip);
-                ui.appendChild(stripWrap);
-            }
-
-            // Optional lever chips — only if explicitly allowed
-            if (!hideChips) {
-                const tokens =
-                    (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
-                        (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
-                            DEFAULT_TOKENS;
-                const box = document.createElement("div");
-                box.className = "chips";
-                tokens.forEach(tok => {
-                    const chip = document.createElement("div");
-                    chip.className = "chip";
-                    chip.textContent = tok;
-                    chip.addEventListener("click", () => {
-                        chosen.push(tok);
-                        state.miniAnswer[idx] = chosen.join(",");
-                        $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                        statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
-                    });
-                    box.appendChild(chip);
-                });
-                ui.appendChild(box);
-            }
-
-            // Undo/Clear + free-type
-            const controls = document.createElement("div");
-            controls.className = "row";
-            controls.style.marginTop = "6px";
-            const undo = document.createElement("button");
-            undo.textContent = "Undo";
-            undo.onclick = () => {
-                chosen.pop();
-                state.miniAnswer[idx] = chosen.join(",");
-                $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`;
-            };
-            const clear = document.createElement("button");
-            clear.textContent = "Clear";
-            clear.onclick = () => {
-                chosen.splice(0, chosen.length);
-                state.miniAnswer[idx] = "";
-                $(`pzin-${idx}`).value = "";
-                statusEl.textContent = "Sequence cleared.";
-            };
+            const controls = document.createElement("div"); controls.className = "row"; controls.style.marginTop = "6px";
+            const undo = document.createElement("button"); undo.textContent = "Undo";
+            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Cues: ${state.miniAnswer[idx] || "(empty)"}`; };
+            const clear = document.createElement("button"); clear.textContent = "Clear";
+            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
             controls.appendChild(undo); controls.appendChild(clear);
             ui.appendChild(controls);
 
-            // keep manual entry
             $(`pzinrow-${idx}`).style.display = "flex";
             $(`pzin-${idx}`).placeholder = "Tap cues — e.g., clank,chime,long beep";
+
+            playBtn.onclick = () => {
+                if (!cues.length) { toast("No audio available"); return; }
+                if (!AUDIO_CTX) AUDIO_CTX = new (window.AudioContext || window.webkitAudioContext)();
+                playBtn.disabled = true;
+                const stepMs = 420;
+                cues.forEach((cue, i) => {
+                    setTimeout(() => {
+                        dots.forEach(d => d.classList.remove("playing"));
+                        if (dots[i]) dots[i].classList.add("playing");
+                        playCue(cue, AUDIO_CTX);
+                        if (i === cues.length - 1) setTimeout(() => {
+                            dots.forEach(d => d.classList.remove("playing"));
+                            playBtn.disabled = false;
+                        }, stepMs);
+                    }, i * stepMs);
+                });
+            };
+        }
+
+        function renderSequenceInput(idx, uiSpec, statusEl) {
+            // Audio-first
+            if (Array.isArray(uiSpec?.cue_set) || Array.isArray(uiSpec?.cues_audio)) {
+                return renderCueMemory(idx, uiSpec, statusEl);
+            }
+
+            // Token chips (tap/hold/left/…)
+            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
+            const chosen = [];
+            const tokens =
+                (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
+                    (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
+                        DEFAULT_TOKENS;
+
+            const bank = document.createElement("div");
+            bank.className = "chips";
+            tokens.forEach(t => {
+                const chip = document.createElement("div");
+                chip.className = "chip";
+                chip.textContent = t;
+                chip.onclick = () => {
+                    chosen.push(t);
+                    state.miniAnswer[idx] = chosen.join(",");
+                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                    statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
+                };
+                bank.appendChild(chip);
+            });
+            ui.appendChild(bank);
+
+            const controls = document.createElement("div");
+            controls.className = "row"; controls.style.marginTop = "6px";
+            const undo = document.createElement("button"); undo.textContent = "Undo";
+            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`; };
+            const clear = document.createElement("button"); clear.textContent = "Clear";
+            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
+            controls.appendChild(undo); controls.appendChild(clear);
+            ui.appendChild(controls);
+
+            // Allow manual editing too
+            $(`pzinrow-${idx}`).style.display = "flex";
+            $(`pzin-${idx}`).placeholder = "e.g., tap,hold,left,right";
         }
 
         function renderGridInput(idx, uiSpec, statusEl) {
             const ui = $(`pzui-${idx}`); ui.innerHTML = "";
             const grid = Array.isArray(uiSpec?.grid) ? uiSpec.grid : [];
-            if (!grid.length) {
-                ui.innerHTML = `<div class="helper">Grid missing — type the answer below.</div>`;
-                $(`pzinrow-${idx}`).style.display = "flex"; return;
-            }
-
-            const startRC = Array.isArray(uiSpec?.start) && uiSpec.start.length === 2
-                ? { r: Number(uiSpec.start[0]) || 0, c: Number(uiSpec.start[1]) || 0 }
-                : null;
+            if (!grid.length) { ui.innerHTML = `<div class="helper">Grid missing — type the answer below.</div>`; $(`pzinrow-${idx}`).style.display = "flex"; return; }
 
             const nCols = Math.max(...grid.map(r => r.length));
-            const g = document.createElement("div");
-            g.className = "grid";
+            const g = document.createElement("div"); g.className = "grid";
             g.style.gridTemplateColumns = `repeat(${nCols}, minmax(36px, auto))`;
 
-            const path = [];
-            grid.forEach((row, r) => row.forEach((val, c) => {
-                const cell = document.createElement("div");
-                cell.className = "cell";
-                if (startRC && r === startRC.r && c === startRC.c) cell.classList.add("start");
-                cell.textContent = String(val);
-                cell.addEventListener("click", () => {
-                    cell.classList.toggle("on");
-                    if (cell.classList.contains("on")) {
-                        path.push(String(val));
-                    } else {
-                        const i = path.lastIndexOf(String(val));
-                        if (i >= 0) path.splice(i, 1);
-                    }
-                    state.miniAnswer[idx] = path.join("");
-                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                    statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
-                });
-                g.appendChild(cell);
-            }));
+            const cells = []; // [r][c] -> element
+            for (let r = 0; r < grid.length; r++) {
+                cells[r] = [];
+                for (let c = 0; c < grid[r].length; c++) {
+                    const cell = document.createElement("div");
+                    cell.className = "cell";
+                    cell.dataset.r = r; cell.dataset.c = c;
+                    cell.textContent = String(grid[r][c]);
+                    cells[r][c] = cell;
+                    g.appendChild(cell);
+                }
+            }
             ui.appendChild(g);
 
-            if (startRC) {
-                const helper = document.createElement("div");
-                helper.className = "helper";
-                helper.textContent = "Start at the starred cell; then follow the prompt’s directions.";
-                ui.appendChild(helper);
+            const path = [];           // labels
+            const coords = [];         // [{r,c}]
+            function isAdj(a, b) { return Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1; }
+            function highlightNext() {
+                g.querySelectorAll(".cell").forEach(el => el.classList.remove("near"));
+                if (!coords.length) return;
+                const { r, c } = coords[coords.length - 1];
+                [[r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]].forEach(([rr, cc]) => {
+                    if (cells[rr]?.[cc]) cells[rr][cc].classList.add("near");
+                });
             }
 
-            const controls = document.createElement("div");
-            controls.className = "row";
-            controls.style.marginTop = "6px";
-            const undo = document.createElement("button");
-            undo.textContent = "Undo";
-            undo.onclick = () => {
-                // un-toggle the last selected label if visible
-                const last = path.pop();
-                if (last !== undefined) {
-                    // try to un-highlight a matching visible cell (best-effort)
-                    const cells = g.querySelectorAll(".cell.on");
-                    for (let i = cells.length - 1; i >= 0; i--) {
-                        if (cells[i].textContent === last) { cells[i].classList.remove("on"); break; }
+            g.addEventListener("click", (e) => {
+                const cell = e.target.closest(".cell"); if (!cell) return;
+                const r = +cell.dataset.r, c = +cell.dataset.c;
+                const label = cell.textContent;
+
+                if (cell.classList.contains("on")) {
+                    // allow undo by clicking the last cell
+                    const last = coords[coords.length - 1];
+                    if (last && last.r === r && last.c === c) {
+                        cell.classList.remove("on"); coords.pop(); path.pop();
+                    } else {
+                        toast("Undo by tapping the most recent tile.");
+                        return;
                     }
+                } else {
+                    if (coords.length && !isAdj(coords[coords.length - 1], { r, c })) {
+                        toast("Move to an adjacent tile (no diagonals).");
+                        return;
+                    }
+                    cell.classList.add("on"); coords.push({ r, c }); path.push(label);
                 }
+
                 state.miniAnswer[idx] = path.join("");
                 $(`pzin-${idx}`).value = state.miniAnswer[idx];
                 statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
-            };
-            const clear = document.createElement("button");
-            clear.textContent = "Clear";
-            clear.onclick = () => {
-                g.querySelectorAll(".cell.on").forEach(c => c.classList.remove("on"));
-                path.splice(0, path.length);
-                state.miniAnswer[idx] = "";
-                $(`pzin-${idx}`).value = "";
-                statusEl.textContent = "Path cleared.";
-            };
-            controls.appendChild(undo); controls.appendChild(clear);
-            ui.appendChild(controls);
+                highlightNext();
+            });
 
-            // allow manual edit too
+            // Controls (undo/clear) remain the same…
+            // After you build the buttons, call highlightNext() once at the end.
+            highlightNext();
+
             $(`pzinrow-${idx}`).style.display = "flex";
             $(`pzin-${idx}`).placeholder = "Your collected letters…";
         }
