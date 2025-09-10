@@ -467,8 +467,15 @@ def _reshuffle_mechanics_for_variety(room_json: Dict[str, Any]) -> Dict[str, Any
                 best_perm = perm
 
         # Apply the best permutation (keeps the same 3 puzzles, just reassigns to the 3 route ids)
+        # Apply best permutation by KEEPING each route id/label but SWAPPING the puzzles.
         if best_perm is not None:
-            rm["routes"] = [routes[i] for i in best_perm]
+            new_routes = []
+            for dest_idx, src_idx in enumerate(best_perm):
+                base  = json.loads(json.dumps(routes[dest_idx]))  # id/label/sub preserved
+                donor = routes[src_idx]
+                base["puzzle"] = donor.get("puzzle")              # <- puzzle reassigned
+                new_routes.append(base)
+            rm["routes"] = new_routes
 
         # Update seen set with what this scene now shows for each route id
         for rt in (rm.get("routes") or []):
@@ -684,9 +691,13 @@ def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: st
                 f"{legend_lines}\n"
                 "Enter the exact action sequence using the chips."),
         mechanic="sequence_input",
-        ui_spec={"sequence": SEQ_TOKENS[:]},
-        answer_format={"pattern": rf"^[A-Za-z0-9,\-]{{5,{min(160, len(ans) + 4)}}}$"},
-        solution={"answer": ans, "legend": legend, "length": k},
+        ui_spec={
+            "sequence": ["tap","hold","left","right","up","down","rotate_left","rotate_right"],
+            "legend": legend,           # <- allow UI to render a mapping
+            "cues": seq_cues            # <- allow UI to render/play the cue strip
+        },
+        answer_format={"pattern": r"^[A-Za-z0-9,\-]{5,24}$"},
+        solution={"answer": ans, "legend": legend, "length": k, "cues": seq_cues},
         hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
         decoys=decoys,
         paraphrases=paraphrases

@@ -339,11 +339,42 @@
             border-radius: 999px;
             background: #132147;
             border: 1px solid #2a3c73;
-            cursor: pointer
+            cursor: pointer;
+            transition: transform .08s ease, box-shadow .08s ease, filter .08s ease;
+            box-shadow: 0 2px 0 rgba(0, 0, 0, .25);
         }
 
         .chip:hover {
             filter: brightness(1.06)
+        }
+
+        .chip:active {
+            transform: translateY(1px);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, .25)
+        }
+
+        /* Cue strip for sequence minis */
+        .cue-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px
+        }
+
+        .cue {
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: #1b2647;
+            border: 1px solid #2a3c73;
+            user-select: none;
+            transition: transform .08s ease, box-shadow .08s ease, filter .08s ease;
+            box-shadow: 0 2px 0 rgba(0, 0, 0, .25);
+        }
+
+        .cue.playing {
+            outline: 2px solid var(--brand);
+            filter: brightness(1.15);
+            transform: translateY(-1px);
         }
 
         .grid {
@@ -833,15 +864,106 @@
         }
 
         const DEFAULT_TOKENS = ["tap", "hold", "left", "right", "up", "down", "rotate_left", "rotate_right", "press", "wait"];
-        function renderSequenceInput(idx, uiSpec, statusEl) {
+
+        // Tiny WebAudio synth for cues
+        function makeSynth() {
+            try { return new (window.AudioContext || window.webkitAudioContext)(); }
+            catch { return null; }
+        }
+        function playTone(actx, type = "sine", freq = 440, ms = 200, gain = 0.05) {
+            if (!actx) return Promise.resolve();
+            const o = actx.createOscillator();
+            const g = actx.createGain();
+            o.type = type; o.frequency.value = freq;
+            g.gain.value = gain;
+            o.connect(g).connect(actx.destination);
+            o.start();
+            return new Promise(res => { setTimeout(() => { o.stop(); res(); }, ms); });
+        }
+        function playNoise(actx, ms = 250, gain = 0.03) {
+            if (!actx) return Promise.resolve();
+            const bufferSize = actx.sampleRate * (ms / 1000);
+            const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.7;
+            const src = actx.createBufferSource(); src.buffer = buffer;
+            const g = actx.createGain(); g.gain.value = gain;
+            src.connect(g).connect(actx.destination);
+            src.start();
+            return new Promise(res => { setTimeout(() => { try { src.stop(); } catch { } res(); }, ms); });
+        }
+
+        function renderSequenceInput(idx, uiSpec, statusEl, puzzle) {
             const ui = $(`pzui-${idx}`); ui.innerHTML = "";
             const chosen = [];
-            // NEW: prefer ui_spec.sequence (LLM), fall back to .tokens, then defaults
+
             const tokens =
                 (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
                     (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
                         DEFAULT_TOKENS;
 
+            // Legend & cues (provided by generator for richer UI)
+            const legendPairs = Array.isArray(uiSpec?.legend) ? uiSpec.legend
+                : (Array.isArray(puzzle?.solution?.legend) ? puzzle.solution.legend : []);
+            const legendMap = Object.fromEntries(legendPairs || []);
+            const cues = Array.isArray(uiSpec?.cues) ? uiSpec.cues
+                : (Array.isArray(puzzle?.solution?.cues) ? puzzle.solution.cues : []);
+
+            // 1) Cue strip (click cues to append mapped action)
+            if (cues.length && Object.keys(legendMap).length) {
+                const strip = document.createElement("div");
+                strip.className = "cue-strip";
+
+                // Play control
+                const playBtn = document.createElement("button");
+                playBtn.textContent = "▶ Play sequence";
+                playBtn.style.marginRight = "8px";
+
+                const actx = makeSynth();
+                playBtn.onclick = async () => {
+                    playBtn.disabled = true;
+                    for (const cue of cues) {
+                        // Highlight current cue bubble
+                        const node = [...strip.querySelectorAll(".cue")].find(x => x.dataset.cue === cue);
+                        if (node) node.classList.add("playing");
+
+                        // Sound design (minimal but distinct)
+                        if (/short beep/i.test(cue)) { await playTone(actx, "sine", 880, 160); }
+                        else if (/long beep/i.test(cue)) { await playTone(actx, "sine", 660, 420); }
+                        else if (/rumble/i.test(cue)) { await playTone(actx, "sine", 120, 280, 0.06); }
+                        else if (/chime/i.test(cue)) { await playTone(actx, "triangle", 1200, 220, 0.05); }
+                        else if (/hiss|gust/i.test(cue)) { await playNoise(actx, 220); }
+                        else if (/drip/i.test(cue)) { await playTone(actx, "square", 980, 120, 0.04); }
+                        else if (/clank/i.test(cue)) { await playTone(actx, "triangle", 400, 180, 0.05); }
+
+                        await new Promise(r => setTimeout(r, 70));
+                        if (node) node.classList.remove("playing");
+                    }
+                    playBtn.disabled = false;
+                };
+
+                ui.appendChild(playBtn);
+
+                cues.forEach(cue => {
+                    const b = document.createElement("div");
+                    b.className = "cue";
+                    b.dataset.cue = cue;
+                    b.textContent = cue;
+                    b.title = legendMap[cue] ? `→ ${legendMap[cue]}` : "";
+                    b.onclick = () => {
+                        const mapped = legendMap[cue];
+                        if (!mapped) return;
+                        chosen.push(mapped);
+                        state.miniAnswer[idx] = chosen.join(",");
+                        $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                        statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
+                    };
+                    strip.appendChild(b);
+                });
+                ui.appendChild(strip);
+            }
+
+            // 2) Action chips (fallback / power user)
             const box = document.createElement("div");
             box.className = "chips";
             tokens.forEach(tok => {
@@ -859,21 +981,32 @@
             });
             ui.appendChild(box);
 
+            // 3) Undo/Clear + free-type
             const controls = document.createElement("div");
             controls.className = "row";
             controls.style.marginTop = "6px";
             const undo = document.createElement("button");
             undo.textContent = "Undo";
-            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`; };
+            undo.onclick = () => {
+                chosen.pop();
+                state.miniAnswer[idx] = chosen.join(",");
+                $(`pzin-${idx}`).value = state.miniAnswer[idx];
+                statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`;
+            };
             const clear = document.createElement("button");
             clear.textContent = "Clear";
-            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
+            clear.onclick = () => {
+                chosen.splice(0, chosen.length);
+                state.miniAnswer[idx] = "";
+                $(`pzin-${idx}`).value = "";
+                statusEl.textContent = "Sequence cleared.";
+            };
             controls.appendChild(undo); controls.appendChild(clear);
             ui.appendChild(controls);
 
-            // free-type is allowed too
+            // text input also available
             $(`pzinrow-${idx}`).style.display = "flex";
-            $(`pzin-${idx}`).placeholder = "e.g., tap,hold,left,right";
+            $(`pzin-${idx}`).placeholder = "Tap cues or chips — e.g., tap,hold,left,right";
         }
 
         function renderGridInput(idx, uiSpec, statusEl) {
@@ -1024,7 +1157,7 @@
                 if (mech === "multiple_choice") {
                     renderMultipleChoice(idx, p.ui_spec || {}, status);
                 } else if (mech === "sequence_input") {
-                    renderSequenceInput(idx, p.ui_spec || {}, status);
+                    renderSequenceInput(idx, p.ui_spec || {}, status, p);
                 } else if (mech === "grid_input") {
                     renderGridInput(idx, p.ui_spec || {}, status);
                 } else {
