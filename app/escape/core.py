@@ -1391,7 +1391,9 @@ def _validate_minigame(p: Dict[str, Any]) -> None:
                 raise ValueError("answer must be one of options for multiple_choice")
     elif mech == "sequence_input":
         seq = ui.get("sequence")
-        if not (isinstance(seq, list) and seq):
+        # Cue-only audio mini is valid without lever/action tokens
+        is_cue_only = isinstance(ui.get("cues"), list) and ui.get("cues") and bool(ui.get("hide_chips"))
+        if not is_cue_only and not (isinstance(seq, list) and seq):
             raise ValueError("sequence_input requires non-empty ui_spec.sequence")
         # Require a reasonably interactive answer (5–24 tokens)
         steps = [t for t in re.split(r"[,\s]+", str(ans)) if t]
