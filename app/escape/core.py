@@ -242,57 +242,6 @@ def _random_word(rng: random.Random, blacklist: set) -> str:
     pool = [w for w in ANAGRAM_WORDS if w not in blacklist]
     return rng.choice(pool) if pool else rng.choice(ANAGRAM_WORDS)
 
-def gen_signal_translate(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    tokens = SEQ_TOKENS[:]
-    k = rng.randrange(7, 11)  # 7–10 steps
-
-    cues = [("short beep","tap"), ("long beep","hold"),
-            ("hiss","left"), ("clank","right"),
-            ("gust","up"), ("drip","down"),
-            ("rumble","rotate_left"), ("chime","rotate_right")]
-    rng.shuffle(cues)
-    legend = cues[:5]
-    legend_map = {name: action for name, action in legend}
-
-    seq_actions = [rng.choice(list(legend_map.values())) for _ in range(k)]
-    seq_cues    = [rng.choice([n for n,a in legend if a == act]) for act in seq_actions]
-
-    ans = ",".join(seq_actions)
-    rev = ",".join(reversed(seq_actions))
-    rot = ",".join(seq_actions[1:] + seq_actions[:1])
-    tweak_idx = rng.randrange(0, k)
-    alt_token_choices = [t for t in legend_map.values() if t != seq_actions[tweak_idx]]
-    tweaked = seq_actions[:]
-    if alt_token_choices:
-        tweaked[tweak_idx] = rng.choice(alt_token_choices)
-    tweak = ",".join(tweaked)
-    decoys = [rev, rot, tweak]
-
-    legend_lines = "\n".join([f"- {n} → {a}" for n,a in legend])
-    ex_name, ex_action = legend[0]
-    paraphrases = [
-        "The panel repeats audio cues; translate each into its action.",
-        "Use the legend to map every sound to a control input.",
-        "Convert cues to actions one-for-one; order matters."
-    ]
-
-    return Puzzle(
-        id=pid,
-        archetype="mini",
-        prompt=(f"From the {theme or 'consoles'}, signals repeat:\n"
-                f"{', '.join(seq_cues)}\n"
-                "Use this legend to translate each cue into an action:\n"
-                f"{legend_lines}\n"
-                "Enter the exact action sequence using the chips."),
-        answer_format={"pattern": rf"^[A-Za-z0-9,\-]{{5,{min(160, len(ans) + 4)}}}$"},
-        solution={"answer": ans, "legend": legend, "length": k},
-        hints=[f"Sequence length: {k}.", f"Example: “{ex_name}” = {ex_action}. Order matters."],
-        decoys=decoys,
-        paraphrases=paraphrases,
-        mechanic="sequence_input",
-        ui_spec={"sequence": tokens}
-    )
-
 def gen_caesar(rng: random.Random, pid: str, blacklist: set) -> Puzzle:
     cands = [w for w in ANAGRAM_WORDS if 5 <= len(w) <= 8 and w not in blacklist]
     ans = rng.choice(cands) if cands else _random_word(rng, blacklist)
@@ -811,12 +760,16 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                         # If the answer is a word, rebuild as a valid single-letter grid that contains it.
                         if re.fullmatch(r"^[A-Za-z]{4,12}$", re.sub(r"[^A-Za-z]", "", str(sol))):
                             _force_letter_grid_for_answer(rng, p, sol)
-                            # Also make the instruction unambiguous
                             p["prompt"] = (prompt_txt.rstrip() + "\nTap tiles to collect letters that spell the word.").strip()
                         else:
-                            # fallback: use a safe path mini instead
+                            # fallback: guaranteed-valid grid mini
                             rt["puzzle"] = gen_knightword(rng, p.get("id") or pid, blacklist, theme).to_json()
                             continue
+
+                    # NEW: enforce minimum interaction — at least 4 taps
+                    if len(re.sub(r"[^A-Za-z0-9]", "", str(sol) or "")) < 4:
+                        rt["puzzle"] = gen_knightword(rng, p.get("id") or pid, blacklist, theme).to_json()
+                        continue
 
                 # --- Coerce/repair pattern so it actually matches the solution
                 af = p.get("answer_format") or {}
@@ -1001,6 +954,8 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
     theme = f"{rm.get('title','')} {rm.get('text','')}".strip()
     routes_raw = _as_dict_list(rm.get("routes"))
     cleaned = []
+
+    # Normalize any provided routes/puzzles first
     for rt in routes_raw:
         p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
         if not p:
@@ -1016,42 +971,41 @@ def _ensure_routes(rm: Dict[str, Any], r_index: int, rng: random.Random, count: 
                     p.get("type"), (p.get("solution") or {}).get("answer", "")
                 )
             }
-        # AFTER
         if "solution" not in p or (p.get("solution") or {}).get("answer") in (None, ""):
             p = _synth_puzzle(rng, f"r{r_index}_autopz_{len(cleaned)+1}", theme=theme)
-        _upgrade_minigame_hints(p)  # ← add
+        _upgrade_minigame_hints(p)
 
         cleaned.append({
             "id": (rt.get("id") or "").lower(),
             "label": rt.get("label"),
+            "sub": rt.get("sub"),
             "puzzle": p
         })
 
-        # AFTER
-        ids = ["cautious", "brisk", "risky"][:count]
-        themed = _thematic_routes_for_room(rng, theme)
+    # Build the final 3 routes (fill/rename/theme)
+    ids = ["cautious", "brisk", "risky"][:count]
+    themed = _thematic_routes_for_room(rng, theme)
 
-        out = []
-        for rid in ids:
-            existing = next((x for x in cleaned if x["id"] == rid), None)
-            label, sub = themed.get(rid, (None, None))
-            if existing:
-                # keep LLM/custom labels if present; otherwise use themed defaults
-                lbl = existing.get("label") or label or rid.title()
-                out.append({
-                    "id": rid,
-                    "label": lbl,
-                    "sub": existing.get("sub") or sub,          # NEW
-                    "puzzle": existing["puzzle"]
-                })
-            else:
-                pid = f"r{r_index}_{rid}_pz_autogen"
-                out.append({
-                    "id": rid,
-                    "label": label or rid.title(),
-                    "sub": sub,                                  # NEW
-                    "puzzle": _synth_puzzle(rng, pid, theme=theme)
-                })
+    out = []
+    for rid in ids:
+        existing = next((x for x in cleaned if x["id"] == rid), None)
+        label, sub = themed.get(rid, (None, None))
+        if existing:
+            lbl = existing.get("label") or label or rid.title()
+            out.append({
+                "id": rid,
+                "label": lbl,
+                "sub": existing.get("sub") or sub,
+                "puzzle": existing["puzzle"]
+            })
+        else:
+            pid = f"r{r_index}_{rid}_pz_autogen"
+            out.append({
+                "id": rid,
+                "label": label or rid.title(),
+                "sub": sub,
+                "puzzle": _synth_puzzle(rng, pid, theme=theme)
+            })
 
     rm["routes"] = out
     fr = rm.get("fragment_rule") or "FIRST2"
@@ -1482,8 +1436,8 @@ def _validate_puzzle(p: Dict[str, Any]) -> None:
     ans = (p.get("solution") or {}).get("answer")
     if not ans or not normalize_answer(ans):
         raise ValueError("Empty solution")
-    if normalize_answer(ans).lower() in {s.upper() for s in COMMON_STOCK_ANSWERS}:
-        raise ValueError("Stock/cliché answer")
+    if normalize_answer(ans).lower() in {s.lower() for s in COMMON_STOCK_ANSWERS}:
+        raise ValueError("Puzzle uses stock/cliché answer")
     pattern = (p.get("answer_format") or {}).get("pattern")
     if not pattern or not re.match(r"^\^.*\$$", pattern):
         raise ValueError("answer_format.pattern must be anchored ^...$")
@@ -1859,11 +1813,17 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
                         _force_letter_grid_for_answer(rng, p, sol)
                         p["prompt"] = (prompt_txt.rstrip() + "\nTap tiles to collect letters that spell the word.").strip()
                     else:
-                        # fallback to a guaranteed-valid grid mini
                         rt["puzzle"] = gen_knightword(rng, pid, set(), theme).to_json()
                         p = rt["puzzle"]
                         mech = (p.get("mechanic") or "").strip().lower()
                         ui = p.setdefault("ui_spec", {})
+
+                # NEW: enforce >=4 taps even if grid is otherwise valid
+                if len(re.sub(r"[^A-Za-z0-9]", "", str(sol) or "")) < 4:
+                    rt["puzzle"] = gen_knightword(rng, pid, set(), theme).to_json()
+                    p = rt["puzzle"]
+                    mech = (p.get("mechanic") or "").strip().lower()
+                    ui = p.setdefault("ui_spec", {})
 
             # Finally, force the pattern to match whatever solution is stored
             _force_pattern_match(p)
