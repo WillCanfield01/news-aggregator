@@ -726,6 +726,84 @@ def _force_letter_grid_for_answer(rng: random.Random, p: Dict[str, Any], answer:
     extra = [f"Grid size: {n}×{n}.", f"Collect exactly {len(ans)} letters."]
     p["hints"] = (hints + [h for h in extra if h not in hints])[:2]
 
+# ── MC visual/interactive helpers ────────────────────────────────────────────
+_ROMAN_MAP = {"I":1,"V":5,"X":10,"L":50,"C":100,"D":500,"M":1000}
+def _roman_to_int(s: str) -> Optional[int]:
+    s = re.sub(r"[^IVXLCDM]", "", (s or "").upper())
+    if not s: return None
+    total = 0
+    prev = 0
+    for ch in reversed(s):
+        v = _ROMAN_MAP.get(ch, 0)
+        if v < prev: total -= v
+        else: total += v; prev = v
+    return total if total > 0 else None
+
+def _normalize_mc_options(opts: List[Any]) -> List[Dict[str, Any]]:
+    """Allow strings or dicts; normalize to {id,label, sprite?, image?, meta?}."""
+    out = []
+    for o in (opts or []):
+        if isinstance(o, dict):
+            label = str(o.get("label") or o.get("id") or "").strip()
+            oid   = str(o.get("id") or normalize_answer(label)).strip()
+            out.append({"id": oid, "label": label, **{k:v for k,v in o.items() if k in {"sprite","image","meta"}}})
+        else:
+            label = str(o).strip()
+            out.append({"id": normalize_answer(label), "label": label})
+    return out
+
+def _embellish_visual_mc(rng: random.Random, p: Dict[str, Any], theme: str = "") -> None:
+    """
+    If a multiple_choice prompt references silhouettes/shadows or tools,
+    attach sprite info and (when a Roman numeral is present) a shadow-length
+    rule the client can render/measure. Does NOT change verification.
+    """
+    if (p.get("type") != "mini") or (p.get("mechanic") != "multiple_choice"):
+        return
+    ui = p.setdefault("ui_spec", {})
+    opts_raw = ui.get("options") or []
+    if not isinstance(opts_raw, list) or len(opts_raw) < 4:
+        return
+
+    prompt = (p.get("prompt") or "")
+    text_l = prompt.lower()
+
+    # 1) Add silhouettes if none are provided yet
+    needs_sprites = not any(isinstance(o, dict) and (o.get("sprite") or o.get("image")) for o in opts_raw)
+    if needs_sprites and re.search(r"shadow|silhouette|tool|cabinet|hammer|drawer", text_l):
+        pack = "workshop_tools_v1"  # front-end sprite pack (svg/png set)
+        opts = _normalize_mc_options(opts_raw)
+        for o in opts:
+            o["sprite"] = f"{pack}/{o['label'].lower().replace(' ', '_')}.svg"
+        ui["options"] = opts
+        ui["sprite_pack"] = pack
+        ui.setdefault("notes", "Tap a tool to see its silhouette and shadow.")
+
+    # 2) If a Roman numeral is present (e.g., VII), add a measurable shadow rule
+    m = re.search(r"\b([IVXLCDM]+)\b", prompt)
+    val = _roman_to_int(m.group(1)) if m else None
+    if val:
+        # Determine which option is correct
+        ans = str((p.get("solution") or {}).get("answer") or "")
+        opts = _normalize_mc_options(ui.get("options") or opts_raw)
+        # Build lengths: correct option = target; other options = near misses
+        near = [max(1, val-2), max(1, val-1), val+1, val+2]
+        rng.shuffle(near)
+        lengths = {}
+        for o in opts:
+            is_ans = normalize_answer(o["label"]) == normalize_answer(ans) or normalize_answer(o["id"]) == normalize_answer(ans)
+            lengths[o["id"]] = val if is_ans else near.pop() if near else max(1, val + rng.choice([-2,-1,1,2]))
+        ui["shadow_rule"] = {
+            "units": "marks",
+            "target": val,
+            "angle_deg": 45,             # client can animate if desired
+            "lengths": lengths           # id -> integer (for on-hover / measure)
+        }
+        # tighten hints for the interactive affordance
+        hints = [h for h in (p.get("hints") or []) if h]
+        add = ["Use the ruler to measure each shadow.", f"Target length: {val} marks."]
+        p["hints"] = (hints + [h for h in add if h not in hints])[:2]
+
 def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist: set) -> None:
     trail = room.get("trail") or {}
     rooms = trail.get("rooms") or []
@@ -752,10 +830,17 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                     mech = "text_input"
                 ui = p.setdefault("ui_spec", {})
 
-                # NEW: trivial multiple-choice guard → replace with a proper mini-game
                 if mech == "multiple_choice" and _looks_trivial_multiple_choice(p):
                     rt["puzzle"] = gen_pathcode(rng, p.get("id") or pid, blacklist, theme).to_json()
                     continue
+
+                # NEW: enrich visual MCs (silhouettes + shadow measuring when applicable)
+                if mech == "multiple_choice":
+                    try:
+                        _embellish_visual_mc(rng, p, theme)
+                    except Exception as e:
+                        try: current_app.logger.warning("[escape] MC embellish skipped: %s", e)
+                        except Exception: pass
 
                 sol = (p.get("solution") or {}).get("answer", "")
 
@@ -1779,18 +1864,30 @@ def _upgrade_minigame_hints(p: Dict[str, Any]) -> None:
             extra.append(f"Sequence length: {steps_len}.")
         extra.append("Use only the chips above; order matters.")
     elif mech == "multiple_choice":
-        extra.append("Eliminate options that contradict the described props.")
-        extra.append("Look for the one that fits all details, not most.")
-    elif mech == "grid_input":
-        grid = ui.get("grid")
-        if isinstance(grid, list) and grid and isinstance(grid[0], list):
-            extra.append(f"Grid size: {len(grid)}×{len(grid[0])}. Start at top-left unless noted.")
-        extra.append("Trace as described; don’t skip or reorder steps.")
-    elif mech == "text_input":
-        if ans and ans.isalpha():
-            extra.append(f"{len(ans)} letters.")
-        else:
-            extra.append("Short single token (letters or digits).")
+        opts = ui.get("options")
+        if not (isinstance(opts, list) and len(opts) >= 4):
+            raise ValueError("multiple_choice requires ≥4 options")
+        if _looks_trivial_multiple_choice(p):
+            raise ValueError("multiple_choice puzzle too trivial")
+
+        # Support strings or dicts with {id,label,...}
+        norm = _normalize_mc_options(opts)
+        labels = [o["label"] for o in norm]
+        ids    = [o["id"]    for o in norm]
+        ok = (
+            str(ans) in labels
+            or normalize_answer(str(ans)) in {normalize_answer(s) for s in labels}
+            or str(ans) in ids
+            or normalize_answer(str(ans)) in {normalize_answer(s) for s in ids}
+        )
+        if not ok:
+            raise ValueError("answer must be one of options for multiple_choice")
+
+        # Basic sprite-pack shape is allowed (if present)
+        if "shadow_rule" in ui:
+            sr = ui["shadow_rule"]
+            if not isinstance(sr, dict) or "target" not in sr or "lengths" not in sr:
+                raise ValueError("ui_spec.shadow_rule must include 'target' and 'lengths'")
 
     # Keep the first two good hints
     p["hints"] = (hints + [h for h in extra if h not in hints])[:2]
