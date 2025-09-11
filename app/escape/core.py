@@ -75,20 +75,42 @@ NUM_WORDS = {
 def _looks_trivial_multiple_choice(p: Dict[str, Any]) -> bool:
     if (p.get("type") != "mini") or (p.get("mechanic") != "multiple_choice"):
         return False
+
     ui = p.get("ui_spec") or {}
     opts = ui.get("options") or []
     prompt = (p.get("prompt") or "").lower()
-    # Too few options or “name that number”-style wording
+
+    # Too few options
     if len(opts) < 4:
         return True
+
+    # “name that number”-style wording (existing)
     if re.search(r"(which|what).*(name|names|word).*(number|digit)", prompt):
         return True
-    # All options are simple number words or digits
+
+    # All options are simple number words or digits (existing)
     def _is_num_token(x: Any) -> bool:
         s = str(x).strip().lower()
         return bool(re.fullmatch(r"\d{1,2}", s) or s in NUM_WORDS)
     if opts and all(_is_num_token(o) for o in opts):
         return True
+
+    # NEW: generic shape/pattern guessing (“which pattern/shape/figure?”) with stocky options
+    generic = {"loop","spiral","echo","pulse","wave","circle","ring","arc","line"}
+    if re.search(r"\b(which|what)\b.*\b(pattern|shape|figure|symbol)\b", prompt):
+        hits = sum(1 for o in opts if str(o).strip().lower() in generic)
+        if hits >= max(2, len(opts) - 2):   # most options are generic shapes
+            return True
+
+    # NEW: any option is a known cliché/stock riddle answer → trivial
+    if any(str(o).strip().lower() in {s.lower() for s in COMMON_STOCK_ANSWERS} for o in opts):
+        return True
+
+    # NEW: enforce “≥2 clues” heuristic for MC — require at least two bullet/numbered lines
+    clue_lines = re.findall(r"(?m)^\s*(?:[-•]|[0-9]+\)|[0-9]+\.)", prompt)
+    if re.search(r"\b(which|what)\b", prompt) and len(clue_lines) < 2:
+        return True
+
     return False
 
 def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, Any]:
@@ -729,6 +751,13 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                     p["mechanic"] = "text_input"
                     mech = "text_input"
                 ui = p.setdefault("ui_spec", {})
+
+                # NEW: trivial multiple-choice guard → replace with a proper mini-game
+                if mech == "multiple_choice" and _looks_trivial_multiple_choice(p):
+                    rt["puzzle"] = gen_pathcode(rng, p.get("id") or pid, blacklist, theme).to_json()
+                    continue
+
+                sol = (p.get("solution") or {}).get("answer", "")
 
                 # --- Sequence minis: guarantee tokens, length ≥5, and visible cues/series
                 if mech == "sequence_input":
@@ -1973,6 +2002,122 @@ def _fixup_minigames(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]
             rt["puzzle"] = p
     return blob
 
+def _classify_mini_kind(p: Dict[str, Any]) -> str:
+    """
+    Map a mini into one of 6 flavors we want daily:
+    'signal' (cue-only sequence), 'legend' (sequence with legend),
+    'pathcode' (grid path), 'knightword' (grid knight hops),
+    'tapcode' (Polybius 5x5), 'acrostic' (first-letters word).
+    Returns '' if unknown.
+    """
+    if (p.get("type") or p.get("archetype")) != "mini":
+        return ""
+    mech = (p.get("mechanic") or "").lower()
+    ui   = p.get("ui_spec") or {}
+    prompt = (p.get("prompt") or "")
+    sol    = (p.get("solution") or {})
+
+    # sequence flavors
+    if mech == "sequence_input":
+        if ui.get("cue_set") or ui.get("cues_audio") or ui.get("cues"):
+            return "signal"
+        if "legend" in prompt.lower() or "legend" in json.dumps(sol).lower():
+            return "legend"
+        return "signal"  # default ambiguous sequences into signal
+
+    # grid flavors
+    if mech == "grid_input":
+        if sol.get("rule") == "knight" or re.search(r"\bknight\b", prompt, re.I) or \
+           re.search(r"\bknight\b", (ui.get("notes") or ""), re.I):
+            return "knightword"
+        if sol.get("path") or re.search(r"\bpath\b|follow the path|directions", prompt, re.I):
+            return "pathcode"
+
+    # text flavors
+    if re.search(r"\bpolybius\b|5×5|5x5|I/J share", prompt, re.I):
+        return "tapcode"
+    if re.search(r"\b(first letters|acrostic)\b", prompt, re.I):
+        return "acrostic"
+
+    return ""
+
+def _enforce_daily_mini_variety(blob: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
+    """
+    Ensure the 9 minis (3 rooms × 3 routes) cover all 6 flavors at least once.
+    If a flavor is missing, replace an overrepresented mini with a generated one of that flavor.
+    """
+    wanted = ["signal","legend","pathcode","knightword","tapcode","acrostic"]
+
+    # gather minis
+    rooms = (blob.get("trail") or {}).get("rooms") or []
+    catalog = []  # (room_idx, route_idx, puzzle, kind)
+    for i, rm in enumerate(rooms):
+        for j, rt in enumerate(rm.get("routes") or []):
+            p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
+            kind = _classify_mini_kind(p)
+            catalog.append((i, j, p, kind))
+
+    from collections import Counter
+    counts = Counter(k for *_, k in catalog if k)
+
+    # quick exit if all covered
+    if all(counts.get(k, 0) > 0 for k in wanted):
+        return blob
+
+    # helper: fabricate a new puzzle of given flavor
+    def _make(kind: str, pid: str, theme: str) -> Dict[str, Any]:
+        if   kind == "signal":     q = gen_signal_translate(rng, pid, set(), theme)
+        elif kind == "legend":     q = gen_translate_with_legend(rng, pid, set(), theme)
+        elif kind == "pathcode":   q = gen_pathcode(rng, pid, set(), theme)
+        elif kind == "knightword": q = gen_knightword(rng, pid, set(), theme)
+        elif kind == "tapcode":    q = gen_tapcode(rng, pid, set(), theme)
+        else:                      q = gen_acrostic(rng, pid, set(), theme)
+        return q.to_json()
+
+    # find overrepresented victims (prefer the flavor with the highest count)
+    def _pick_victim():
+        # pick any entry whose kind currently has the max count
+        if not catalog:
+            return None
+        # compute live counts each time
+        live_counts = Counter(k for *_, k in catalog if k)
+        if not live_counts:
+            return None
+        worst_kind, _ = max(live_counts.items(), key=lambda kv: kv[1])
+        # choose a concrete puzzle of that kind
+        choices = [(idx, entry) for idx, entry in enumerate(catalog) if entry[3] == worst_kind]
+        return rng.choice(choices) if choices else None
+
+    # replace until all flavors exist or we run out of safe victims
+    for missing in [k for k in wanted if counts.get(k, 0) == 0]:
+        victim = _pick_victim()
+        if not victim:
+            break
+        v_idx, (ri, rj, old_p, old_kind) = victim
+        theme = (rooms[ri].get("title") or rooms[ri].get("text") or "")
+        pid   = (old_p.get("id") if isinstance(old_p, dict) else f"r{ri+1}_{rj}_pz") or f"r{ri+1}_{rj}_pz"
+        new_p = _make(missing, pid, theme)
+
+        # write back
+        rooms[ri]["routes"][rj]["puzzle"] = new_p
+        catalog[v_idx] = (ri, rj, new_p, missing)
+        counts[old_kind] -= 1
+        counts[missing]  += 1
+
+    # re-coerce fragment rules per room (answers changed)
+    for rm in rooms:
+        puzzles = []
+        for rt in rm.get("routes") or []:
+            q = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
+            if q: puzzles.append(q)
+        if puzzles:
+            fr_rule = rm.get("fragment_rule") or "FIRST2"
+            fr_rule, _ = _coerce_same_fragment_or_const_all(fr_rule, puzzles)
+            rm["fragment_rule"] = fr_rule
+
+    blob.setdefault("trail", {})["rooms"] = rooms
+    return blob
+
 def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     salt = os.getenv("ESCAPE_REGEN_SALT", "")
     rng_seed = daily_seed(date_key, server_secret + salt)
@@ -2023,7 +2168,6 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
     _sanitize_trail_puzzles(blob, rng, blacklist)
 
     # 🔁 NEW: reduce “same route → same mechanic” across scenes
-    # 🔁 NEW: reduce “same route → same mechanic” across scenes
     try:
         blob = _reshuffle_mechanics_for_variety(blob)
     except Exception as e:
@@ -2034,6 +2178,14 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
         blob = _fixup_minigames(blob, rng)
     except Exception as e:
         current_app.logger.warning("[escape] mini fixup skipped: %s", e)
+
+    # ⭐ NEW: guarantee daily variety across all 9 minis (cover all 6 flavors)
+    try:
+        blob = _enforce_daily_mini_variety(blob, rng)
+        # run the fixup one more time in case we swapped puzzles
+        blob = _fixup_minigames(blob, rng)
+    except Exception as e:
+        current_app.logger.warning("[escape] enforce variety skipped: %s", e)
 
     # Validate & standardize; if broken, fallback offline
     try:
