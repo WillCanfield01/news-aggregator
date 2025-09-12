@@ -324,10 +324,8 @@ def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = No
             break
 
     c1 = f"The first two digits sum to {d1 + d2}."
-    delta2 = d3 - d1
-    c2 = f"The third digit is the first digit {'plus ' + str(delta2) if delta2 >= 0 else 'minus ' + str(abs(delta2))}."
-    delta3 = d4 - d2
-    c3 = f"The last digit equals the second digit {'plus ' + str(delta3) if delta3 >= 0 else 'minus ' + str(abs(delta3))}."
+    c2 = f"The third digit is the first digit plus {d3 - d1}."
+    c3 = f"The last digit equals the second digit plus {d4 - d2}."
 
     return Puzzle(
         id=pid, archetype="numeric_lock",
@@ -551,7 +549,7 @@ def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
         id=pid, archetype="pathcode",
         prompt=(f"A glowing tile grid is etched on the floor:\n{grid_str}\n"
                 f"Start at the glowing letter (first in the word), then follow the path {', '.join(path)} to collect letters.\n"
-                f"Directions are {', '.join(sorted(set(path)))}"
+                f"Directions are {''.join(sorted(set(path)))}"
                 f"{' (wrapping allowed)' if wrap else ''}. What word do you read?"),
         answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
         solution={"answer": word.upper(), "grid": grid, "path": path, "start": [sr, sc]},
@@ -950,6 +948,11 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 ):
                     af["pattern"] = need
                 p["answer_format"] = af
+
+                # Add scene-grounding legend for sequences when no cue_set; tighten hints
+                if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
+                    _inject_sequence_legend(p, theme)
+                _upgrade_minigame_hints(p)
 
                 # Add scene-grounding legend for sequences when no cue_set; tighten hints
                 if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
@@ -2298,7 +2301,7 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
             "anti_spoiler": blob.get("anti_spoiler", {"paraphrase_variants":3,"decoys":2}),
         }
 
-    # 🔧 NEW: sanitize to 3 rooms / 3 routes per room
+    # 🔧 NEW: sanitize to 3 rooms / 2 routes per room
     blob = _sanitize_llm_blob(blob, rng, date_key)
     blob = _replace_recent_answers(blob, rng)  # <-- add this
 
