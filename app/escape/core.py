@@ -2343,7 +2343,23 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
 
     # Validate & standardize; if broken, fallback offline
     try:
+        # -- pre-validation hardening: purge trivial MCs and re-reroll recent answers
+        try:
+            for _rm in (blob.get("trail") or {}).get("rooms", []) or []:
+                _theme = _rm.get("title") or _rm.get("text") or ""
+                for _rt in (_rm.get("routes") or []):
+                    _p = _rt.get("puzzle") if isinstance(_rt.get("puzzle"), dict) else {}
+                    if (_p.get("type") == "mini") and (_p.get("mechanic") == "multiple_choice") and _looks_trivial_multiple_choice(_p):
+                        _pid = (_p.get("id") or "mini_autogen")
+                        _rt["puzzle"] = gen_pathcode(rng, _pid, set(), _theme).to_json()
+            # run an extra cooldown-swap + fixup pass to avoid 'recently used' rejections
+            blob = _replace_recent_answers(blob, rng)
+            blob = _fixup_minigames(blob, rng)
+        except Exception as _e:
+            try: current_app.logger.warning("[escape] pre-validate hardening skipped: %s", _e)
+            except Exception: pass
         room = validate_trailroom(blob)
+    
 
         # Debug: show per-room fragments and final
         try:
