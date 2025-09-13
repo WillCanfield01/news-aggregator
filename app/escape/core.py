@@ -1865,6 +1865,14 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
     }
     room = _reshuffle_mechanics_for_variety(room)
 
+
+    # NEW: avoid cooldown collisions in offline flow
+    try:
+        room = _replace_recent_answers(room, rng)
+    except Exception as e:
+        try: current_app.logger.warning("[escape] offline replace_recent skipped: %s", e)
+        except Exception: pass
+
     # 🔧 Make sure minis are self-consistent before validation (offline flow too)
     try:
         room = _fixup_minigames(room, rng)

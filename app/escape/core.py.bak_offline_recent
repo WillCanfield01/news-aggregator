@@ -324,8 +324,10 @@ def gen_numeric_lock(rng: random.Random, pid: str, blacklist: Optional[set] = No
             break
 
     c1 = f"The first two digits sum to {d1 + d2}."
-    c2 = f"The third digit is the first digit plus {d3 - d1}."
-    c3 = f"The last digit equals the second digit plus {d4 - d2}."
+    delta2 = d3 - d1
+    c2 = f"The third digit is the first digit {'plus ' + str(delta2) if delta2 >= 0 else 'minus ' + str(abs(delta2))}."
+    delta3 = d4 - d2
+    c3 = f"The last digit equals the second digit {'plus ' + str(delta3) if delta3 >= 0 else 'minus ' + str(abs(delta3))}."
 
     return Puzzle(
         id=pid, archetype="numeric_lock",
@@ -549,7 +551,7 @@ def gen_pathcode(rng: random.Random, pid: str, blacklist: set, theme: str = "") 
         id=pid, archetype="pathcode",
         prompt=(f"A glowing tile grid is etched on the floor:\n{grid_str}\n"
                 f"Start at the glowing letter (first in the word), then follow the path {', '.join(path)} to collect letters.\n"
-                f"Directions are {''.join(sorted(set(path)))}"
+                f"Directions are {', '.join(sorted(set(path)))}"
                 f"{' (wrapping allowed)' if wrap else ''}. What word do you read?"),
         answer_format={"pattern": r"^[A-Za-z]{3,12}$"},
         solution={"answer": word.upper(), "grid": grid, "path": path, "start": [sr, sc]},
@@ -948,11 +950,6 @@ def _sanitize_trail_puzzles(room: Dict[str, Any], rng: random.Random, blacklist:
                 ):
                     af["pattern"] = need
                 p["answer_format"] = af
-
-                # Add scene-grounding legend for sequences when no cue_set; tighten hints
-                if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
-                    _inject_sequence_legend(p, theme)
-                _upgrade_minigame_hints(p)
 
                 # Add scene-grounding legend for sequences when no cue_set; tighten hints
                 if not (p.get("mechanic") == "sequence_input" and (p.get("ui_spec") or {}).get("cue_set")):
@@ -1868,6 +1865,14 @@ def _offline_trail(date_key: str, rng: random.Random) -> Dict[str, Any]:
     }
     room = _reshuffle_mechanics_for_variety(room)
 
+
+    # NEW: avoid cooldown collisions in offline flow
+    try:
+        room = _replace_recent_answers(room, rng)
+    except Exception as e:
+        try: current_app.logger.warning("[escape] offline replace_recent skipped: %s", e)
+        except Exception: pass
+
     # 🔧 Make sure minis are self-consistent before validation (offline flow too)
     try:
         room = _fixup_minigames(room, rng)
@@ -2301,7 +2306,7 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
             "anti_spoiler": blob.get("anti_spoiler", {"paraphrase_variants":3,"decoys":2}),
         }
 
-    # 🔧 NEW: sanitize to 3 rooms / 2 routes per room
+    # 🔧 NEW: sanitize to 3 rooms / 3 routes per room
     blob = _sanitize_llm_blob(blob, rng, date_key)
     blob = _replace_recent_answers(blob, rng)  # <-- add this
 
@@ -2346,7 +2351,23 @@ def compose_trailroom(date_key: str, server_secret: str) -> Dict[str,Any]:
 
     # Validate & standardize; if broken, fallback offline
     try:
+        # -- pre-validation hardening: purge trivial MCs and re-reroll recent answers
+        try:
+            for _rm in (blob.get("trail") or {}).get("rooms", []) or []:
+                _theme = _rm.get("title") or _rm.get("text") or ""
+                for _rt in (_rm.get("routes") or []):
+                    _p = _rt.get("puzzle") if isinstance(_rt.get("puzzle"), dict) else {}
+                    if (_p.get("type") == "mini") and (_p.get("mechanic") == "multiple_choice") and _looks_trivial_multiple_choice(_p):
+                        _pid = (_p.get("id") or "mini_autogen")
+                        _rt["puzzle"] = gen_pathcode(rng, _pid, set(), _theme).to_json()
+            # run an extra cooldown-swap + fixup pass to avoid 'recently used' rejections
+            blob = _replace_recent_answers(blob, rng)
+            blob = _fixup_minigames(blob, rng)
+        except Exception as _e:
+            try: current_app.logger.warning("[escape] pre-validate hardening skipped: %s", _e)
+            except Exception: pass
         room = validate_trailroom(blob)
+    
 
         # Debug: show per-room fragments and final
         try:
