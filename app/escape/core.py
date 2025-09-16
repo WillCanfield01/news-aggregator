@@ -195,8 +195,9 @@ def _gen_pressure_chamber(rng: random.Random, ident="C") -> Tuple[Dict[str, Any]
     return public, {"type": "pressure_chamber", "server_seed": rng.getrandbits(64)}
 
 
-def generate_room(date: Optional[dt.date] = None) -> DailyRoom:
-    rng = _seeded_rng(date, "room")
+def generate_room(date: Optional[dt.date] = None, salt: Optional[str] = None) -> DailyRoom:
+    flavor = "room" + (f"::{salt}" if salt else "")
+    rng = _seeded_rng(date, flavor)
     theme = _pick_theme(rng)
     pubA, privA = _gen_vault_frenzy(rng, "A")
     pubB, privB = _gen_light_reactor(rng, "B")

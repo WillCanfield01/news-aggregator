@@ -1,7 +1,7 @@
-
 {# app/templates/escape/play.html (REWRITE) #}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -17,73 +17,265 @@
       --ok: #68f2a1;
       --warn: #ffd166;
       --bad: #ff6b6b;
-      --shadow: rgba(0,0,0,0.45);
+      --shadow: rgba(0, 0, 0, 0.45);
       --card: #121832;
       --line: #223057;
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      margin: 0; background: radial-gradient(1200px 800px at 50% -20%, #1a1f3e 0%, #0e1222 55%, #0e1222 100%);
-      color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
-      min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 50% -20%, #1a1f3e 0%, #0e1222 55%, #0e1222 100%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
-    .wrap { width: 100%; max-width: 820px; padding: 18px; }
+
+    .wrap {
+      width: 100%;
+      max-width: 820px;
+      padding: 18px;
+    }
+
     header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 12px; background: linear-gradient(180deg, var(--panel), var(--panel2));
-      border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 30px var(--shadow);
     }
-    .brand { font-weight: 800; letter-spacing: 0.4px; }
-    .meta { color: var(--muted); font-size: 14px; }
+
+    .brand {
+      font-weight: 800;
+      letter-spacing: 0.4px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
     .progress {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 10px;
     }
+
     .step {
-      background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; text-align: center; font-size: 14px; color: var(--muted);
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      text-align: center;
+      font-size: 14px;
+      color: var(--muted);
     }
-    .step.active { color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+
+    .step.active {
+      color: var(--text);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent) inset;
+    }
+
     .panel {
-      margin-top: 14px; background: linear-gradient(180deg, var(--panel), var(--panel2));
-      border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow);
+      margin-top: 14px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 30px var(--shadow);
       padding: 12px;
     }
-    .center { display: flex; align-items: center; justify-content: center; }
+
+    .center {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .btn {
-      appearance: none; background: var(--accent); color: #08111e; border: none; border-radius: 12px;
-      padding: 10px 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(88,187,255,0.35);
+      appearance: none;
+      background: var(--accent);
+      color: #08111e;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(88, 187, 255, 0.35);
     }
-    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
-    .muted { color: var(--muted); }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .timer { font-weight: 800; letter-spacing: 0.4px; }
-    .ads { margin-top: 12px; height: 64px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); display:flex; align-items:center; justify-content:center; }
-    .share { white-space: pre; background:#0b1225; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .timer {
+      font-weight: 800;
+      letter-spacing: 0.4px;
+    }
+
+    .ads {
+      margin-top: 12px;
+      height: 64px;
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .share {
+      white-space: pre;
+      background: #0b1225;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
     /* Vault Frenzy UI */
-    .vf-grid { display:grid; gap:10px; touch-action: manipulation; }
-    .vf-cell {
-      width: 86px; height: 86px; border-radius: 14px; background: #121832; border:1px solid #223057;
-      display:flex; align-items:center; justify-content:center; font-size:18px; cursor:pointer;
-      user-select:none; transition: transform .06s ease;
+    .vf-grid {
+      display: grid;
+      gap: 10px;
+      touch-action: manipulation;
     }
-    .vf-cell:active { transform: scale(0.96); }
+
+    .vf-cell {
+      width: 86px;
+      height: 86px;
+      border-radius: 14px;
+      background: #121832;
+      border: 1px solid #223057;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      cursor: pointer;
+      user-select: none;
+      transition: transform .06s ease;
+    }
+
+    .vf-cell:active {
+      transform: scale(0.96);
+    }
+
     /* Light Reactor UI */
     .reactor {
-      position: relative; width: 320px; height: 320px; border-radius: 50%; background: #0e1a34; border:2px solid #20335f; box-shadow: inset 0 0 60px rgba(32,64,128,.45);
+      position: relative;
+      width: 320px;
+      height: 320px;
+      border-radius: 50%;
+      background: #0e1a34;
+      border: 2px solid #20335f;
+      box-shadow: inset 0 0 60px rgba(32, 64, 128, .45);
     }
-    .reactor .target { position:absolute; top:50%; left:50%; width: 280px; height: 280px; margin:-140px 0 0 -140px; border-radius:50%; border:2px dashed #2954a8; }
-    .reactor .orb { position:absolute; width:16px; height:16px; border-radius:50%; background:#58bbff; box-shadow: 0 0 14px rgba(88,187,255,.9); }
-    .reactor .zone { position:absolute; width: 260px; height: 260px; margin:-130px 0 0 -130px; top:50%; left:50%; border-radius:50%; border: 4px solid rgba(104,242,161,.45); }
-    .reactor .cta { position:absolute; bottom:14px; left:50%; transform: translateX(-50%); }
+
+    .reactor .target {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 280px;
+      height: 280px;
+      margin: -140px 0 0 -140px;
+      border-radius: 50%;
+      border: 2px dashed #2954a8;
+    }
+
+    .reactor .orb {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #58bbff;
+      box-shadow: 0 0 14px rgba(88, 187, 255, .9);
+    }
+
+    .reactor .zone {
+      position: absolute;
+      width: 260px;
+      height: 260px;
+      margin: -130px 0 0 -130px;
+      top: 50%;
+      left: 50%;
+      border-radius: 50%;
+      border: 4px solid rgba(104, 242, 161, .45);
+    }
+
+    .reactor .cta {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
     /* Pressure Chamber UI */
-    .pc-wrap { display:flex; gap: 12px; }
-    .pc-valve { width: 70px; background:#0f1a33; border:1px solid #223057; border-radius:10px; padding:6px; }
-    .pc-gauge { height: 160px; background: linear-gradient(0deg, #1c2b5c, #14305a); border-radius:6px; overflow:hidden; position:relative; }
-    .pc-fill { position:absolute; bottom:0; left:0; right:0; height:0%; background:linear-gradient(180deg, #68f2a1, #2a7f55); box-shadow:inset 0 0 18px rgba(0,0,0,.35); transition: height .12s linear; }
-    .pc-btn { margin-top:6px; width:100%; font-weight:700; }
+    .pc-wrap {
+      display: flex;
+      gap: 12px;
+    }
+
+    .pc-valve {
+      width: 70px;
+      background: #0f1a33;
+      border: 1px solid #223057;
+      border-radius: 10px;
+      padding: 6px;
+    }
+
+    .pc-gauge {
+      height: 160px;
+      background: linear-gradient(0deg, #1c2b5c, #14305a);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .pc-fill {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 0%;
+      background: linear-gradient(180deg, #68f2a1, #2a7f55);
+      box-shadow: inset 0 0 18px rgba(0, 0, 0, .35);
+      transition: height .12s linear;
+    }
+
+    .pc-btn {
+      margin-top: 6px;
+      width: 100%;
+      font-weight: 700;
+    }
+
     /* Finish */
-    .finish { text-align:center; }
+    .finish {
+      text-align: center;
+    }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <header>
@@ -131,360 +323,365 @@
   </div>
 
   <script>
-  // Minimal SFX (optional)
-  let SOUND_ON = true;
-  const muteBtn = document.getElementById('muteBtn');
-  muteBtn.addEventListener('click', () => {
-    SOUND_ON = !SOUND_ON;
-    muteBtn.textContent = SOUND_ON ? '🔊 Sound' : '🔇 Sound';
-    muteBtn.style.background = SOUND_ON ? '#58bbff' : '#263a5f';
-    muteBtn.style.color = SOUND_ON ? '#08111e' : '#cfe2ff';
-  });
-  function bip(freq=880, dur=0.05){ try{
-      if(!SOUND_ON) return; const ctx = new (window.AudioContext||window.webkitAudioContext)();
-      const o = ctx.createOscillator(); const g = ctx.createGain();
-      o.type='sine'; o.frequency.value=freq; g.gain.value=0.02; o.connect(g); g.connect(ctx.destination); o.start();
-      setTimeout(()=>{o.stop(); ctx.close();}, dur*1000);
-  }catch(e){}}
-
-  const todayMeta = document.getElementById('todayMeta');
-  const globalTimer = document.getElementById('globalTimer');
-  const startBtn = document.getElementById('startBtn');
-  const intro = document.getElementById('intro');
-  const panel = document.getElementById('panel');
-  const gameA = document.getElementById('gameA');
-  const gameB = document.getElementById('gameB');
-  const gameC = document.getElementById('gameC');
-  const finish = document.getElementById('finish');
-  const totalMsEl = document.getElementById('totalMs');
-  const shareBlock = document.getElementById('shareBlock');
-
-  let ROOM = null;
-  let START_TS = 0;
-  let elapsedA = 0, elapsedB = 0, elapsedC = 0;
-  let tokenA = null, tokenB = null, tokenC = null;
-
-  function fmt(ms){
-    const s = Math.floor(ms/1000); const m = Math.floor(s/60);
-    const rem = s % 60; return `${m}:${rem.toString().padStart(2,'0')}`;
-  }
-
-  function tickGlobal(){
-    if(!START_TS) return;
-    const ms = Date.now() - START_TS;
-    globalTimer.textContent = fmt(ms);
-    requestAnimationFrame(tickGlobal);
-  }
-
-  async function fetchToday(){
-    const res = await fetch('/escape/api/today');
-    const js = await res.json();
-    ROOM = js;
-    todayMeta.textContent = `${js.date} • ${js.theme}`;
-  }
-
-  function setStep(id){
-    for(const k of ['A','B','C']){
-      document.getElementById('step'+k).classList.toggle('active', k===id);
+    // Minimal SFX (optional)
+    let SOUND_ON = true;
+    const muteBtn = document.getElementById('muteBtn');
+    muteBtn.addEventListener('click', () => {
+      SOUND_ON = !SOUND_ON;
+      muteBtn.textContent = SOUND_ON ? '🔊 Sound' : '🔇 Sound';
+      muteBtn.style.background = SOUND_ON ? '#58bbff' : '#263a5f';
+      muteBtn.style.color = SOUND_ON ? '#08111e' : '#cfe2ff';
+    });
+    function bip(freq = 880, dur = 0.05) {
+      try {
+        if (!SOUND_ON) return; const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = freq; g.gain.value = 0.02; o.connect(g); g.connect(ctx.destination); o.start();
+        setTimeout(() => { o.stop(); ctx.close(); }, dur * 1000);
+      } catch (e) { }
     }
-  }
 
-  // ───────────────────── Vault Frenzy (A) ─────────────────────
-  function mountVaultFrenzy(cfg){
-    gameA.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.innerHTML = `<h3 style="margin:10px 0;">◆ Vault Frenzy</h3>`;
-    const grid = document.createElement('div');
-    grid.className = 'vf-grid';
-    grid.style.gridTemplateColumns = `repeat(${cfg.grid_cols}, 1fr)`;
+    const todayMeta = document.getElementById('todayMeta');
+    const globalTimer = document.getElementById('globalTimer');
+    const startBtn = document.getElementById('startBtn');
+    const intro = document.getElementById('intro');
+    const panel = document.getElementById('panel');
+    const gameA = document.getElementById('gameA');
+    const gameB = document.getElementById('gameB');
+    const gameC = document.getElementById('gameC');
+    const finish = document.getElementById('finish');
+    const totalMsEl = document.getElementById('totalMs');
+    const shareBlock = document.getElementById('shareBlock');
 
-    const rows = cfg.grid_rows, cols = cfg.grid_cols;
-    const total = rows*cols;
-    const cells = [];
-    for(let i=0;i<total;i++){
-      const el = document.createElement('div');
-      el.className = 'vf-cell';
-      el.textContent = '';
-      el.dataset.idx = i;
-      grid.appendChild(el);
-      cells.push(el);
+    let ROOM = null;
+    let START_TS = 0;
+    let elapsedA = 0, elapsedB = 0, elapsedC = 0;
+    let tokenA = null, tokenB = null, tokenC = null;
+
+    function fmt(ms) {
+      const s = Math.floor(ms / 1000); const m = Math.floor(s / 60);
+      const rem = s % 60; return `${m}:${rem.toString().padStart(2, '0')}`;
     }
-    wrap.appendChild(grid);
 
-    const cta = document.createElement('div');
-    cta.style.marginTop = '10px';
-    cta.innerHTML = `<button class="btn" id="vfGo">Go</button>`;
-    wrap.appendChild(cta);
+    function tickGlobal() {
+      if (!START_TS) return;
+      const ms = Date.now() - START_TS;
+      globalTimer.textContent = fmt(ms);
+      requestAnimationFrame(tickGlobal);
+    }
 
-    gameA.appendChild(wrap);
-    gameA.style.display = 'block';
+    async function fetchToday() {
+      const qs = new URLSearchParams(location.search);
+      const date = qs.get('date');
+      const res = await fetch('/escape/api/today' + (date ? ('?date=' + encodeURIComponent(date)) : ''));
+      const js = await res.json();
+      ROOM = js;
+      todayMeta.textContent = `${js.date} • ${js.theme}`;
+    }
 
-    const transcript = { rounds: [] };
-    let roundIdx = 0;
-    function runRound(){
-      const need = cfg.pops_per_round[roundIdx];
-      const decoys = cfg.decoys_per_round[roundIdx];
-      const roundStart = performance.now();
-      const taps = [];
-      const indexes = [...Array(total).keys()];
+    function setStep(id) {
+      for (const k of ['A', 'B', 'C']) {
+        document.getElementById('step' + k).classList.toggle('active', k === id);
+      }
+    }
 
-      function flash(){
-        // fake, purely visual: randomly flash some cells quickly.
-        // Real verification is server-side and counts taps only.
-        for(const el of cells){
-          el.style.background = '#121832';
+    // ───────────────────── Vault Frenzy (A) ─────────────────────
+    function mountVaultFrenzy(cfg) {
+      gameA.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<h3 style="margin:10px 0;">◆ Vault Frenzy</h3>`;
+      const grid = document.createElement('div');
+      grid.className = 'vf-grid';
+      grid.style.gridTemplateColumns = `repeat(${cfg.grid_cols}, 1fr)`;
+
+      const rows = cfg.grid_rows, cols = cfg.grid_cols;
+      const total = rows * cols;
+      const cells = [];
+      for (let i = 0; i < total; i++) {
+        const el = document.createElement('div');
+        el.className = 'vf-cell';
+        el.textContent = '';
+        el.dataset.idx = i;
+        grid.appendChild(el);
+        cells.push(el);
+      }
+      wrap.appendChild(grid);
+
+      const cta = document.createElement('div');
+      cta.style.marginTop = '10px';
+      cta.innerHTML = `<button class="btn" id="vfGo">Go</button>`;
+      wrap.appendChild(cta);
+
+      gameA.appendChild(wrap);
+      gameA.style.display = 'block';
+
+      const transcript = { rounds: [] };
+      let roundIdx = 0;
+      function runRound() {
+        const need = cfg.pops_per_round[roundIdx];
+        const decoys = cfg.decoys_per_round[roundIdx];
+        const roundStart = performance.now();
+        const taps = [];
+        const indexes = [...Array(total).keys()];
+
+        function flash() {
+          // fake, purely visual: randomly flash some cells quickly.
+          // Real verification is server-side and counts taps only.
+          for (const el of cells) {
+            el.style.background = '#121832';
+          }
+          const on = new Set();
+          for (let i = 0; i < need; i++) {
+            on.add(indexes[Math.floor(Math.random() * indexes.length)]);
+          }
+          for (let i = 0; i < decoys; i++) {
+            on.add(indexes[Math.floor(Math.random() * indexes.length)]);
+          }
+          for (const el of cells) {
+            if (on.has(parseInt(el.dataset.idx))) el.style.background = '#1b2a56';
+          }
         }
-        const on = new Set();
-        for(let i=0;i<need;i++){
-          on.add(indexes[Math.floor(Math.random()*indexes.length)]);
+        flash();
+        const flashTimer = setInterval(flash, 400);
+
+        function onTap(ev) {
+          const el = ev.currentTarget;
+          const idx = parseInt(el.dataset.idx);
+          el.style.transform = 'scale(0.96)'; setTimeout(() => el.style.transform = '', 60);
+          taps.push({ idx, t: Math.floor(performance.now() - roundStart) });
+          bip(1200, .03);
+          if (taps.length >= need) { // allow finishing early
+            cleanup();
+          }
         }
-        for(let i=0;i<decoys;i++){
-          on.add(indexes[Math.floor(Math.random()*indexes.length)]);
+        for (const el of cells) el.addEventListener('click', onTap);
+
+        function cleanup() {
+          clearInterval(flashTimer);
+          for (const el of cells) el.removeEventListener('click', onTap);
+          transcript.rounds.push({ taps, elapsed_ms: Math.floor(performance.now() - roundStart) });
+          roundIdx++;
+          if (roundIdx < cfg.rounds) { runRound(); }
+          else submit();
         }
-        for(const el of cells){
-          if(on.has(parseInt(el.dataset.idx))) el.style.background = '#1b2a56';
+        // hard cap
+        setTimeout(() => cleanup(), cfg.time_cap_sec * 1000);
+      }
+
+      document.getElementById('vfGo').addEventListener('click', () => {
+        document.getElementById('vfGo').disabled = true;
+        runRound();
+      });
+
+      async function submit() {
+        const body = { minigame_id: cfg.id, transcript, client_time_ms: transcript.rounds.reduce((a, r) => a + r.elapsed_ms, 0) };
+        const res = await fetch('/escape/api/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const js = await res.json();
+        if (js.passed) {
+          elapsedA = js.elapsed_ms; tokenA = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
+          gameA.style.display = 'none'; launchB();
+        } else {
+          alert('Failed Vault Frenzy — try again tomorrow!');
         }
       }
-      flash();
-      const flashTimer = setInterval(flash, 400);
+    }
 
-      function onTap(ev){
-        const el = ev.currentTarget;
-        const idx = parseInt(el.dataset.idx);
-        el.style.transform='scale(0.96)'; setTimeout(()=>el.style.transform='',60);
-        taps.push({idx, t: Math.floor(performance.now()-roundStart)});
-        bip(1200, .03);
-        if(taps.length >= need){ // allow finishing early
-          cleanup();
+    // ───────────────────── Light Reactor (B) ─────────────────────
+    function mountLightReactor(cfg) {
+      gameB.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<h3 style="margin:10px 0;">◎ Light Reactor</h3>`;
+      const arena = document.createElement('div');
+      arena.className = 'reactor';
+      const zone = document.createElement('div'); zone.className = 'zone';
+      const target = document.createElement('div'); target.className = 'target';
+      arena.appendChild(zone); arena.appendChild(target);
+      const orb1 = document.createElement('div'); orb1.className = 'orb';
+      const orb2 = document.createElement('div'); orb2.className = 'orb'; orb2.style.background = '#68f2a1';
+      arena.appendChild(orb1); arena.appendChild(orb2); orb2.style.display = 'none';
+      const cta = document.createElement('button'); cta.className = 'btn reactor cta'; cta.textContent = 'HIT';
+      arena.appendChild(cta);
+      wrap.appendChild(arena);
+      gameB.appendChild(wrap);
+      gameB.style.display = 'block';
+
+      const roundDur = 1000;
+      const t0 = performance.now();
+      const stops = [];
+
+      let roundIdx = 0;
+      function layoutRound() {
+        // purely visual spin — server verifies mathematically
+        const speed = cfg.speeds[roundIdx];
+        const reverse = cfg.reverse_rounds[roundIdx];
+        const orbs = cfg.orb_counts[roundIdx];
+        orb2.style.display = (orbs === 2) ? 'block' : 'none';
+        function paint() {
+          const now = performance.now();
+          const t = (now - t0) % (roundDur * (roundIdx + 1));
+          const rRel = (now - (t0 + roundIdx * roundDur));
+          const tt = Math.max(0, Math.min(roundDur, rRel));
+          const phase = (tt / roundDur) * 2 * Math.PI * speed * (reverse ? -1 : 1);
+          const cx = 160, cy = 160, rad = 120;
+
+          const x1 = cx + Math.cos(phase) * rad, y1 = cy + Math.sin(phase) * rad;
+          orb1.style.transform = `translate(${x1 - 8}px, ${y1 - 8}px)`;
+          if (orbs === 2) {
+            const phase2 = -phase * 1.05;
+            const x2 = cx + Math.cos(phase2) * rad, y2 = cy + Math.sin(phase2) * rad;
+            orb2.style.transform = `translate(${x2 - 8}px, ${y2 - 8}px)`;
+          }
+          if (roundIdx < cfg.rounds) requestAnimationFrame(paint);
         }
+        requestAnimationFrame(paint);
       }
-      for(const el of cells) el.addEventListener('click', onTap);
+      layoutRound();
 
-      function cleanup(){
-        clearInterval(flashTimer);
-        for(const el of cells) el.removeEventListener('click', onTap);
-        transcript.rounds.push({taps, elapsed_ms: Math.floor(performance.now()-roundStart)});
+      cta.addEventListener('click', () => {
+        bip(1000, .04);
+        stops.push({ t: Math.floor(performance.now() - t0) });
         roundIdx++;
-        if(roundIdx < cfg.rounds){ runRound(); }
+        if (roundIdx < cfg.rounds) layoutRound();
         else submit();
-      }
-      // hard cap
-      setTimeout(()=>cleanup(), cfg.time_cap_sec*1000);
-    }
+      });
 
-    document.getElementById('vfGo').addEventListener('click', ()=>{
-      document.getElementById('vfGo').disabled = true;
-      runRound();
-    });
-
-    async function submit(){
-      const body = { minigame_id: cfg.id, transcript, client_time_ms: transcript.rounds.reduce((a,r)=>a+r.elapsed_ms,0) };
-      const res = await fetch('/escape/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-      const js = await res.json();
-      if(js.passed){
-        elapsedA = js.elapsed_ms; tokenA = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
-        gameA.style.display = 'none'; launchB();
-      }else{
-        alert('Failed Vault Frenzy — try again tomorrow!');
+      async function submit() {
+        const body = { minigame_id: cfg.id, transcript: { stops, elapsed_ms: Math.floor(performance.now() - t0) }, client_time_ms: Math.floor(performance.now() - t0) };
+        const res = await fetch('/escape/api/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const js = await res.json();
+        if (js.passed) {
+          elapsedB = js.elapsed_ms; tokenB = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
+          gameB.style.display = 'none'; launchC();
+        } else {
+          alert('Failed Light Reactor — try again tomorrow!');
+        }
       }
     }
-  }
 
-  // ───────────────────── Light Reactor (B) ─────────────────────
-  function mountLightReactor(cfg){
-    gameB.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.innerHTML = `<h3 style="margin:10px 0;">◎ Light Reactor</h3>`;
-    const arena = document.createElement('div');
-    arena.className = 'reactor';
-    const zone = document.createElement('div'); zone.className='zone';
-    const target = document.createElement('div'); target.className='target';
-    arena.appendChild(zone); arena.appendChild(target);
-    const orb1 = document.createElement('div'); orb1.className='orb';
-    const orb2 = document.createElement('div'); orb2.className='orb'; orb2.style.background='#68f2a1';
-    arena.appendChild(orb1); arena.appendChild(orb2); orb2.style.display='none';
-    const cta = document.createElement('button'); cta.className='btn reactor cta'; cta.textContent='HIT';
-    arena.appendChild(cta);
-    wrap.appendChild(arena);
-    gameB.appendChild(wrap);
-    gameB.style.display='block';
+    // ───────────────────── Pressure Chamber (C) ─────────────────────
+    function mountPressureChamber(cfg) {
+      gameC.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<h3 style="margin:10px 0;">✶ Pressure Chamber</h3>`;
+      const row = document.createElement('div'); row.className = 'pc-wrap';
+      const valves = [];
+      for (let i = 0; i < cfg.valves; i++) {
+        const v = document.createElement('div'); v.className = 'pc-valve';
+        v.innerHTML = `<div class="pc-gauge"><div class="pc-fill" id="fill${i}"></div></div><button class="btn pc-btn" data-idx="${i}">Vent</button>`;
+        row.appendChild(v);
+        valves.push(v);
+      }
+      wrap.appendChild(row);
+      gameC.appendChild(wrap);
+      gameC.style.display = 'block';
 
-    const roundDur = 1000;
-    const t0 = performance.now();
-    const stops = [];
+      const actions = [];
+      const start = performance.now();
+      let round = 0;
+      let levels = new Array(cfg.valves).fill(0);
+      let speeds = cfg.rise_speeds[round].slice();
 
-    let roundIdx = 0;
-    function layoutRound(){
-      // purely visual spin — server verifies mathematically
-      const speed = cfg.speeds[roundIdx];
-      const reverse = cfg.reverse_rounds[roundIdx];
-      const orbs = cfg.orb_counts[roundIdx];
-      orb2.style.display = (orbs===2) ? 'block' : 'none';
-      function paint(){
+      function paint() {
         const now = performance.now();
-        const t = (now - t0) % (roundDur*(roundIdx+1));
-        const rRel = (now - (t0 + roundIdx*roundDur));
-        const tt = Math.max(0, Math.min(roundDur, rRel));
-        const phase = (tt / roundDur) * 2*Math.PI * speed * (reverse?-1:1);
-        const cx = 160, cy = 160, rad = 120;
-
-        const x1 = cx + Math.cos(phase)*rad, y1 = cy + Math.sin(phase)*rad;
-        orb1.style.transform = `translate(${x1-8}px, ${y1-8}px)`;
-        if(orbs===2){
-          const phase2 = -phase*1.05;
-          const x2 = cx + Math.cos(phase2)*rad, y2 = cy + Math.sin(phase2)*rad;
-          orb2.style.transform = `translate(${x2-8}px, ${y2-8}px)`;
+        const elapsed = now - start;
+        const rStart = round * 1000, rEnd = (round + 1) * 1000;
+        const dt = Math.min(16, Math.max(0, now - (paint._last || now))); paint._last = now;
+        // update pressures
+        for (let i = 0; i < cfg.valves; i++) {
+          levels[i] += speeds[i] * (dt / 1000);
+          levels[i] = Math.max(0, levels[i]);
+          document.getElementById('fill' + i).style.height = Math.min(100, levels[i] * 100) + '%';
+          if (levels[i] >= cfg.overflow_threshold) {
+            // fail visuals; server will also fail
+            for (let j = 0; j < cfg.valves; j++) document.getElementById('fill' + j).style.background = 'linear-gradient(180deg,#ff6b6b,#8b2b2b)';
+            return;
+          }
         }
-        if(roundIdx < cfg.rounds) requestAnimationFrame(paint);
+        if (elapsed >= rEnd) {
+          round++;
+          if (round >= cfg.rounds) { submit(); return; }
+          // next round
+          levels = new Array(cfg.valves).fill(0);
+          speeds = cfg.rise_speeds[round].slice();
+        }
+        requestAnimationFrame(paint);
       }
       requestAnimationFrame(paint);
-    }
-    layoutRound();
 
-    cta.addEventListener('click', ()=>{
-      bip(1000,.04);
-      stops.push({t: Math.floor(performance.now()-t0)});
-      roundIdx++;
-      if(roundIdx < cfg.rounds) layoutRound();
-      else submit();
-    });
+      gameC.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.pc-btn'); if (!btn) return;
+        const i = parseInt(btn.dataset.idx);
+        actions.push({ valve: i, t: Math.floor(performance.now() - start) });
+        levels[i] = 0;
+        if (cfg.reroll_speed_after_tap) {
+          // purely visual; server reenacts with its RNG
+          speeds[i] = (Math.random() * 0.4 + 0.25);
+        }
+        bip(900, .04);
+      });
 
-    async function submit(){
-      const body = { minigame_id: cfg.id, transcript: {stops, elapsed_ms: Math.floor(performance.now()-t0)}, client_time_ms: Math.floor(performance.now()-t0) };
-      const res = await fetch('/escape/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-      const js = await res.json();
-      if(js.passed){
-        elapsedB = js.elapsed_ms; tokenB = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
-        gameB.style.display='none'; launchC();
-      } else {
-        alert('Failed Light Reactor — try again tomorrow!');
-      }
-    }
-  }
-
-  // ───────────────────── Pressure Chamber (C) ─────────────────────
-  function mountPressureChamber(cfg){
-    gameC.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.innerHTML = `<h3 style="margin:10px 0;">✶ Pressure Chamber</h3>`;
-    const row = document.createElement('div'); row.className='pc-wrap';
-    const valves = [];
-    for(let i=0;i<cfg.valves;i++){
-      const v = document.createElement('div'); v.className='pc-valve';
-      v.innerHTML = `<div class="pc-gauge"><div class="pc-fill" id="fill${i}"></div></div><button class="btn pc-btn" data-idx="${i}">Vent</button>`;
-      row.appendChild(v);
-      valves.push(v);
-    }
-    wrap.appendChild(row);
-    gameC.appendChild(wrap);
-    gameC.style.display='block';
-
-    const actions = [];
-    const start = performance.now();
-    let round = 0;
-    let levels = new Array(cfg.valves).fill(0);
-    let speeds = cfg.rise_speeds[round].slice();
-
-    function paint(){
-      const now = performance.now();
-      const elapsed = now - start;
-      const rStart = round * 1000, rEnd = (round+1)*1000;
-      const dt = Math.min(16, Math.max(0, now - (paint._last||now))); paint._last = now;
-      // update pressures
-      for(let i=0;i<cfg.valves;i++){
-        levels[i] += speeds[i] * (dt/1000);
-        levels[i] = Math.max(0, levels[i]);
-        document.getElementById('fill'+i).style.height = Math.min(100, levels[i]*100) + '%';
-        if(levels[i] >= cfg.overflow_threshold){
-          // fail visuals; server will also fail
-          for(let j=0;j<cfg.valves;j++) document.getElementById('fill'+j).style.background = 'linear-gradient(180deg,#ff6b6b,#8b2b2b)';
-          return;
+      async function submit() {
+        const body = { minigame_id: cfg.id, transcript: { actions, elapsed_ms: Math.floor(performance.now() - start) }, client_time_ms: Math.floor(performance.now() - start) };
+        const res = await fetch('/escape/api/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const js = await res.json();
+        if (js.passed) {
+          elapsedC = js.elapsed_ms; tokenC = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
+          gameC.style.display = 'none'; onFinish();
+        } else {
+          alert('Failed Pressure Chamber — try again tomorrow!');
         }
       }
-      if(elapsed >= rEnd){
-        round++;
-        if(round >= cfg.rounds){ submit(); return; }
-        // next round
-        levels = new Array(cfg.valves).fill(0);
-        speeds = cfg.rise_speeds[round].slice();
-      }
-      requestAnimationFrame(paint);
     }
-    requestAnimationFrame(paint);
 
-    gameC.addEventListener('click', (ev)=>{
-      const btn = ev.target.closest('.pc-btn'); if(!btn) return;
-      const i = parseInt(btn.dataset.idx);
-      actions.push({valve:i, t: Math.floor(performance.now()-start)});
-      levels[i] = 0;
-      if(cfg.reroll_speed_after_tap){
-        // purely visual; server reenacts with its RNG
-        speeds[i] = (Math.random()*0.4 + 0.25);
-      }
-      bip(900,.04);
-    });
+    // Flow control
+    function launchA() {
+      setStep('A');
+      const cfg = ROOM.minigames.find(m => m.id === 'A');
+      mountVaultFrenzy(cfg);
+    }
+    function launchB() {
+      setStep('B');
+      const cfg = ROOM.minigames.find(m => m.id === 'B');
+      mountLightReactor(cfg);
+    }
+    function launchC() {
+      setStep('C');
+      const cfg = ROOM.minigames.find(m => m.id === 'C');
+      mountPressureChamber(cfg);
+    }
 
-    async function submit(){
-      const body = { minigame_id: cfg.id, transcript: {actions, elapsed_ms: Math.floor(performance.now()-start)}, client_time_ms: Math.floor(performance.now()-start) };
-      const res = await fetch('/escape/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    async function onFinish() {
+      const body = { tokens: [tokenA, tokenB, tokenC] };
+      const res = await fetch('/escape/api/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const js = await res.json();
-      if(js.passed){
-        elapsedC = js.elapsed_ms; tokenC = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
-        gameC.style.display='none'; onFinish();
-      } else {
-        alert('Failed Pressure Chamber — try again tomorrow!');
-      }
-    }
-  }
-
-  // Flow control
-  function launchA(){
-    setStep('A');
-    const cfg = ROOM.minigames.find(m=>m.id==='A');
-    mountVaultFrenzy(cfg);
-  }
-  function launchB(){
-    setStep('B');
-    const cfg = ROOM.minigames.find(m=>m.id==='B');
-    mountLightReactor(cfg);
-  }
-  function launchC(){
-    setStep('C');
-    const cfg = ROOM.minigames.find(m=>m.id==='C');
-    mountPressureChamber(cfg);
-  }
-
-  async function onFinish(){
-    const body = { tokens: [tokenA, tokenB, tokenC] };
-    const res = await fetch('/escape/api/finish', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const js = await res.json();
-    if(js.ok){
-      const total = js.total_time_ms;
-      totalMsEl.textContent = total.toString();
-      const share =
-`◆◎✶
+      if (js.ok) {
+        const total = js.total_time_ms;
+        totalMsEl.textContent = total.toString();
+        const share =
+          `◆◎✶
 Time: ${fmt(total)}
 ${ROOM.date} • ${ROOM.theme}
 theroundup.com/escape`;
-      shareBlock.textContent = share;
-      finish.style.display='block';
-      const introAd = document.querySelector('.ads'); if(introAd) introAd.remove();
-    }else{
-      alert('Finish failed');
+        shareBlock.textContent = share;
+        finish.style.display = 'block';
+        const introAd = document.querySelector('.ads'); if (introAd) introAd.remove();
+      } else {
+        alert('Finish failed');
+      }
     }
-  }
 
-  startBtn.addEventListener('click', async ()=>{
-    startBtn.disabled = true;
-    intro.style.display='none';
-    START_TS = Date.now();
-    tickGlobal();
-    setStep('A'); launchA();
-  });
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      intro.style.display = 'none';
+      START_TS = Date.now();
+      tickGlobal();
+      setStep('A'); launchA();
+    });
 
-  (async function init(){
-    await fetchToday();
-  })();
+    (async function init() {
+      await fetchToday();
+    })();
   </script>
 </body>
+
 </html>

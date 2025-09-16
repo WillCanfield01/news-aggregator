@@ -13,7 +13,7 @@ from app.extensions import db
 
 from .models import EscapeRoom, EscapeScore
 from . import core
-
+import os
 
 bp = Blueprint("escape", __name__, url_prefix="/escape")
 
@@ -143,6 +143,56 @@ def leaderboard_view():
     date = request.args.get("date") or core._date_key()
     rows = EscapeScore.top_for_day(date=date, limit=100)
     return render_template("escape/leaderboard.html", date=date, rows=rows)
+
+@bp.route("/api/admin/regen", methods=["GET", "POST"])
+def api_admin_regen():
+    """
+    Admin-only: regenerate (or rotate) a room for a given date.
+    Params:
+      - token: must match ESCAPE_ADMIN_TOKEN env var (required)
+      - date: YYYY-MM-DD (defaults to today)
+      - force: true/false (kept for compat; not required)
+      - rotate or salt: any string; if provided, creates a different variant for the same date
+    """
+    expected = os.getenv("ESCAPE_ADMIN_TOKEN")
+    token = request.args.get("token") or (request.get_json(silent=True) or {}).get("token")
+    if not expected or token != expected:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    date = request.args.get("date") or (request.get_json(silent=True) or {}).get("date") or core._date_key()
+    salt = (
+        request.args.get("rotate") or request.args.get("salt")
+        or (request.get_json(silent=True) or {}).get("rotate")
+        or (request.get_json(silent=True) or {}).get("salt")
+    )
+
+    try:
+        d = dt.datetime.strptime(date, "%Y-%m-%d").date()
+    except Exception:
+        return jsonify({"ok": False, "error": "bad date"}), 400
+
+    # Generate (optionally rotated with salt) and upsert
+    try:
+        room = core.generate_room(d, salt=str(salt))  # salt may be None → normal daily
+    except TypeError:
+        # If your core doesn't have salt yet, fall back to normal generate
+        room = core.generate_room(d)
+
+    existing = EscapeRoom.query.filter_by(date=room.date).first()
+    if existing:
+        existing.theme = room.theme
+        existing.minigames_json = room.minigames
+        existing.server_private_json = room.server_private
+        db.session.add(existing)
+    else:
+        db.session.add(EscapeRoom(
+            date=room.date, theme=room.theme,
+            minigames_json=room.minigames, server_private_json=room.server_private
+        ))
+    db.session.commit()
+
+    return jsonify({"ok": True, "date": room.date, "theme": room.theme,
+                    "minis": [m.get("type") for m in room.minigames]})
 
 
 # ───────────────────── Legacy compatibility: init_routes(bp) ─────────────────────
