@@ -1,22 +1,22 @@
 
-# app/escape/core.py (REWRITE)
+# app/escape/core.py (FULL — compatible + new minigames)
 # -*- coding: utf-8 -*-
 """
-Escape minigames core: daily 3 arcades -> 1 final lock (server verified).
+Daily Escape — Core module
+- Deterministic daily generation of 3 ORIGINAL minigames
+- Server-side verification (no solutions sent to client)
+- HMAC-signed mini completion tokens
+- Back-compat shims for legacy imports (schedule_daily_generation, ensure_daily_room, get_today_key,
+  apply_fragment_rule, verify_puzzle, verify_meta_final).
 
-This file defines:
-- Daily room generation (deterministic by date) with 3 ORIGINAL minigames:
-    1) Vault Frenzy       (tapping chaos + fake-outs)
-    2) Light Reactor      (precision timing + risk/reward)
-    3) Pressure Chamber   (real-time multitasking valves)
-- Server-side verification for each minigame (no client solutions)
-- HMAC-signed completion tokens
-- Helpers for daily room ensure/fetch
+Minigames:
+  A) Vault Frenzy        — tapping chaos + fake-outs
+  B) Light Reactor       — precision timing + risk/reward
+  C) Pressure Chamber    — real-time multitasking of valves
 
-Design goals:
-- Mobile-first, < 5 min total
-- One-and-done per day
-- Leaderboard uses total time (ms)
+Expected external usage:
+  - routes.py calls /escape/api/today, /escape/api/submit, /escape/api/finish
+  - app/app.py may import schedule_daily_generation(app)  ← provided
 """
 
 from __future__ import annotations
@@ -29,13 +29,19 @@ import math
 import os
 import random
 import secrets
+import string
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
-# ───────────────────────── Config & RNG ─────────────────────────
+import pytz
 
+# ───────────────────────── Config ─────────────────────────
+TIMEZONE = os.getenv("ESCAPE_TZ", "America/Boise")
+_scheduler_started = False
+
+
+# ───────────────────────── Secrets / RNG ─────────────────────────
 def _app_secret() -> bytes:
-    # Use a dedicated secret if present; fall back to Flask SECRET_KEY.
     key = os.getenv("ESCAPE_SECRET") or os.getenv("SECRET_KEY") or "change-me"
     return key.encode("utf-8")
 
@@ -47,7 +53,6 @@ def _date_key(date: Optional[dt.date] = None) -> str:
 
 def _seeded_rng(date: Optional[dt.date] = None, flavor: str = "") -> random.Random:
     seed_src = f"{_date_key(date)}::{flavor}::{os.getenv('ESCAPE_SEED_SALT','')}".encode()
-    # Stable 64-bit seed
     seed = int(hashlib.sha256(seed_src).hexdigest()[:16], 16)
     return random.Random(seed)
 
@@ -61,14 +66,23 @@ def _hmac_verify(data: Dict[str, Any], signature: str) -> bool:
     return hmac.compare_digest(_hmac_sign(data), signature)
 
 
-# ───────────────────────── Data Models (dataclasses) ─────────────────────────
+# ───────────────────────── Back-compat helpers ─────────────────────────
+def normalize_answer(s: str) -> str:
+    import re as _re
+    return _re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
 
+
+def get_today_key(tz: Optional[str] = None) -> str:
+    now = dt.datetime.now(pytz.timezone(tz or TIMEZONE))
+    return now.date().isoformat()
+
+
+# ───────────────────────── Data Models (dataclasses) ─────────────────────────
 @dataclass
 class MiniConfig:
     type: str
     id: str
     seed: str
-    # Generic caps to keep rounds short & consistent:
     time_cap_sec: int = 75
 
 
@@ -77,10 +91,8 @@ class VaultFrenzyConfig(MiniConfig):
     grid_rows: int = 3
     grid_cols: int = 4
     rounds: int = 3
-    # Each round: number of correct pops and injected decoys
     pops_per_round: List[int] = None
     decoys_per_round: List[int] = None
-    # Fake-out behaviors:
     allow_double_blink: bool = True
     allow_delay_blink: bool = True
     allow_wrong_color: bool = True
@@ -89,13 +101,11 @@ class VaultFrenzyConfig(MiniConfig):
 @dataclass
 class LightReactorConfig(MiniConfig):
     rounds: int = 3
-    # For each round we specify orb count (1→2), speed multipliers, and target zones
-    orb_counts: List[int] = None          # e.g., [1,1,2]
-    speeds: List[float] = None            # base angular velocity per round
-    target_spans_deg: List[float] = None  # size of target window in degrees
-    reverse_rounds: List[bool] = None     # whether to reverse direction
-    bonus_orb_prob: float = 0.35          # chance to spawn bonus orb in a round
-    # Tolerance for server overlap check (ms windows around true overlap moment)
+    orb_counts: List[int] = None
+    speeds: List[float] = None
+    target_spans_deg: List[float] = None
+    reverse_rounds: List[bool] = None
+    bonus_orb_prob: float = 0.35
     hit_tolerance_ms: int = 110
 
 
@@ -103,11 +113,8 @@ class LightReactorConfig(MiniConfig):
 class PressureChamberConfig(MiniConfig):
     valves: int = 4
     rounds: int = 3
-    # For each round, per-valve rise speed in "pressure units per second"
     rise_speeds: List[List[float]] = None
-    # Pressure max threshold (overflow if >= 1.0)
     overflow_threshold: float = 1.0
-    # After a tap, valve resets to 0 and speed may reroll within range (server seeded)
     reroll_speed_after_tap: bool = True
 
 
@@ -115,17 +122,16 @@ class PressureChamberConfig(MiniConfig):
 class DailyRoom:
     date: str
     theme: str
-    minigames: List[Dict[str, Any]]  # public-safe config for client
-    # server-only (never returned to client):
+    minigames: List[Dict[str, Any]]
     server_private: Dict[str, Any]
 
 
-# ───────────────────────── Daily Generation ─────────────────────────
-
+# ───────────────────────── Generation ─────────────────────────
 THEMES = [
     "Neon Archives", "Sapphire Vault", "Clockwork Corridor", "Lumen Lab",
     "Dusty Attic", "Void Observatory", "Arcade Bunker", "Crystal Caves",
 ]
+
 
 def _pick_theme(rng: random.Random) -> str:
     return rng.choice(THEMES)
@@ -147,7 +153,6 @@ def _gen_vault_frenzy(rng: random.Random, ident="A") -> Tuple[Dict[str, Any], Di
         time_cap_sec=75,
     )
     public = asdict(cfg)
-    # Strip server-only determinism details if any are added later; for now we keep public minimal.
     return public, {"type": "vault_frenzy", "server_seed": rng.getrandbits(64)}
 
 
@@ -174,7 +179,6 @@ def _gen_pressure_chamber(rng: random.Random, ident="C") -> Tuple[Dict[str, Any]
     valves = 4
     rise_speeds = []
     for _ in range(rounds):
-        # Generate per-valve speeds between 0.25 and 0.65 units/sec for variety
         rise_speeds.append([round(rng.uniform(0.25, 0.65), 2) for _ in range(valves)])
     cfg = PressureChamberConfig(
         type="pressure_chamber",
@@ -206,34 +210,16 @@ def generate_room(date: Optional[dt.date] = None) -> DailyRoom:
     )
 
 
-# ───────────────────────── Server Verification ─────────────────────────
-# We verify based on a deterministic simulation using server seeds and
-# the client's input transcript. We only need to confirm success and compute
-# an effective time. Specific physics/animations run on client are *visual only*.
-
+# ───────────────────────── Verification ─────────────────────────
 class VerifyError(Exception):
     pass
 
 
 def verify_vault_frenzy(server_seed: int, cfg: Dict[str, Any], transcript: Dict[str, Any]) -> Tuple[bool, int]:
-    """
-    transcript:
-      {
-        "rounds": [
-          {"taps": [{"idx": 5, "t": 123}, ...], "elapsed_ms": 2100},
-          ...
-        ]
-      }
-    Return (passed, elapsed_ms).
-    """
     rng = random.Random(server_seed)
-    rounds = cfg.get("rounds", 3)
-    pops_per_round = cfg.get("pops_per_round", [3,4,4])
-    decoys_per_round = cfg.get("decoys_per_round", [2,3,3])
+    rounds = int(cfg.get("rounds", 3))
+    pops_per_round = cfg.get("pops_per_round", [3, 4, 4])
 
-    # We simulate that there are exactly 'pops_per_round[r]' correct windows to hit.
-    # Client succeeds a round if they have at least that many valid taps (we allow extra taps but ignore).
-    # We also cap time by provided elapsed.
     total_ms = 0
     tr_rounds = transcript.get("rounds", [])
     if len(tr_rounds) != rounds:
@@ -243,12 +229,9 @@ def verify_vault_frenzy(server_seed: int, cfg: Dict[str, Any], transcript: Dict[
         taps = rd.get("taps", [])
         elapsed = int(rd.get("elapsed_ms", 0))
         total_ms += max(0, elapsed)
-        # Deterministic target count
         target_hits = pops_per_round[r]
-        # Very basic integrity: cap taps to grid size * 3 to discourage spam
         if len(taps) > 100:
             return (False, 0)
-        # Accept if taps >= target_hits, and no obvious impossible sequences (e.g., negative times)
         if any(t.get("t", 0) < 0 for t in taps):
             return (False, 0)
         if len([t for t in taps if isinstance(t.get("idx"), int)]) < target_hits:
@@ -257,59 +240,35 @@ def verify_vault_frenzy(server_seed: int, cfg: Dict[str, Any], transcript: Dict[
 
 
 def verify_light_reactor(server_seed: int, cfg: Dict[str, Any], transcript: Dict[str, Any]) -> Tuple[bool, int]:
-    """
-    transcript:
-      { "stops": [ {"t": 812}, {"t": 1543}, {"t": 2301} ], "elapsed_ms": 3000 }
-    Each stop must coincide (within tolerance) with an overlap of orb and target zone.
-    We simulate the orb angle over time using 'speeds', 'reverse_rounds', and 'target_spans_deg'.
-    """
     rng = random.Random(server_seed)
-    rounds = cfg.get("rounds", 3)
+    rounds = int(cfg.get("rounds", 3))
     speeds = cfg.get("speeds", [1.0, 1.25, 1.4])
     target_spans = cfg.get("target_spans_deg", [40.0, 32.0, 28.0])
     reverse = cfg.get("reverse_rounds", [False, True, False])
-    tol = int(cfg.get("hit_tolerance_ms", 110))
 
     stops = transcript.get("stops", [])
     elapsed = int(transcript.get("elapsed_ms", 0))
 
     if len(stops) < rounds:
         return (False, 0)
-    # Simulate: each round lasts ~1000 ms baseline
-    success = True
+    # Assume ~1000 ms per round for verification
     for i in range(rounds):
-        # For determinism, set round-specific target angle in [0, 360)
         target_center = rng.uniform(0, 360.0)
         span = target_spans[i]
-        # Compute orb angle at stop time t_i (relative per round window):
         t_i = int(stops[i].get("t", -1))
         if t_i < 0:
-            success = False
-            break
-        # Normalize to round window (assume ~1000ms per round for verification)
+            return (False, 0)
         t_rel = (t_i % 1000) / 1000.0
         direction = -1.0 if reverse[i] else 1.0
         angle = (direction * 360.0 * speeds[i] * t_rel) % 360.0
-        # Check overlap:
         diff = abs((angle - target_center + 540.0) % 360.0 - 180.0)
-        if diff > (span / 2.0) and diff > 5.0:  # small absolute tolerance
-            success = False
-            break
-
-    if not success:
-        return (False, 0)
+        if diff > (span / 2.0) and diff > 5.0:
+            return (False, 0)
 
     return (True, max(0, elapsed))
 
 
 def verify_pressure_chamber(server_seed: int, cfg: Dict[str, Any], transcript: Dict[str, Any]) -> Tuple[bool, int]:
-    """
-    transcript:
-      { "actions": [ {"valve": 0, "t": 420}, ... ], "elapsed_ms": 2800 }
-    We simulate N valves whose pressure increases linearly per round. Tapping a valve
-    resets it to 0 and may reroll its speed. If any valve reaches threshold before
-    an action, round fails.
-    """
     rng = random.Random(server_seed)
     valves = int(cfg.get("valves", 4))
     rounds = int(cfg.get("rounds", 3))
@@ -320,28 +279,23 @@ def verify_pressure_chamber(server_seed: int, cfg: Dict[str, Any], transcript: D
     actions = transcript.get("actions", [])
     elapsed = int(transcript.get("elapsed_ms", 0))
 
-    # Sim verification per round: window ~1000ms. We walk through actions time-ordered.
     idx = 0
     last_t = 0
     for r in range(rounds):
-        # State per valve at start of round
         press = [0.0] * valves
         speeds = list(rise_speeds[r])
-        # Extract actions for this round (<= 20 to avoid spam)
         round_actions = []
         while idx < len(actions) and len(round_actions) < 20:
             t = int(actions[idx].get("t", -1))
             v = actions[idx].get("valve", -1)
-            if t < last_t: break  # next round
-            if t > (r+1)*1000: break  # next round window
+            if t < last_t: break
+            if t > (r+1)*1000: break
             round_actions.append((t, v))
             idx += 1
 
-        # Simulate time from r*1000 → (r+1)*1000
         cursor = r*1000
         for t, v in round_actions + [((r+1)*1000, None)]:
             dt_ms = max(0, t - cursor)
-            # increase pressure
             for i in range(valves):
                 press[i] += speeds[i] * (dt_ms / 1000.0)
                 if press[i] >= threshold:
@@ -349,7 +303,6 @@ def verify_pressure_chamber(server_seed: int, cfg: Dict[str, Any], transcript: D
             cursor = t
             if v is None:
                 break
-            # tap valve v
             if not isinstance(v, int) or not (0 <= v < valves):
                 return (False, 0)
             press[v] = 0.0
@@ -358,19 +311,6 @@ def verify_pressure_chamber(server_seed: int, cfg: Dict[str, Any], transcript: D
         last_t = (r+1)*1000
 
     return (True, max(0, elapsed))
-
-
-# ───────────────────────── Public API helpers ─────────────────────────
-
-def room_public_payload(room: DailyRoom) -> Dict[str, Any]:
-    # Prepare safe JSON for client
-    return {
-        "date": room.date,
-        "theme": room.theme,
-        "minigames": room.minigames,
-        # signed envelope to prevent tampering (does NOT include answers)
-        "signature": _hmac_sign({"date": room.date, "count": len(room.minigames)}),
-    }
 
 
 def verify_minigame(minigame_id: str, cfg: Dict[str, Any], server_private: Dict[str, Any], transcript: Dict[str, Any]) -> Tuple[bool, int]:
@@ -388,15 +328,137 @@ def verify_minigame(minigame_id: str, cfg: Dict[str, Any], server_private: Dict[
     raise VerifyError("unknown minigame type")
 
 
+# ───────────────────────── Public payload ─────────────────────────
+def room_public_payload(room: DailyRoom) -> Dict[str, Any]:
+    return {
+        "date": room.date,
+        "theme": room.theme,
+        "minigames": room.minigames,
+        "signature": _hmac_sign({"date": room.date, "count": len(room.minigames)}),
+    }
+
+
 def fragment_for(mini_id: str) -> str:
-    # Simple mapping to fun symbols; the final code is the concatenation
-    # of the three fragments in order A→B→C.
     return {"A": "◆", "B": "◎", "C": "✶"}.get(mini_id, "?")
 
 
 def assemble_final_code(fragments: List[str]) -> str:
-    # Human-readable final code for share text
     return "".join(fragments)
 
 
-# Persistence hooks are kept in routes/models to avoid circular imports.
+# ───────────────────────── Persistence + Scheduler (compat) ─────────────────────────
+def _get_db_and_models():
+    from app.extensions import db
+    from .models import EscapeRoom
+    return db, EscapeRoom
+
+
+def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False):
+    db, EscapeRoom = _get_db_and_models()
+    if date_key is None:
+        date_key = get_today_key()
+    row = db.session.query(EscapeRoom).filter_by(date=date_key).first()
+    if row and not force_regen:
+        return row
+    dr = generate_room(dt.datetime.strptime(date_key, "%Y-%m-%d").date())
+    if row:
+        row.theme = dr.theme
+        row.minigames_json = dr.minigames
+        row.server_private_json = dr.server_private
+        db.session.add(row); db.session.commit(); return row
+    else:
+        row = EscapeRoom(
+            date=dr.date, theme=dr.theme,
+            minigames_json=dr.minigames, server_private_json=dr.server_private
+        )
+        db.session.add(row); db.session.commit(); return row
+
+
+def schedule_daily_generation(app) -> None:
+    """Start a background scheduler to pre-generate the daily room (00:05 local)."""
+    global _scheduler_started
+    if _scheduler_started:
+        try: app.logger.info("[escape] scheduler already started; skipping.")
+        except Exception: pass
+        return
+    _scheduler_started = True
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except Exception as e:
+        try: app.logger.warning(f"[escape] APScheduler not available: {e}")
+        except Exception: pass
+        return
+
+    tz = pytz.timezone(TIMEZONE)
+    scheduler = BackgroundScheduler(timezone=tz)
+
+    def job():
+        with app.app_context():
+            date_key = get_today_key()
+            try:
+                ensure_daily_room(date_key)
+                app.logger.info(f"[escape] Daily room generated for {date_key}")
+            except Exception as e:
+                app.logger.error(f"[escape] Daily generation failed for {date_key}: {e}")
+
+    scheduler.add_job(job, "cron", hour=0, minute=5, id="escape_daily_gen", replace_existing=True)
+    scheduler.start()
+    try: app.logger.info("[escape] scheduler started (daily 00:05 local).")
+    except Exception: pass
+
+
+# ───────────────────────── Legacy puzzle-API compatibility ─────────────────────────
+def apply_fragment_rule(answer: str, rule: str) -> str:
+    """
+    Keeps compatibility with older meta flows.
+    Supports: CONST:<TEXT>, FIRST2, FIRST3, LAST2, LAST3, CAESAR:+/-K;FIRST2/3/LAST2/3, IDX:a,b,c
+    """
+    ans = normalize_answer(answer)
+    rule = (rule or "").strip().upper()
+
+    if rule.startswith("CONST:"):
+        return normalize_answer(rule.split("CONST:",1)[1])[:4]
+
+    if rule == "FIRST2":  return ans[:2]
+    if rule == "FIRST3":  return ans[:3]
+    if rule == "LAST2":   return ans[-2:]
+    if rule == "LAST3":   return ans[-3:]
+
+    import re as _re
+    m = _re.match(r"CAESAR:\+?(-?\d+);(FIRST2|FIRST3|LAST2|LAST3)$", rule)
+    if m:
+        k = int(m.group(1)) % 26
+        A = string.ascii_uppercase
+        shifted = "".join(A[(A.index(ch)+k)%26] if ch in A else ch for ch in ans)
+        sub = m.group(2)
+        return apply_fragment_rule(shifted, sub)
+
+    m = _re.match(r"IDX:([0-9,]+)$", rule)
+    if m:
+        idxs = [int(x) for x in m.group(1).split(",") if x.strip().isdigit()]
+        out = "".join(ans[i] for i in idxs if 0 <= i < len(ans))
+        return out[:4]
+
+    return ans[:4]
+
+
+def verify_puzzle(room_json: Dict[str, Any], puzzle_id: str, answer: str) -> bool:
+    """
+    Minimal backward-compat. If legacy 'puzzles' exist, check solution.answer.
+    This will return False for our new minigames (which use /api/submit instead).
+    """
+    puzzles = (room_json or {}).get("puzzles") or []
+    for p in puzzles:
+        if not isinstance(p, dict): continue
+        if p.get("id") != puzzle_id: continue
+        sol = (p.get("solution") or {}).get("answer") or p.get("answer")
+        if sol is None: return False
+        return normalize_answer(str(sol)) == normalize_answer(str(answer or ""))
+    return False
+
+
+def verify_meta_final(room_json: Dict[str, Any], submitted: str) -> bool:
+    final = (room_json or {}).get("final") or {}
+    sol = (final.get("solution") or {}).get("answer") or final.get("answer")
+    if sol is None: return False
+    return normalize_answer(str(sol)) == normalize_answer(str(submitted or ""))
