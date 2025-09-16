@@ -1,1296 +1,490 @@
+
+{# app/templates/escape/play.html (REWRITE) #}
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <title>Mini Escape — {{ date_key }}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <style>
-        :root {
-            --bg: #0f1220;
-            --panel: #151a2f;
-            --panel2: #0f1427;
-            --text: #e6eaf6;
-            --muted: #9aa3c7;
-            --brand: #58bbff;
-            --ok: #55d38e;
-            --err: #ff6b6b;
-            --shadow: rgba(0, 0, 0, .35);
-            --vh: 1vh
-        }
-
-        * {
-            box-sizing: border-box
-        }
-
-        html,
-        body {
-            height: 100%
-        }
-
-        body {
-            margin: 0;
-            background: var(--bg);
-            color: var(--text);
-            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif
-        }
-
-        .wrap {
-            max-width: 960px;
-            margin: 0 auto;
-            padding: 20px 16px 80px
-        }
-
-        header {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-bottom: 12px
-        }
-
-        .title {
-            font-size: 22px;
-            font-weight: 800
-        }
-
-        .badge {
-            padding: 4px 10px;
-            border-radius: 999px;
-            background: #172042;
-            border: 1px solid #26325f;
-            color: #b6c4ff
-        }
-
-        .timer {
-            margin-left: auto;
-            font-variant-numeric: tabular-nums;
-            font-weight: 700;
-            background: #172042;
-            border: 1px solid #26325f;
-            border-radius: 10px;
-            padding: 6px 10px
-        }
-
-        .intro,
-        .panel {
-            background: linear-gradient(180deg, #151a2f, #0f1427);
-            border: 1px solid #24305b;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px var(--shadow)
-        }
-
-        .intro {
-            padding: 14px;
-            margin: 10px 0 14px
-        }
-
-        .row {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        button,
-        .btn {
-            background: #1c2a4e;
-            border: 1px solid #2a3c73;
-            color: #cfe3ff;
-            border-radius: 10px;
-            padding: 10px 14px;
-            cursor: pointer;
-            text-decoration: none
-        }
-
-        button:hover,
-        .btn:hover {
-            filter: brightness(1.06)
-        }
-
-        input[type=text] {
-            flex: 1;
-            min-width: 200px;
-            background: #0b1226;
-            border: 1px solid #24305b;
-            color: var(--text);
-            border-radius: 10px;
-            padding: 10px 12px
-        }
-
-        .scene {
-            padding: 12px;
-            margin: 10px 0;
-            display: none
-        }
-
-        .scene.active {
-            display: block
-        }
-
-        .scene h3 {
-            margin: 4px 0 6px
-        }
-
-        .route-btns {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap
-        }
-
-        .p-card {
-            margin-top: 8px;
-            padding: 10px;
-            background: #0f1427;
-            border: 1px solid #22305d;
-            border-radius: 12px
-        }
-
-        .status {
-            font-size: 13px;
-            color: var(--muted)
-        }
-
-        .status.ok {
-            color: var(--ok)
-        }
-
-        .status.err {
-            color: var(--err)
-        }
-
-        .hint-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 6px
-        }
-
-        .hint-pill {
-            background: #0f1730;
-            border: 1px dashed #2a3769;
-            color: #a9b4e6;
-            border-radius: 999px;
-            padding: 6px 10px;
-            cursor: pointer
-        }
-
-        .hint-text {
-            margin-top: 4px;
-            background: #0c1428;
-            border: 1px solid #25305a;
-            border-radius: 8px;
-            padding: 8px 10px;
-            display: none
-        }
-
-        .footer {
-            margin-top: 16px;
-            padding: 12px
-        }
-
-        .final {
-            display: none
-        }
-
-        .notes {
-            position: sticky;
-            top: 10px
-        }
-
-        textarea {
-            width: 100%;
-            min-height: 140px;
-            background: #0b1226;
-            border: 1px solid #24305b;
-            color: var(--text);
-            border-radius: 10px;
-            padding: 8px
-        }
-
-        .two-col {
-            display: grid;
-            grid-template-columns: 1fr 320px;
-            gap: 14px
-        }
-
-        @media (max-width:900px) {
-            .two-col {
-                grid-template-columns: 1fr
-            }
-        }
-
-        .overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(7, 10, 18, .6);
-            backdrop-filter: blur(6px);
-            display: flex;
-            align-items: flex-start;
-            /* mobile: keep top-aligned */
-            justify-content: center;
-            z-index: 50;
-            overflow: auto;
-            /* <- allow scrolling */
-            padding: 12px;
-            /* breathing room */
-        }
-
-        .start {
-            width: min(780px, 92vw);
-            max-height: 92vh;
-            /* <- ensure Start button stays reachable */
-            overflow: auto;
-            /* <- scroll inside if needed */
-            background: linear-gradient(180deg, #141a30, #0f1427);
-            border: 1px solid #24305b;
-            border-radius: 20px;
-            padding: 22px;
-            box-shadow: 0 20px 60px var(--shadow)
-        }
-
-        .hidden {
-            display: none !important
-        }
-
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #0e182e;
-            color: #dce4ff;
-            border: 1px solid #2c3a69;
-            padding: 10px 12px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px var(--shadow);
-            opacity: 0;
-            transform: translateY(10px);
-            transition: .2s;
-            z-index: 60
-        }
-
-        .toast.show {
-            opacity: 1;
-            transform: translateY(0)
-        }
-
-        .rules {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 10px
-        }
-
-        @media (max-width:700px) {
-            .rules {
-                grid-template-columns: 1fr
-            }
-        }
-
-        .rule {
-            background: #0f162d;
-            border: 1px solid #24305b;
-            border-radius: 12px;
-            padding: 10px
-        }
-
-        .muted {
-            color: #9aa3c7;
-            font-size: 13px
-        }
-
-        .gloss {
-            margin-top: 8px;
-            background: #0b1327;
-            border: 1px solid #243463;
-            border-radius: 10px;
-            padding: 8px
-        }
-
-        .gloss summary {
-            cursor: pointer;
-            color: #b6c4ff
-        }
-
-        .choice {
-            display: inline-block;
-            margin: 4px 6px 0 0;
-            padding: 8px 10px;
-            border-radius: 10px;
-            background: #14234a;
-            border: 1px solid #2a3c73;
-            cursor: pointer;
-            user-select: none
-        }
-
-        .choice.selected {
-            outline: 2px solid var(--brand)
-        }
-
-        .chips {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 6px
-        }
-
-        .chip {
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: #132147;
-            border: 1px solid #2a3c73;
-            cursor: pointer;
-            transition: transform .08s ease, box-shadow .08s ease, filter .08s ease;
-            box-shadow: 0 2px 0 rgba(0, 0, 0, .25);
-        }
-
-        .chip:hover {
-            filter: brightness(1.06)
-        }
-
-        .chip:active {
-            transform: translateY(1px);
-            box-shadow: 0 1px 0 rgba(0, 0, 0, .25)
-        }
-
-        /* Cue strip for sequence minis */
-        .cue-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 8px
-        }
-
-        .cue {
-            padding: 6px 10px;
-            border-radius: 10px;
-            background: #1b2647;
-            border: 1px solid #2a3c73;
-            user-select: none;
-            transition: transform .08s ease, box-shadow .08s ease, filter .08s ease;
-            box-shadow: 0 2px 0 rgba(0, 0, 0, .25);
-        }
-
-        .cue.playing {
-            outline: 2px solid var(--brand);
-            filter: brightness(1.15);
-            transform: translateY(-1px);
-        }
-
-        .grid {
-            display: inline-grid;
-            gap: 6px;
-            margin-top: 6px
-        }
-
-        .grid .cell {
-            min-width: 36px;
-            min-height: 36px;
-            padding: 6px 8px;
-            text-align: center;
-            border-radius: 8px;
-            background: #0e1832;
-            border: 1px solid #243463;
-            cursor: pointer;
-            user-select: none;
-            font-variant-numeric: tabular-nums;
-            transition: transform .06s ease
-        }
-
-        .grid .cell.on {
-            outline: 2px solid var(--brand);
-            transform: scale(1.03)
-        }
-
-        .grid .cell.near {
-            box-shadow: 0 0 0 2px rgba(88, 187, 255, .35) inset;
-        }
-
-        /* NEW: visually mark the start cell the generator provides */
-        .grid .cell.start {
-            outline: 2px solid var(--brand);
-            box-shadow: 0 0 0 3px rgba(88, 187, 255, .2), 0 0 16px rgba(88, 187, 255, .25) inset;
-            position: relative;
-        }
-
-        .grid .cell.start::after {
-            content: "★";
-            position: absolute;
-            top: -10px;
-            right: -10px;
-            font-size: 12px;
-            color: var(--brand);
-        }
-
-        .helper {
-            font-size: 12px;
-            color: #9aa3c7;
-            margin-top: 6px
-        }
-
-        /* NEW: make disabled UI really inert */
-        .disabled {
-            opacity: .6;
-            pointer-events: none;
-            filter: saturate(.7);
-        }
-
-        /* Thematic route buttons */
-        .route-btn {
-            text-align: left;
-            min-width: 240px
-        }
-
-        .route-title {
-            font-weight: 700
-        }
-
-        .route-sub {
-            display: block;
-            font-size: 12px;
-            color: var(--muted);
-            margin-top: 2px
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Escape — Play</title>
+  <style>
+    :root {
+      --bg: #0e1222;
+      --panel: #151a2f;
+      --panel2: #0f1427;
+      --text: #f5f6fa;
+      --muted: #99a3c7;
+      --accent: #58bbff;
+      --ok: #68f2a1;
+      --warn: #ffd166;
+      --bad: #ff6b6b;
+      --shadow: rgba(0,0,0,0.45);
+      --card: #121832;
+      --line: #223057;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: radial-gradient(1200px 800px at 50% -20%, #1a1f3e 0%, #0e1222 55%, #0e1222 100%);
+      color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    }
+    .wrap { width: 100%; max-width: 820px; padding: 18px; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow);
+    }
+    .brand { font-weight: 800; letter-spacing: 0.4px; }
+    .meta { color: var(--muted); font-size: 14px; }
+    .progress {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px;
+    }
+    .step {
+      background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; text-align: center; font-size: 14px; color: var(--muted);
+    }
+    .step.active { color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+    .panel {
+      margin-top: 14px; background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow);
+      padding: 12px;
+    }
+    .center { display: flex; align-items: center; justify-content: center; }
+    .btn {
+      appearance: none; background: var(--accent); color: #08111e; border: none; border-radius: 12px;
+      padding: 10px 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(88,187,255,0.35);
+    }
+    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .muted { color: var(--muted); }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .timer { font-weight: 800; letter-spacing: 0.4px; }
+    .ads { margin-top: 12px; height: 64px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); display:flex; align-items:center; justify-content:center; }
+    .share { white-space: pre; background:#0b1225; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    /* Vault Frenzy UI */
+    .vf-grid { display:grid; gap:10px; touch-action: manipulation; }
+    .vf-cell {
+      width: 86px; height: 86px; border-radius: 14px; background: #121832; border:1px solid #223057;
+      display:flex; align-items:center; justify-content:center; font-size:18px; cursor:pointer;
+      user-select:none; transition: transform .06s ease;
+    }
+    .vf-cell:active { transform: scale(0.96); }
+    /* Light Reactor UI */
+    .reactor {
+      position: relative; width: 320px; height: 320px; border-radius: 50%; background: #0e1a34; border:2px solid #20335f; box-shadow: inset 0 0 60px rgba(32,64,128,.45);
+    }
+    .reactor .target { position:absolute; top:50%; left:50%; width: 280px; height: 280px; margin:-140px 0 0 -140px; border-radius:50%; border:2px dashed #2954a8; }
+    .reactor .orb { position:absolute; width:16px; height:16px; border-radius:50%; background:#58bbff; box-shadow: 0 0 14px rgba(88,187,255,.9); }
+    .reactor .zone { position:absolute; width: 260px; height: 260px; margin:-130px 0 0 -130px; top:50%; left:50%; border-radius:50%; border: 4px solid rgba(104,242,161,.45); }
+    .reactor .cta { position:absolute; bottom:14px; left:50%; transform: translateX(-50%); }
+    /* Pressure Chamber UI */
+    .pc-wrap { display:flex; gap: 12px; }
+    .pc-valve { width: 70px; background:#0f1a33; border:1px solid #223057; border-radius:10px; padding:6px; }
+    .pc-gauge { height: 160px; background: linear-gradient(0deg, #1c2b5c, #14305a); border-radius:6px; overflow:hidden; position:relative; }
+    .pc-fill { position:absolute; bottom:0; left:0; right:0; height:0%; background:linear-gradient(180deg, #68f2a1, #2a7f55); box-shadow:inset 0 0 18px rgba(0,0,0,.35); transition: height .12s linear; }
+    .pc-btn { margin-top:6px; width:100%; font-weight:700; }
+    /* Finish */
+    .finish { text-align:center; }
+  </style>
 </head>
-
 <body>
-    <!-- Intro modal: scenario + rules. Timer starts only after click -->
-    <div id="overlay" class="overlay">
-        <div class="start">
-            <div style="font-size:22px;font-weight:800;margin-bottom:6px;">Mini Escape — Daily Trail</div>
-            <div id="ovTitle" style="font-weight:700;margin-top:2px;">Loading…</div>
-            <div id="ovIntro" class="muted" style="margin-top:6px;">Please wait…</div>
+  <div class="wrap">
+    <header>
+      <div>
+        <div class="brand">Daily Escape</div>
+        <div class="meta"><span id="todayMeta"></span> • <span class="timer" id="globalTimer">0:00</span></div>
+      </div>
+      <div class="row">
+        <button id="muteBtn" class="btn" style="background:#263a5f;color:#cfe2ff">🔇 Sound</button>
+        <a href="/escape/leaderboard" class="btn" style="background:#1cf29f;">Leaderboard</a>
+      </div>
+    </header>
 
-            <div class="rules">
-                <div class="rule">
-                    <div style="font-weight:700;margin-bottom:4px;">How it works</div>
-                    <div class="muted">Solve 3 scenes to collect fragments, then combine them — in order — to unlock the
-                        final code.
-                    </div>
-                </div>
-
-                <div class="rule">
-                    <div style="font-weight:700;margin-bottom:4px;">Routes</div>
-                    <div class="muted" id="ovRoutesText">
-                        Each scene offers three scene-themed routes (1× / 2× / 3×). Faster routes delay hints (+30s /
-                        +60s) and may
-                        reward a clean first try.
-                    </div>
-                </div>
-
-                <div class="rule">
-                    <div style="font-weight:700;margin-bottom:4px;">Hints & timing</div>
-                    <div class="muted">
-                        Hints unlock after a short delay. Choosing faster routes delays hints a bit more (+30s for
-                        quick, +60s for
-                        risky). Finishing a scene on your first try without hints can earn a time bonus on brisk/risky
-                        routes.
-                    </div>
-                </div>
-
-                <div class="rule">
-                    <div style="font-weight:700;margin-bottom:4px;">Tips</div>
-                    <div class="muted">Notes save locally per day. Press <b>Cmd/Ctrl+Enter</b> to submit an answer
-                        quickly.</div>
-                </div>
-            </div>
-            <div class="row" style="justify-content:center;margin-top:12px;">
-                <button id="startBtn" style="background:#1b7bc0;border-color:#2f8bd5">Start Today’s Escape</button>
-                <a class="badge" href="/escape/leaderboard?date={{ date_key }}" target="_blank" rel="noopener">View
-                    Leaderboard</a>
-            </div>
-            <div class="muted" style="margin-top:6px;">Date: <b id="ovDate">{{ date_key }}</b> • Difficulty: <b
-                    id="ovDiff">{{ difficulty|default('medium')|title }}</b></div>
-        </div>
+    <div class="progress">
+      <div class="step active" id="stepA">◆ Vault Frenzy</div>
+      <div class="step" id="stepB">◎ Light Reactor</div>
+      <div class="step" id="stepC">✶ Pressure Chamber</div>
     </div>
 
-    <div class="wrap">
-        <header>
-            <div class="title">Mini Escape — <span id="dateKey">{{ date_key }}</span></div>
-            <span class="badge">Difficulty: <b id="difficulty">{{ difficulty|default('medium')|title }}</b></span>
-            <span class="badge" id="sceneBadge">Scene 1 of 3</span>
-            <div id="timer" class="timer">00:00.000</div>
-        </header>
+    <div class="panel" id="panel">
+      <div id="intro" class="center" style="flex-direction:column; padding:20px;">
+        <h2 style="margin:4px 0 10px;">Ready to escape?</h2>
+        <p class="muted" style="text-align:center; max-width:520px;">
+          Three quick minigames. One escape. Finish as fast as you can.
+        </p>
+        <div class="ads">Ad slot</div>
+        <div style="height:8px;"></div>
+        <button id="startBtn" class="btn">Start</button>
+      </div>
 
-        <div class="two-col">
-            <main>
-                <section class="intro panel">
-                    <div id="roomTitle" style="font-weight:800;margin-bottom:6px;">Loading…</div>
-                    <div id="roomIntro" style="color:#c8d4ff">Please wait…</div>
-                </section>
+      <div id="gameA" style="display:none;"></div>
+      <div id="gameB" style="display:none;"></div>
+      <div id="gameC" style="display:none;"></div>
 
-                <!-- Scenes (sequential reveal) -->
-                <section id="scenes"></section>
-
-                <section class="footer panel final" id="finalGate">
-                    <div><strong>Final Code</strong> — Combine the three fragments <em>in order</em> (Scene 1 +
-                        Scene 2
-                        + Scene 3).
-                    </div>
-
-                    <!-- NEW: live fragment display -->
-                    <div id="fragBag" class="status" style="margin-top:6px;"></div>
-
-                    <div class="row" style="margin-top:6px;">
-                        <input id="finalInput" type="text" placeholder="Enter final code…" autocomplete="off" />
-                        <button id="finishBtn">Finish & Submit Time</button>
-                    </div>
-                    <div id="finalStatus" class="status"></div>
-
-                    <div id="share"
-                        style="display:none;margin-top:10px;border:1px dashed #2a3769;border-radius:12px;padding:10px;color:#b6c4ff">
-                        <div id="shareText">Share your time!</div>
-                        <div class="row" style="margin-top:8px;">
-                            <button id="copyBtn">Copy Result</button>
-                            <a class="btn" href="/escape/leaderboard?date={{ date_key }}" target="_blank"
-                                rel="noopener">View Leaderboard</a>
-                        </div>
-                    </div>
-                </section>
-            </main>
-
-            <!-- Notes panel -->
-            <aside class="notes">
-                <div class="panel" style="padding:12px;">
-                    <div style="font-weight:700;margin-bottom:6px;">Notes</div>
-                    <textarea id="notesBox" placeholder="Jot down letters, codes, fragments…"></textarea>
-                    <div class="row" style="margin-top:8px;">
-                        <button id="clearNotes">Clear</button>
-                        <span id="saveStamp" class="status" style="margin-left:auto;">Autosaved</span>
-                    </div>
-                </div>
-            </aside>
+      <div id="finish" class="finish" style="display:none;">
+        <h2>Escaped!</h2>
+        <p>Total time: <b><span id="totalMs"></span> ms</b></p>
+        <div class="row center" style="justify-content:center;">
+          <div id="shareBlock" class="share"></div>
         </div>
+        <div style="height:10px;"></div>
+        <a href="/escape/leaderboard" class="btn">See Leaderboard</a>
+      </div>
     </div>
+  </div>
 
-    <div id="toast" class="toast">Saved</div>
+  <script>
+  // Minimal SFX (optional)
+  let SOUND_ON = true;
+  const muteBtn = document.getElementById('muteBtn');
+  muteBtn.addEventListener('click', () => {
+    SOUND_ON = !SOUND_ON;
+    muteBtn.textContent = SOUND_ON ? '🔊 Sound' : '🔇 Sound';
+    muteBtn.style.background = SOUND_ON ? '#58bbff' : '#263a5f';
+    muteBtn.style.color = SOUND_ON ? '#08111e' : '#cfe2ff';
+  });
+  function bip(freq=880, dur=0.05){ try{
+      if(!SOUND_ON) return; const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.type='sine'; o.frequency.value=freq; g.gain.value=0.02; o.connect(g); g.connect(ctx.destination); o.start();
+      setTimeout(()=>{o.stop(); ctx.close();}, dur*1000);
+  }catch(e){}}
 
-    <script>
-        // ----- Mobile viewport + scroll lock helpers -----
-        function setVHVar() {
-            const vh = window.innerHeight * 0.01;
-            document.documentElement.style.setProperty('--vh', `${vh}px`);
+  const todayMeta = document.getElementById('todayMeta');
+  const globalTimer = document.getElementById('globalTimer');
+  const startBtn = document.getElementById('startBtn');
+  const intro = document.getElementById('intro');
+  const panel = document.getElementById('panel');
+  const gameA = document.getElementById('gameA');
+  const gameB = document.getElementById('gameB');
+  const gameC = document.getElementById('gameC');
+  const finish = document.getElementById('finish');
+  const totalMsEl = document.getElementById('totalMs');
+  const shareBlock = document.getElementById('shareBlock');
+
+  let ROOM = null;
+  let START_TS = 0;
+  let elapsedA = 0, elapsedB = 0, elapsedC = 0;
+  let tokenA = null, tokenB = null, tokenC = null;
+
+  function fmt(ms){
+    const s = Math.floor(ms/1000); const m = Math.floor(s/60);
+    const rem = s % 60; return `${m}:${rem.toString().padStart(2,'0')}`;
+  }
+
+  function tickGlobal(){
+    if(!START_TS) return;
+    const ms = Date.now() - START_TS;
+    globalTimer.textContent = fmt(ms);
+    requestAnimationFrame(tickGlobal);
+  }
+
+  async function fetchToday(){
+    const res = await fetch('/escape/api/today');
+    const js = await res.json();
+    ROOM = js;
+    todayMeta.textContent = `${js.date} • ${js.theme}`;
+  }
+
+  function setStep(id){
+    for(const k of ['A','B','C']){
+      document.getElementById('step'+k).classList.toggle('active', k===id);
+    }
+  }
+
+  // ───────────────────── Vault Frenzy (A) ─────────────────────
+  function mountVaultFrenzy(cfg){
+    gameA.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<h3 style="margin:10px 0;">◆ Vault Frenzy</h3>`;
+    const grid = document.createElement('div');
+    grid.className = 'vf-grid';
+    grid.style.gridTemplateColumns = `repeat(${cfg.grid_cols}, 1fr)`;
+
+    const rows = cfg.grid_rows, cols = cfg.grid_cols;
+    const total = rows*cols;
+    const cells = [];
+    for(let i=0;i<total;i++){
+      const el = document.createElement('div');
+      el.className = 'vf-cell';
+      el.textContent = '';
+      el.dataset.idx = i;
+      grid.appendChild(el);
+      cells.push(el);
+    }
+    wrap.appendChild(grid);
+
+    const cta = document.createElement('div');
+    cta.style.marginTop = '10px';
+    cta.innerHTML = `<button class="btn" id="vfGo">Go</button>`;
+    wrap.appendChild(cta);
+
+    gameA.appendChild(wrap);
+    gameA.style.display = 'block';
+
+    const transcript = { rounds: [] };
+    let roundIdx = 0;
+    function runRound(){
+      const need = cfg.pops_per_round[roundIdx];
+      const decoys = cfg.decoys_per_round[roundIdx];
+      const roundStart = performance.now();
+      const taps = [];
+      const indexes = [...Array(total).keys()];
+
+      function flash(){
+        // fake, purely visual: randomly flash some cells quickly.
+        // Real verification is server-side and counts taps only.
+        for(const el of cells){
+          el.style.background = '#121832';
         }
-        setVHVar();
-        window.addEventListener('resize', setVHVar);
-        window.addEventListener('orientationchange', setVHVar);
-
-        const body = document.body;
-        function lockScroll() {
-            body.dataset.scrollY = String(window.scrollY);
-            body.style.position = 'fixed';
-            body.style.top = `-${body.dataset.scrollY}px`;
-            body.style.left = '0';
-            body.style.right = '0';
+        const on = new Set();
+        for(let i=0;i<need;i++){
+          on.add(indexes[Math.floor(Math.random()*indexes.length)]);
         }
-        function unlockScroll() {
-            const y = parseInt(body.dataset.scrollY || '0', 10);
-            body.style.position = '';
-            body.style.top = '';
-            body.style.left = '';
-            body.style.right = '';
-            window.scrollTo(0, y);
+        for(let i=0;i<decoys;i++){
+          on.add(indexes[Math.floor(Math.random()*indexes.length)]);
         }
-
-        // Modal is open by default → lock background scroll
-        document.addEventListener('DOMContentLoaded', lockScroll);
-
-        // ------- Glossary (legacy types) -------
-        const GLOSSARY = {
-            acrostic: {
-                label: "What’s an acrostic?",
-                text: "Read the FIRST letter of each line vertically to spell a single word."
-            },
-            tapcode: {
-                label: "What’s tap code?",
-                text: "Use a 5×5 Polybius square (I/J share a cell). Each pair like 3-2 is row-col."
-            },
-            pathcode: {
-                label: "What’s a path code?",
-                text: "Follow the given moves (R/D) on the grid from top-left, collecting letters."
-            },
-            mini: {
-                label: "What’s a mini-game?",
-                text: "A short, scene-themed challenge. Controls change daily: buttons, chips, grid, or text."
-            }
-        };
-        const ROUTE_TO_APPROACH = { cautious: "observe", brisk: "listen", risky: "traverse" };
-        // --- Thematic labeling fallback (client-side) ---
-        const STOP = new Set(["the", "a", "an", "and", "of", "to", "in", "on", "at", "for", "with", "into", "across", "over", "under", "hall", "room", "scene", "chamber"]);
-        function pickNoun(text = "") {
-            const words = (text || "").toLowerCase().match(/[a-z]{4,}/g) || [];
-            const w = words.find(w => !STOP.has(w)) || "device";
-            return w;
+        for(const el of cells){
+          if(on.has(parseInt(el.dataset.idx))) el.style.background = '#1b2a56';
         }
-        function isGenericLabel(s = "") { return /^(proceed carefully|move quickly|take a risk)$/i.test(s.trim()); }
-        function themedRouteCopy(rm, rid, route) {
-            const noun = pickNoun(`${rm.title || ""} ${rm.text || ""}`);
-            const mult = { cautious: "1×", brisk: "2×", risky: "3×" };
-            const defaults = {
-                cautious: { label: `Inspect the ${noun}`, sub: "Safer path — hints unlock sooner." },
-                brisk: { label: `Weave past the ${noun}`, sub: "Faster path — hints unlock +30s; small time bonus if clean." },
-                risky: { label: `Tamper with the ${noun}`, sub: "Bold path — hints unlock +60s; bigger bonus if first try." }
-            };
-            const fromApi = {
-                label: (route.label && !isGenericLabel(route.label)) ? route.label : null,
-                sub: route.sub || null
-            };
-            return {
-                label: fromApi.label || defaults[rid].label,
-                sub: fromApi.sub || defaults[rid].sub,
-                mult: mult[rid] || "1×"
-            };
+      }
+      flash();
+      const flashTimer = setInterval(flash, 400);
+
+      function onTap(ev){
+        const el = ev.currentTarget;
+        const idx = parseInt(el.dataset.idx);
+        el.style.transform='scale(0.96)'; setTimeout(()=>el.style.transform='',60);
+        taps.push({idx, t: Math.floor(performance.now()-roundStart)});
+        bip(1200, .03);
+        if(taps.length >= need){ // allow finishing early
+          cleanup();
         }
+      }
+      for(const el of cells) el.addEventListener('click', onTap);
 
-        // ------- State -------
-        // AFTER
-        const state = {
-            dateKey: "{{ date_key }}",
-            startedMs: null,
-            tickHandle: null,
-            room: null,
-            currentScene: 0,
-            solvedScenes: [false, false, false],
-            chosenRoutes: [null, null, null],
-            hintsUsedScene: [0, 0, 0],
-            submissionsScene: [0, 0, 0],
-            fragments: ["", "", ""],
-            hintPolicy: { first_hint_delay_s: 60, second_hint_delay_s: 120 },
-            miniAnswer: ["", "", ""],
-            routeLocked: [false, false, false],
-            // 👇 NEW — avoids runtime error in hint timers
-            puzzleMountedAt: [0, 0, 0]
-        };
+      function cleanup(){
+        clearInterval(flashTimer);
+        for(const el of cells) el.removeEventListener('click', onTap);
+        transcript.rounds.push({taps, elapsed_ms: Math.floor(performance.now()-roundStart)});
+        roundIdx++;
+        if(roundIdx < cfg.rounds){ runRound(); }
+        else submit();
+      }
+      // hard cap
+      setTimeout(()=>cleanup(), cfg.time_cap_sec*1000);
+    }
 
-        const $ = id => document.getElementById(id);
-        const fmtTime = ms => {
-            const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), ms3 = String(ms % 1000).padStart(3, "0");
-            return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms3}`;
-        };
-        function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1600); }
+    document.getElementById('vfGo').addEventListener('click', ()=>{
+      document.getElementById('vfGo').disabled = true;
+      runRound();
+    });
 
-        // ------- Notes (localStorage per day) -------
-        const NOTES_KEY = d => `trail-notes-${d}`;
-        function loadNotes() { $("notesBox").value = localStorage.getItem(NOTES_KEY(state.dateKey)) || ""; }
-        function saveNotes() { localStorage.setItem(NOTES_KEY(state.dateKey), $("notesBox").value); $("saveStamp").textContent = "Saved"; setTimeout(() => $("saveStamp").textContent = "Autosaved", 1000); }
+    async function submit(){
+      const body = { minigame_id: cfg.id, transcript, client_time_ms: transcript.rounds.reduce((a,r)=>a+r.elapsed_ms,0) };
+      const res = await fetch('/escape/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const js = await res.json();
+      if(js.passed){
+        elapsedA = js.elapsed_ms; tokenA = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
+        gameA.style.display = 'none'; launchB();
+      }else{
+        alert('Failed Vault Frenzy — try again tomorrow!');
+      }
+    }
+  }
 
-        // ------- Prefetch room for intro modal -------
-        window.addEventListener("DOMContentLoaded", async () => { await prefetchRoom(); loadNotes(); });
+  // ───────────────────── Light Reactor (B) ─────────────────────
+  function mountLightReactor(cfg){
+    gameB.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<h3 style="margin:10px 0;">◎ Light Reactor</h3>`;
+    const arena = document.createElement('div');
+    arena.className = 'reactor';
+    const zone = document.createElement('div'); zone.className='zone';
+    const target = document.createElement('div'); target.className='target';
+    arena.appendChild(zone); arena.appendChild(target);
+    const orb1 = document.createElement('div'); orb1.className='orb';
+    const orb2 = document.createElement('div'); orb2.className='orb'; orb2.style.background='#68f2a1';
+    arena.appendChild(orb1); arena.appendChild(orb2); orb2.style.display='none';
+    const cta = document.createElement('button'); cta.className='btn reactor cta'; cta.textContent='HIT';
+    arena.appendChild(cta);
+    wrap.appendChild(arena);
+    gameB.appendChild(wrap);
+    gameB.style.display='block';
 
-        async function prefetchRoom() {
-            try {
-                const res = await fetch(`/escape/api/today?date=${encodeURIComponent(state.dateKey)}`, { cache: "no-store" });
-                const room = await res.json();
-                state.room = room;
-                state.hintPolicy = room.server_hint_policy || state.hintPolicy;
-                $("ovTitle").textContent = room.title || "Today’s Puzzle";
-                $("ovIntro").textContent = room.intro || "";
-                $("roomTitle").textContent = room.title || "Today’s Puzzle";
-                $("roomIntro").textContent = room.intro || "";
+    const roundDur = 1000;
+    const t0 = performance.now();
+    const stops = [];
 
-                // Safe dynamic routes blurb
-                // in prefetchRoom(), after setting ovTitle/ovIntro
-                // Scene-themed routes blurb (use today's labels, with explicit trade-offs)
-                const routesEl = document.getElementById("ovRoutesText");
-                if (routesEl) {
-                    const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
-                    const rts = (rooms[0]?.routes) || [];
-                    const map = Object.fromEntries(rts.map(r => [r.id, r]));
-                    const l1 = map.cautious?.label || "Proceed carefully";
-                    const l2 = map.brisk?.label || "Move quickly";
-                    const l3 = map.risky?.label || "Take a risk";
+    let roundIdx = 0;
+    function layoutRound(){
+      // purely visual spin — server verifies mathematically
+      const speed = cfg.speeds[roundIdx];
+      const reverse = cfg.reverse_rounds[roundIdx];
+      const orbs = cfg.orb_counts[roundIdx];
+      orb2.style.display = (orbs===2) ? 'block' : 'none';
+      function paint(){
+        const now = performance.now();
+        const t = (now - t0) % (roundDur*(roundIdx+1));
+        const rRel = (now - (t0 + roundIdx*roundDur));
+        const tt = Math.max(0, Math.min(roundDur, rRel));
+        const phase = (tt / roundDur) * 2*Math.PI * speed * (reverse?-1:1);
+        const cx = 160, cy = 160, rad = 120;
 
-                    routesEl.innerHTML =
-                        `Routes are <b>scene-themed</b>. In each scene you’ll choose one path:<br>
-    • <b>${l1}</b> (1×) — safer; hints unlock sooner.<br>
-    • <b>${l2}</b> (2×) — faster; hints unlock <b>+30s</b>; small bonus if first try.<br>
-    • <b>${l3}</b> (3×) — bold; hints unlock <b>+60s</b>; bigger first-try bonus.<br>
-    Faster routes demand speed — mistakes can erase the benefit.`;
-                }
-
-
-
-            } catch (e) {
-                $("ovTitle").textContent = "Mini Escape — Daily Trail";
-                $("ovIntro").textContent = "Three scenes, one final lock. Pick routes and solve.";
-            }
+        const x1 = cx + Math.cos(phase)*rad, y1 = cy + Math.sin(phase)*rad;
+        orb1.style.transform = `translate(${x1-8}px, ${y1-8}px)`;
+        if(orbs===2){
+          const phase2 = -phase*1.05;
+          const x2 = cx + Math.cos(phase2)*rad, y2 = cy + Math.sin(phase2)*rad;
+          orb2.style.transform = `translate(${x2-8}px, ${y2-8}px)`;
         }
+        if(roundIdx < cfg.rounds) requestAnimationFrame(paint);
+      }
+      requestAnimationFrame(paint);
+    }
+    layoutRound();
 
-        // Close the instructions by tapping the shaded backdrop
-        $("overlay").addEventListener("click", (e) => {
-            if (e.target === $("overlay")) { $("startBtn").click(); }
-        });
+    cta.addEventListener('click', ()=>{
+      bip(1000,.04);
+      stops.push({t: Math.floor(performance.now()-t0)});
+      roundIdx++;
+      if(roundIdx < cfg.rounds) layoutRound();
+      else submit();
+    });
 
-        // ------- Start / Timer -------
-        $("startBtn").addEventListener("click", async () => {
-            $("overlay").classList.add("hidden");
-            unlockScroll();                 // <— add this line
-            if (!state.room) { await prefetchRoom(); }
-            renderScenes(state.room);
-            startTimer();
-        });
-        function startTimer() { state.startedMs = Date.now(); state.tickHandle = setInterval(() => { $("timer").textContent = fmtTime(Date.now() - state.startedMs); }, 33); }
-        function stopTimer() { if (state.tickHandle) { clearInterval(state.tickHandle); state.tickHandle = null; } }
+    async function submit(){
+      const body = { minigame_id: cfg.id, transcript: {stops, elapsed_ms: Math.floor(performance.now()-t0)}, client_time_ms: Math.floor(performance.now()-t0) };
+      const res = await fetch('/escape/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const js = await res.json();
+      if(js.passed){
+        elapsedB = js.elapsed_ms; tokenB = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
+        gameB.style.display='none'; launchC();
+      } else {
+        alert('Failed Light Reactor — try again tomorrow!');
+      }
+    }
+  }
 
-        // ------- Render scenes (one-at-a-time) -------
-        function renderScenes(room) {
-            const holder = $("scenes"); holder.innerHTML = "";
-            const rooms = (room.trail && room.trail.rooms) ? room.trail.rooms : [];
-            rooms.forEach((rm, idx) => {
-                const wrap = document.createElement("section");
-                wrap.className = "scene panel" + (idx === 0 ? " active" : "");
-                wrap.id = `scene-${idx}`;
-                wrap.innerHTML = `
-            <h3>Scene ${idx + 1}: ${rm.title || ""}</h3>
-            <div style="color:#c8d4ff">${rm.text || ""}</div>
-            <div class="route-btns" id="routebtns-${idx}" style="margin-top:8px;"></div>
-    
-            <div class="p-card" id="pzwrap-${idx}" style="display:none;">
-              <div id="pzp-${idx}" style="white-space:pre-wrap;"></div>
-    
-              <!-- Dynamic UI surface -->
-              <div id="pzui-${idx}" style="margin-top:6px;"></div>
-    
-              <!-- Text input row (used for text_input and as fallback/manual entry) -->
-              <div class="row" id="pzinrow-${idx}" style="margin-top:6px; display:none;">
-                <input id="pzin-${idx}" type="text" placeholder="Type your answer…" autocomplete="off" />
-                <button type="button" id="pzbtn-${idx}">Submit</button>
-              </div>
-    
-              <div id="pzstatus-${idx}" class="status">Awaiting answer…</div>
-    
-              <div class="hint-row">
-                <button class="hint-pill" id="h1btn-${idx}">Hint 1 in …</button>
-                <button class="hint-pill" id="h2btn-${idx}">Hint 2 in …</button>
-              </div>
-              <div class="hint-text" id="h1txt-${idx}"></div>
-              <div class="hint-text" id="h2txt-${idx}"></div>
-    
-              <div class="gloss" id="gloss-${idx}" style="display:none;"></div>
-            </div>
-    
-            <div class="row" style="margin-top:8px;">
-              <button class="btn" id="next-${idx}" style="display:none;">Next scene →</button>
-            </div>
-          `;
-                holder.appendChild(wrap);
+  // ───────────────────── Pressure Chamber (C) ─────────────────────
+  function mountPressureChamber(cfg){
+    gameC.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<h3 style="margin:10px 0;">✶ Pressure Chamber</h3>`;
+    const row = document.createElement('div'); row.className='pc-wrap';
+    const valves = [];
+    for(let i=0;i<cfg.valves;i++){
+      const v = document.createElement('div'); v.className='pc-valve';
+      v.innerHTML = `<div class="pc-gauge"><div class="pc-fill" id="fill${i}"></div></div><button class="btn pc-btn" data-idx="${i}">Vent</button>`;
+      row.appendChild(v);
+      valves.push(v);
+    }
+    wrap.appendChild(row);
+    gameC.appendChild(wrap);
+    gameC.style.display='block';
 
-                // Build route buttons dynamically (works + themed)
-                const btnHolder = document.getElementById(`routebtns-${idx}`);
-                btnHolder.innerHTML = "";
-                state.routeLocked[idx] = false;
+    const actions = [];
+    const start = performance.now();
+    let round = 0;
+    let levels = new Array(cfg.valves).fill(0);
+    let speeds = cfg.rise_speeds[round].slice();
 
-                (rm.routes || []).forEach((r) => {
-                    const rid = r.id;
-                    const copy = themedRouteCopy(rm, rid, r);
-
-                    const b = document.createElement("button");
-                    b.type = "button";
-                    b.className = "route-btn";
-                    b.setAttribute("data-route", rid);
-                    b.innerHTML = `
-    <span class="route-title">${copy.label} <span class="badge">${copy.mult}</span></span>
-    <span class="route-sub">${copy.sub}</span>
-  `;
-
-                    b.addEventListener("click", () => {
-                        if (state.routeLocked[idx]) return;
-                        state.routeLocked[idx] = true;
-                        state.chosenRoutes[idx] = rid;
-
-                        // Visually disable all three
-                        btnHolder.querySelectorAll("button").forEach(x => { x.disabled = true; x.classList.add("disabled"); });
-
-                        // Mount the puzzle and scroll to it
-                        showPuzzle(idx, rm, rid);
-                        document.getElementById(`pzwrap-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    });
-
-                    btnHolder.appendChild(b);
-                });
-            });
+    function paint(){
+      const now = performance.now();
+      const elapsed = now - start;
+      const rStart = round * 1000, rEnd = (round+1)*1000;
+      const dt = Math.min(16, Math.max(0, now - (paint._last||now))); paint._last = now;
+      // update pressures
+      for(let i=0;i<cfg.valves;i++){
+        levels[i] += speeds[i] * (dt/1000);
+        levels[i] = Math.max(0, levels[i]);
+        document.getElementById('fill'+i).style.height = Math.min(100, levels[i]*100) + '%';
+        if(levels[i] >= cfg.overflow_threshold){
+          // fail visuals; server will also fail
+          for(let j=0;j<cfg.valves;j++) document.getElementById('fill'+j).style.background = 'linear-gradient(180deg,#ff6b6b,#8b2b2b)';
+          return;
         }
+      }
+      if(elapsed >= rEnd){
+        round++;
+        if(round >= cfg.rounds){ submit(); return; }
+        // next round
+        levels = new Array(cfg.valves).fill(0);
+        speeds = cfg.rise_speeds[round].slice();
+      }
+      requestAnimationFrame(paint);
+    }
+    requestAnimationFrame(paint);
 
-        function updateFragmentDisplay() {
-            const parts = state.fragments.map((f, i) => f ? `Scene ${i + 1}: <b>${f}</b>` : `Scene ${i + 1}: _ _`);
-            $("fragBag").innerHTML = `Fragments — ${parts.join("  •  ")}`;
-            if (state.fragments.every(Boolean)) {
-                $("finalInput").placeholder = state.fragments.join("");
-            }
-        }
+    gameC.addEventListener('click', (ev)=>{
+      const btn = ev.target.closest('.pc-btn'); if(!btn) return;
+      const i = parseInt(btn.dataset.idx);
+      actions.push({valve:i, t: Math.floor(performance.now()-start)});
+      levels[i] = 0;
+      if(cfg.reroll_speed_after_tap){
+        // purely visual; server reenacts with its RNG
+        speeds[i] = (Math.random()*0.4 + 0.25);
+      }
+      bip(900,.04);
+    });
 
-        // ------- Mini-game renderers -------
-        function renderMultipleChoice(idx, uiSpec, statusEl) {
-            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-            const wrap = document.createElement("div");
-            const opts = Array.isArray(uiSpec?.options) ? uiSpec.options : [];
-            if (!opts.length) {
-                wrap.innerHTML = `<div class="helper">No options provided — type your choice below.</div>`;
-                $(`pzinrow-${idx}`).style.display = "flex";
-                ui.appendChild(wrap);
-                return;
-            }
-            opts.forEach(opt => {
-                const btn = document.createElement("div");
-                btn.className = "choice";
-                btn.textContent = String(opt);
-                btn.addEventListener("click", () => {
-                    // toggle selection (single-select)
-                    wrap.querySelectorAll(".choice").forEach(x => x.classList.remove("selected"));
-                    btn.classList.add("selected");
-                    state.miniAnswer[idx] = String(opt);
-                    statusEl.textContent = `Selected: ${opt}`;
-                    statusEl.className = "status";
-                });
-                wrap.appendChild(btn);
-            });
-            ui.appendChild(wrap);
-            // show submit row as well, pre-fill on submit
-            $(`pzinrow-${idx}`).style.display = "flex";
-        }
+    async function submit(){
+      const body = { minigame_id: cfg.id, transcript: {actions, elapsed_ms: Math.floor(performance.now()-start)}, client_time_ms: Math.floor(performance.now()-start) };
+      const res = await fetch('/escape/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const js = await res.json();
+      if(js.passed){
+        elapsedC = js.elapsed_ms; tokenC = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
+        gameC.style.display='none'; onFinish();
+      } else {
+        alert('Failed Pressure Chamber — try again tomorrow!');
+      }
+    }
+  }
 
-        const DEFAULT_TOKENS = ["tap", "hold", "left", "right", "up", "down", "rotate_left", "rotate_right", "press", "wait"];
+  // Flow control
+  function launchA(){
+    setStep('A');
+    const cfg = ROOM.minigames.find(m=>m.id==='A');
+    mountVaultFrenzy(cfg);
+  }
+  function launchB(){
+    setStep('B');
+    const cfg = ROOM.minigames.find(m=>m.id==='B');
+    mountLightReactor(cfg);
+  }
+  function launchC(){
+    setStep('C');
+    const cfg = ROOM.minigames.find(m=>m.id==='C');
+    mountPressureChamber(cfg);
+  }
 
-        // Tiny WebAudio synth for cues
-        function makeSynth() {
-            try { return new (window.AudioContext || window.webkitAudioContext)(); }
-            catch { return null; }
-        }
-        function playTone(actx, type = "sine", freq = 440, ms = 200, gain = 0.05) {
-            if (!actx) return Promise.resolve();
-            const o = actx.createOscillator();
-            const g = actx.createGain();
-            o.type = type; o.frequency.value = freq;
-            g.gain.value = gain;
-            o.connect(g).connect(actx.destination);
-            o.start();
-            return new Promise(res => { setTimeout(() => { o.stop(); res(); }, ms); });
-        }
-        function playNoise(actx, ms = 250, gain = 0.03) {
-            if (!actx) return Promise.resolve();
-            const bufferSize = actx.sampleRate * (ms / 1000);
-            const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.7;
-            const src = actx.createBufferSource(); src.buffer = buffer;
-            const g = actx.createGain(); g.gain.value = gain;
-            src.connect(g).connect(actx.destination);
-            src.start();
-            return new Promise(res => { setTimeout(() => { try { src.stop(); } catch { } res(); }, ms); });
-        }
+  async function onFinish(){
+    const body = { tokens: [tokenA, tokenB, tokenC] };
+    const res = await fetch('/escape/api/finish', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const js = await res.json();
+    if(js.ok){
+      const total = js.total_time_ms;
+      totalMsEl.textContent = total.toString();
+      const share =
+`◆◎✶
+Time: ${fmt(total)}
+${ROOM.date} • ${ROOM.theme}
+theroundup.com/escape`;
+      shareBlock.textContent = share;
+      finish.style.display='block';
+      const introAd = document.querySelector('.ads'); if(introAd) introAd.remove();
+    }else{
+      alert('Finish failed');
+    }
+  }
 
-        function playCue(name, ctx) {
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.connect(g).connect(ctx.destination);
-            const now = ctx.currentTime;
+  startBtn.addEventListener('click', async ()=>{
+    startBtn.disabled = true;
+    intro.style.display='none';
+    START_TS = Date.now();
+    tickGlobal();
+    setStep('A'); launchA();
+  });
 
-            // simple, distinct voices
-            const W = 0.18, LONG = 0.45;
-            if (name === "short beep") { o.type = "sine"; o.frequency.value = 880; g.gain.setValueAtTime(0.9, now); g.gain.exponentialRampToValueAtTime(0.001, now + W); o.start(now); o.stop(now + W); return; }
-            if (name === "long beep") { o.type = "sine"; o.frequency.value = 440; g.gain.setValueAtTime(0.9, now); g.gain.exponentialRampToValueAtTime(0.001, now + LONG); o.start(now); o.stop(now + LONG); return; }
-            if (name === "hiss") { const n = ctx.createBufferSource(); const b = ctx.createBuffer(1, ctx.sampleRate * W, ctx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; n.buffer = b; const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 800; n.connect(f).connect(g).connect(ctx.destination); g.gain.setValueAtTime(0.6, now); g.gain.exponentialRampToValueAtTime(0.001, now + W); n.start(now); return; }
-            if (name === "gust") { const n = ctx.createBufferSource(); const b = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; n.buffer = b; const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 300; const g2 = ctx.createGain(); n.connect(f).connect(g2).connect(ctx.destination); g2.gain.setValueAtTime(0.001, now); g2.gain.exponentialRampToValueAtTime(0.8, now + 0.1); g2.gain.exponentialRampToValueAtTime(0.001, now + 0.3); n.start(now); return; }
-            if (name === "clank") { o.type = "square"; o.frequency.setValueAtTime(220, now); g.gain.setValueAtTime(0.9, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.12); o.start(now); o.stop(now + 0.12); return; }
-            if (name === "drip") { o.type = "triangle"; o.frequency.setValueAtTime(660, now); g.gain.setValueAtTime(0.8, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.16); o.start(now); o.stop(now + 0.16); return; }
-            if (name === "chime") { const o2 = ctx.createOscillator(); const g2 = ctx.createGain(); o.type = "sine"; o2.type = "sine"; o.frequency.value = 660; o2.frequency.value = 990; o.connect(g).connect(ctx.destination); o2.connect(g2).connect(ctx.destination); g.gain.setValueAtTime(0.7, now); g2.gain.setValueAtTime(0.5, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.35); g2.gain.exponentialRampToValueAtTime(0.001, now + 0.35); o.start(now); o2.start(now); o.stop(now + 0.35); o2.stop(now + 0.35); return; }
-            if (name === "rumble") { o.type = "sawtooth"; o.frequency.value = 90; g.gain.setValueAtTime(0.5, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.4); o.start(now); o.stop(now + 0.4); return; }
-        }
-
-        let AUDIO_CTX; // reuse across plays
-
-        function renderCueMemory(idx, uiSpec, statusEl) {
-            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-            const cueSet = Array.from(new Set(uiSpec?.cue_set || []));
-            const cues = Array.isArray(uiSpec?.cues_audio) ? uiSpec.cues_audio : [];
-
-            const row = document.createElement("div"); row.className = "row";
-            const playBtn = document.createElement("button"); playBtn.textContent = "▶ Play sequence";
-            row.appendChild(playBtn); ui.appendChild(row);
-
-            // Visual progress (doesn't reveal names)
-            const strip = document.createElement("div"); strip.className = "cue-strip";
-            const dots = cues.map(() => {
-                const d = document.createElement("div"); d.className = "cue"; d.textContent = "•"; strip.appendChild(d); return d;
-            });
-            if (dots.length) ui.appendChild(strip);
-
-            const bank = document.createElement("div"); bank.className = "chips"; ui.appendChild(bank);
-            const chosen = [];
-            cueSet.forEach(c => {
-                const chip = document.createElement("div"); chip.className = "chip"; chip.textContent = c;
-                chip.onclick = () => {
-                    chosen.push(c);
-                    state.miniAnswer[idx] = chosen.join(",");
-                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                    statusEl.textContent = `Cues: ${state.miniAnswer[idx]}`;
-                };
-                bank.appendChild(chip);
-            });
-
-            const controls = document.createElement("div"); controls.className = "row"; controls.style.marginTop = "6px";
-            const undo = document.createElement("button"); undo.textContent = "Undo";
-            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Cues: ${state.miniAnswer[idx] || "(empty)"}`; };
-            const clear = document.createElement("button"); clear.textContent = "Clear";
-            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
-            controls.appendChild(undo); controls.appendChild(clear);
-            ui.appendChild(controls);
-
-            $(`pzinrow-${idx}`).style.display = "flex";
-            $(`pzin-${idx}`).placeholder = "Tap cues — e.g., clank,chime,long beep";
-
-            playBtn.onclick = () => {
-                if (!cues.length) { toast("No audio available"); return; }
-                if (!AUDIO_CTX) AUDIO_CTX = new (window.AudioContext || window.webkitAudioContext)();
-                playBtn.disabled = true;
-                const stepMs = 420;
-                cues.forEach((cue, i) => {
-                    setTimeout(() => {
-                        dots.forEach(d => d.classList.remove("playing"));
-                        if (dots[i]) dots[i].classList.add("playing");
-                        playCue(cue, AUDIO_CTX);
-                        if (i === cues.length - 1) setTimeout(() => {
-                            dots.forEach(d => d.classList.remove("playing"));
-                            playBtn.disabled = false;
-                        }, stepMs);
-                    }, i * stepMs);
-                });
-            };
-        }
-
-        function renderSequenceInput(idx, uiSpec, statusEl) {
-            // Audio-first
-            if (Array.isArray(uiSpec?.cue_set) || Array.isArray(uiSpec?.cues_audio)) {
-                return renderCueMemory(idx, uiSpec, statusEl);
-            }
-
-            // Token chips (tap/hold/left/…)
-            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-            const chosen = [];
-            const tokens =
-                (Array.isArray(uiSpec?.sequence) && uiSpec.sequence.length) ? uiSpec.sequence :
-                    (Array.isArray(uiSpec?.tokens) && uiSpec.tokens.length) ? uiSpec.tokens :
-                        DEFAULT_TOKENS;
-
-            const bank = document.createElement("div");
-            bank.className = "chips";
-            tokens.forEach(t => {
-                const chip = document.createElement("div");
-                chip.className = "chip";
-                chip.textContent = t;
-                chip.onclick = () => {
-                    chosen.push(t);
-                    state.miniAnswer[idx] = chosen.join(",");
-                    $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                    statusEl.textContent = `Sequence: ${state.miniAnswer[idx]}`;
-                };
-                bank.appendChild(chip);
-            });
-            ui.appendChild(bank);
-
-            const controls = document.createElement("div");
-            controls.className = "row"; controls.style.marginTop = "6px";
-            const undo = document.createElement("button"); undo.textContent = "Undo";
-            undo.onclick = () => { chosen.pop(); state.miniAnswer[idx] = chosen.join(","); $(`pzin-${idx}`).value = state.miniAnswer[idx]; statusEl.textContent = `Sequence: ${state.miniAnswer[idx] || "(empty)"}`; };
-            const clear = document.createElement("button"); clear.textContent = "Clear";
-            clear.onclick = () => { chosen.splice(0, chosen.length); state.miniAnswer[idx] = ""; $(`pzin-${idx}`).value = ""; statusEl.textContent = "Sequence cleared."; };
-            controls.appendChild(undo); controls.appendChild(clear);
-            ui.appendChild(controls);
-
-            // Allow manual editing too
-            $(`pzinrow-${idx}`).style.display = "flex";
-            $(`pzin-${idx}`).placeholder = "e.g., tap,hold,left,right";
-        }
-
-        function renderGridInput(idx, uiSpec, statusEl) {
-            const ui = $(`pzui-${idx}`); ui.innerHTML = "";
-            const grid = Array.isArray(uiSpec?.grid) ? uiSpec.grid : [];
-            if (!grid.length) { ui.innerHTML = `<div class="helper">Grid missing — type the answer below.</div>`; $(`pzinrow-${idx}`).style.display = "flex"; return; }
-
-            const nCols = Math.max(...grid.map(r => r.length));
-            const g = document.createElement("div"); g.className = "grid";
-            g.style.gridTemplateColumns = `repeat(${nCols}, minmax(36px, auto))`;
-
-            const cells = []; // [r][c] -> element
-            for (let r = 0; r < grid.length; r++) {
-                cells[r] = [];
-                for (let c = 0; c < grid[r].length; c++) {
-                    const cell = document.createElement("div");
-                    cell.className = "cell";
-                    cell.dataset.r = r; cell.dataset.c = c;
-                    cell.textContent = String(grid[r][c]);
-                    cells[r][c] = cell;
-                    g.appendChild(cell);
-                }
-            }
-            ui.appendChild(g);
-
-            const path = [];           // labels
-            const coords = [];         // [{r,c}]
-            function isAdj(a, b) { return Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1; }
-            function highlightNext() {
-                g.querySelectorAll(".cell").forEach(el => el.classList.remove("near"));
-                if (!coords.length) return;
-                const { r, c } = coords[coords.length - 1];
-                [[r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]].forEach(([rr, cc]) => {
-                    if (cells[rr]?.[cc]) cells[rr][cc].classList.add("near");
-                });
-            }
-
-            g.addEventListener("click", (e) => {
-                const cell = e.target.closest(".cell"); if (!cell) return;
-                const r = +cell.dataset.r, c = +cell.dataset.c;
-                const label = cell.textContent;
-
-                if (cell.classList.contains("on")) {
-                    // allow undo by clicking the last cell
-                    const last = coords[coords.length - 1];
-                    if (last && last.r === r && last.c === c) {
-                        cell.classList.remove("on"); coords.pop(); path.pop();
-                    } else {
-                        toast("Undo by tapping the most recent tile.");
-                        return;
-                    }
-                } else {
-                    if (coords.length && !isAdj(coords[coords.length - 1], { r, c })) {
-                        toast("Move to an adjacent tile (no diagonals).");
-                        return;
-                    }
-                    cell.classList.add("on"); coords.push({ r, c }); path.push(label);
-                }
-
-                state.miniAnswer[idx] = path.join("");
-                $(`pzin-${idx}`).value = state.miniAnswer[idx];
-                statusEl.textContent = `Path: ${state.miniAnswer[idx] || "(none)"}`;
-                highlightNext();
-            });
-
-            // Controls (undo/clear) remain the same…
-            // After you build the buttons, call highlightNext() once at the end.
-            highlightNext();
-
-            $(`pzinrow-${idx}`).style.display = "flex";
-            $(`pzin-${idx}`).placeholder = "Your collected letters…";
-        }
-
-        function gridEndpoints(uiSpec) {
-            const g = Array.isArray(uiSpec?.grid) ? uiSpec.grid : null;
-            if (!g || !g.length) return { startLabel: null, endLabel: null };
-
-            const startLabel = g?.[0]?.[0] != null ? String(g[0][0]) : null;
-
-            const lastRow = g[g.length - 1] || [];
-            let endLabel = null;
-            for (let i = lastRow.length - 1; i >= 0; i--) {
-                if (lastRow[i] != null) { endLabel = String(lastRow[i]); break; }
-            }
-            return { startLabel, endLabel };
-        }
-
-        function normalizePromptForGrid(promptText, uiSpec) {
-            let t = String(promptText || "");
-            const { startLabel, endLabel } = gridEndpoints(uiSpec);
-            if (!startLabel || !endLabel) return t;
-
-            const replaced = t
-                .replace(/\btop[- ]left\b/gi, startLabel)
-                .replace(/\bbottom[- ]right\b/gi, endLabel);
-
-            // If author used directional words but nothing replaced, add a clarifier.
-            if (replaced === t && /top[- ]left|bottom[- ]right/i.test(t)) {
-                return `${t} (Start at ${startLabel}; finish at ${endLabel}.)`;
-            }
-            return replaced;
-        }
-
-        // ------- Puzzle mount / hints / submit -------
-        function showPuzzle(idx, rm, routeId) {
-            const route = (rm.routes || []).find(r => r.id === routeId) || (rm.routes || [])[0] || {};
-            const p = route.puzzle || {};
-            const pw = $(`pzwrap-${idx}`); pw.style.display = "block";
-            let promptText = p.prompt || "Puzzle";
-            if ((p.type || p.archetype || "").toLowerCase() === "mini" &&
-                (p.mechanic || "").toLowerCase() === "grid_input") {
-                promptText = normalizePromptForGrid(promptText, p.ui_spec || {});
-            }
-            $(`pzp-${idx}`).textContent = promptText;
-
-            const inputRow = $(`pzinrow-${idx}`);
-            const input = $(`pzin-${idx}`);
-            const btn = $(`pzbtn-${idx}`);
-            const status = $(`pzstatus-${idx}`);
-            const h1btn = $(`h1btn-${idx}`), h2btn = $(`h2btn-${idx}`), h1txt = $(`h1txt-${idx}`), h2txt = $(`h2txt-${idx}`);
-            const glossBox = $(`gloss-${idx}`);
-
-            // Glossary
-            const typ = (p.type || p.archetype || "").toLowerCase();
-            const G = GLOSSARY[typ] || GLOSSARY["mini"];
-            if (G) { glossBox.style.display = "block"; glossBox.innerHTML = `<details><summary>${G.label}</summary><div style="margin-top:6px;color:#c8d4ff">${G.text}</div></details>`; }
-
-            // Clear previous UI + temp answers
-            state.miniAnswer[idx] = "";
-            input.value = "";
-            inputRow.style.display = "none";
-            $(`pzui-${idx}`).innerHTML = "";
-
-            // Mount per mechanic
-            const mech = (p.mechanic || "").toLowerCase();
-            if (typ === "mini") {
-                if (mech === "multiple_choice") {
-                    renderMultipleChoice(idx, p.ui_spec || {}, status);
-                } else if (mech === "sequence_input") {
-                    renderSequenceInput(idx, p.ui_spec || {}, status, p);
-                } else if (mech === "grid_input") {
-                    renderGridInput(idx, p.ui_spec || {}, status);
-                } else {
-                    // text_input or unknown → plain input
-                    inputRow.style.display = "flex";
-                }
-            } else {
-                // legacy types → plain input
-                inputRow.style.display = "flex";
-            }
-
-            // Hint timers based on when THIS puzzle mounted (+30s brisk, +60s risky)
-            if (!state.puzzleMountedAt) state.puzzleMountedAt = [];
-            state.puzzleMountedAt[idx] = Date.now();
-            const extraDelay = routeId === "brisk" ? 30000 : routeId === "risky" ? 60000 : 0;
-            function updateHints() {
-                const mounted = state.puzzleMountedAt[idx] || Date.now();
-                const elapsed = Date.now() - mounted;
-                const d1 = (state.hintPolicy.first_hint_delay_s ?? 60) * 1000 + extraDelay;
-                const d2 = (state.hintPolicy.second_hint_delay_s ?? 120) * 1000 + extraDelay;
-                h1btn.disabled = elapsed < d1;
-                h2btn.disabled = elapsed < d2;
-                h1btn.textContent = h1btn.disabled ? `Hint 1 in ${Math.max(0, Math.ceil((d1 - elapsed) / 1000))}s` : "Reveal Hint 1";
-                h2btn.textContent = h2btn.disabled ? `Hint 2 in ${Math.max(0, Math.ceil((d2 - elapsed) / 1000))}s` : "Reveal Hint 2";
-            }
-            updateHints(); const iv = setInterval(updateHints, 250);
-
-
-            // Count hints once each
-            let h1Shown = false, h2Shown = false;
-            h1btn.onclick = () => { if (h1btn.disabled) return; if (!h1Shown) { state.hintsUsedScene[idx] += 1; h1Shown = true; } h1txt.textContent = (p.hints || [])[0] || "No hint provided."; h1txt.style.display = "block"; };
-            h2btn.onclick = () => { if (h2btn.disabled) return; if (!h2Shown) { state.hintsUsedScene[idx] += 1; h2Shown = true; } h2txt.textContent = (p.hints || [])[1] || "No additional hint."; h2txt.style.display = "block"; };
-
-            // Submit handler — gathers the right answer source for the mechanic
-            btn.onclick = async () => {
-                let answer = (input.value || "").trim();
-                if (typ === "mini") {
-                    // prefer constructed answer if available
-                    if (state.miniAnswer[idx]) answer = state.miniAnswer[idx];
-                }
-                if (!answer) { status.textContent = "Enter an answer."; status.className = "status"; return; }
-
-                status.textContent = "Checking…"; status.className = "status";
-                state.submissionsScene[idx] += 1;
-                try {
-                    const res = await fetch(`/escape/api/submit`, {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ date_key: state.dateKey, puzzle_id: p.id, answer })
-                    });
-                    const data = await res.json();
-                    if (data && data.correct) {
-                        const frag = (data.fragment || "").toString();
-                        if (frag) {
-                            state.fragments[idx] = frag;
-                            updateFragmentDisplay();
-                            status.innerHTML = `Correct! Fragment secured: <b>${frag}</b>`;
-                        } else {
-                            status.textContent = "Correct! Fragment secured.";
-                        }
-                        status.className = "status ok";
-                        input.disabled = true; btn.disabled = true;
-                        // disable mini ui
-                        // AFTER
-                        const ui = $(`pzui-${idx}`);
-                        if (ui) ui.querySelectorAll("button,.choice,.chip,.cell").forEach(el => {
-                            el.classList.add("disabled");
-                            if (el.tagName === "BUTTON") el.disabled = true;
-                        });
-                        clearInterval(iv);
-                        state.solvedScenes[idx] = true;
-
-                        const nextBtn = $(`next-${idx}`);
-                        if (idx < 2) { nextBtn.style.display = "inline-block"; nextBtn.onclick = () => goToScene(idx + 1); }
-                        else { revealFinal(); }
-                    } else {
-                        status.textContent = "Not yet. Try another angle."; status.className = "status err";
-                    }
-
-                } catch (e) {
-                    status.textContent = "Network error — try again."; status.className = "status err";
-                }
-            };
-
-            // Enter submits for text fields
-            input.addEventListener("keydown", e => { if (e.key === "Enter" && !btn.disabled) btn.click(); });
-        }
-
-        function goToScene(idx) {
-            document.querySelectorAll(".scene").forEach(s => s.classList.remove("active"));
-            $(`scene-${idx}`).classList.add("active");
-            state.currentScene = idx;
-            updateSceneBadge();
-        }
-        function updateSceneBadge() { $("sceneBadge").textContent = `Scene ${state.currentScene + 1} of 3`; }
-        function revealFinal() { if (state.solvedScenes.every(Boolean)) { $("finalGate").style.display = "block"; updateFragmentDisplay(); goToScene(2); } }
-
-        // ------- Finish flow -------
-        $("finishBtn").addEventListener("click", async () => {
-            if (!state.solvedScenes.every(Boolean)) { toast("Solve all scenes first."); return; }
-            const finalVal = ($("finalInput").value || "").trim();
-            if (!finalVal) { $("finalStatus").textContent = "Enter the final code."; $("finalStatus").className = "status err"; return; }
-            try {
-                const res = await fetch(`/escape/api/finish`, {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        date_key: state.dateKey,
-                        started_ms: state.startedMs,
-                        success: true,
-                        final_code: finalVal,
-                        meta: {
-                            ua: navigator.userAgent,
-                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                            width: window.innerWidth, height: window.innerHeight,
-                            routes: state.chosenRoutes.map(r => ROUTE_TO_APPROACH[r] || r),
-                            hints_used_scene: state.hintsUsedScene,
-                            submissions_scene: state.submissionsScene
-                        }
-                    })
-                });
-                const data = await res.json();
-                if (!res.ok || !data.ok) { $("finalStatus").textContent = data.error || "Submission failed."; $("finalStatus").className = "status err"; return; }
-                if (!data.success) { $("finalStatus").textContent = "Final check failed. Re-check your fragments."; $("finalStatus").className = "status err"; return; }
-                stopTimer();
-                $("finalStatus").textContent = "Escaped! Time submitted."; $("finalStatus").className = "status ok";
-                const timeMs = data.time_ms || (Date.now() - state.startedMs);
-                const shareTxt = `I escaped today’s Mini Escape in ${fmtTime(timeMs)}. Can you beat me?`;
-                $("shareText").textContent = shareTxt;
-                $("copyBtn").onclick = async () => {
-                    try { await navigator.clipboard.writeText(`${shareTxt} ${window.location.origin}/escape/today`); toast("Copied!"); }
-                    catch (e) { toast("Copy failed"); }
-                };
-                $("share").style.display = "block";
-            } catch (e) {
-                $("finalStatus").textContent = "Network error — try again."; $("finalStatus").className = "status err";
-            }
-        });
-
-        // Notes events
-        $("notesBox").addEventListener("input", () => { $("saveStamp").textContent = "…"; saveNotes(); });
-        $("clearNotes").addEventListener("click", () => { $("notesBox").value = ""; saveNotes(); });
-
-        // Cmd/Ctrl+Enter submits active scene’s puzzle
-        document.addEventListener("keydown", (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                const idx = state.currentScene; const btn = document.getElementById(`pzbtn-${idx}`);
-                if (btn && !btn.disabled) btn.click();
-            }
-        });
-    </script>
-
+  (async function init(){
+    await fetchToday();
+  })();
+  </script>
 </body>
-
 </html>

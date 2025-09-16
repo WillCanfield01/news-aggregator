@@ -1,87 +1,48 @@
+
+{# app/templates/escape/leaderboard.html (REWRITE) #}
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="utf-8" />
-    <title>Mini Escape — Leaderboard ({{ date_key }})</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-        body {
-            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto;
-            background: #0f1220;
-            color: #e6eaf6;
-            margin: 0
-        }
-
-        .wrap {
-            max-width: 760px;
-            margin: 0 auto;
-            padding: 20px 16px
-        }
-
-        h1 {
-            font-size: 22px;
-            margin: 0 0 10px
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #0f1427;
-            border: 1px solid #24305b;
-            border-radius: 10px;
-            overflow: hidden
-        }
-
-        th,
-        td {
-            padding: 10px;
-            border-bottom: 1px solid #1f284b;
-            text-align: left
-        }
-
-        tr:last-child td {
-            border-bottom: none
-        }
-
-        a {
-            color: #58bbff;
-            text-decoration: none
-        }
-
-        a:hover {
-            text-decoration: underline
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Escape — Leaderboard</title>
+  <style>
+    :root {
+      --bg: #0e1222; --panel:#151a2f; --panel2:#0f1427; --text:#f5f6fa;
+      --muted:#99a3c7; --line:#223057; --accent:#58bbff;
+    }
+    *{box-sizing:border-box} body{margin:0;background:#0e1222;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{max-width:820px;margin:0 auto;padding:18px}
+    header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
+    th{color:var(--muted);font-weight:600}
+  </style>
 </head>
-
 <body>
-    <div class="wrap">
-        <h1>Leaderboard — {{ date_key }}</h1>
-        <p><a href="/escape/today">Back to Today’s Room</a></p>
-        {% if rows and rows|length > 0 %}
-        <table>
-            <thead>
-                <tr>
-                    <th>Rank</th>
-                    <th>Time</th>
-                    <th>Recorded</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in rows %}
-                <tr>
-                    <td>#{{ r.rank }}</td>
-                    <td>{{ "%.3f"|format(r.seconds|default(0.0)) }} s</td>
-                    <td>{{ r.created_at }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p>No successful escapes yet today. Be the first!</p>
-        {% endif %}
-    </div>
-</body>
+  <div class="wrap">
+    <header>
+      <div>
+        <div style="font-weight:800">Daily Escape — Leaderboard</div>
+        <div style="color:var(--muted)">Date: {{ date }}</div>
+      </div>
+      <a href="/escape/play" style="text-decoration:none;background:#1cf29f;color:#08111e;border-radius:12px;padding:10px 14px;font-weight:700">Play</a>
+    </header>
 
+    <table>
+      <thead><tr><th>#</th><th>Time</th><th>Finished</th></tr></thead>
+      <tbody>
+        {% for i, row in enumerate(rows, start=1) %}
+        <tr>
+          <td>{{ i }}</td>
+          <td>{{ "%.2f"|format(row.total_time_ms/1000.0) }}s</td>
+          <td>{{ row.finished_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" style="color:var(--muted)">No scores yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
 </html>
