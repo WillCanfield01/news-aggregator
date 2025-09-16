@@ -1,21 +1,18 @@
 
-# app/escape/routes.py (REWRITE)
+# app/escape/routes.py (FULL with legacy init_routes compatibility)
 # -*- coding: utf-8 -*-
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import hmac
-import json
-import os
 from typing import Any, Dict
 
-from flask import Blueprint, abort, current_app, jsonify, make_response, render_template, request
+from flask import Blueprint, jsonify, render_template, request
 from app.extensions import db
 
 from .models import EscapeRoom, EscapeScore
-from . import core  # this module is our rewritten core (generate/verify)
+from . import core
 
 
 bp = Blueprint("escape", __name__, url_prefix="/escape")
@@ -31,7 +28,6 @@ def _ensure_room(date: str) -> EscapeRoom:
     room = EscapeRoom.query.filter_by(date=date).first()
     if room:
         return room
-    # generate and persist
     dr = core.generate_room(dt.datetime.strptime(date, "%Y-%m-%d").date())
     room = EscapeRoom(
         date=dr.date,
@@ -58,10 +54,6 @@ def api_today():
 
 @bp.post("/api/submit")
 def api_submit():
-    """
-    Body: { "minigame_id": "A", "transcript": {...}, "client_time_ms": 2431 }
-    Returns on success: { "passed": true, "fragment": "◆", "signed_token": "..." }
-    """
     data = request.get_json(force=True, silent=True) or {}
     mid = data.get("minigame_id")
     transcript = data.get("transcript") or {}
@@ -73,14 +65,13 @@ def api_submit():
     date = core._date_key()
     room = _ensure_room(date)
 
-    # find cfg for mini id
     cfg = next((m for m in room.minigames_json if m.get("id") == mid), None)
     if not cfg:
         return jsonify({"passed": False, "error": "missing config"}), 400
 
     try:
         passed, elapsed_ms = core.verify_minigame(mid, cfg, room.server_private_json, transcript)
-    except Exception as e:
+    except Exception:
         return jsonify({"passed": False, "error": "verify-failed"}), 400
 
     if not passed:
@@ -100,15 +91,6 @@ def api_submit():
 
 @bp.post("/api/finish")
 def api_finish():
-    """
-    Body: {
-      "tokens": [
-        {"minigame_id":"A","fragment":"◆","signed_token":"...","elapsed_ms":...},
-        {"minigame_id":"B","fragment":"◎","signed_token":"...","elapsed_ms":...},
-        {"minigame_id":"C","fragment":"✶","signed_token":"...","elapsed_ms":...}
-      ]
-    }
-    """
     data = request.get_json(force=True, silent=True) or {}
     tokens = data.get("tokens") or []
     if len(tokens) != 3:
@@ -117,7 +99,6 @@ def api_finish():
     date = core._date_key()
     room = _ensure_room(date)
 
-    # Verify tokens independently
     fragments = []
     total_ms = 0
     for t in tokens:
@@ -135,16 +116,16 @@ def api_finish():
 
     final_code = core.assemble_final_code(fragments)
 
-    # Prevent multiple finishes per IP per day
-    existing = EscapeScore.query.filter_by(date=date, ip_hash=_ip_hash(request)).first()
+    # One score per IP/date
+    this_ip = _ip_hash(request)
+    existing = EscapeScore.query.filter_by(date=date, ip_hash=this_ip).first()
     if existing:
         return jsonify({"ok": True, "final_code": final_code, "total_time_ms": int(total_ms), "note": "score already recorded for today"})
 
-    # Persist score
     score = EscapeScore(
         date=date,
         total_time_ms=int(total_ms),
-        ip_hash=_ip_hash(request),
+        ip_hash=this_ip,
     )
     db.session.add(score)
     db.session.commit()
@@ -162,3 +143,20 @@ def leaderboard_view():
     date = request.args.get("date") or core._date_key()
     rows = EscapeScore.top_for_day(date=date, limit=100)
     return render_template("escape/leaderboard.html", date=date, rows=rows)
+
+
+# ───────────────────── Legacy compatibility: init_routes(bp) ─────────────────────
+def init_routes(bp_external=None):
+    """
+    Some existing setups call `from .routes import init_routes` and pass in a Blueprint
+    created elsewhere (e.g., in app/escape/__init__.py). We attach our view funcs to it.
+    If no blueprint is provided, return the module-level `bp` so callers can register it.
+    """
+    if bp_external is None:
+        return bp
+    bp_external.add_url_rule("/api/today", view_func=api_today, methods=["GET"])
+    bp_external.add_url_rule("/api/submit", view_func=api_submit, methods=["POST"])
+    bp_external.add_url_rule("/api/finish", view_func=api_finish, methods=["POST"])
+    bp_external.add_url_rule("/play", view_func=play_today, methods=["GET"])
+    bp_external.add_url_rule("/leaderboard", view_func=leaderboard_view, methods=["GET"])
+    return bp_external
