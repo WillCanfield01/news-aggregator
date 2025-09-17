@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-apply_trailroom_patches.py
-Patches app/escape/core.py to add the three new original minigames and
-bias gen_scene_mini() to select them, keeping legacy minis as fallbacks.
+apply_trailroom_patches.py  — robust patcher for your original core.py
 
-- Safe to re-run (idempotent).
-- Makes a timestamped backup of core.py in the same directory.
-- Use --dry-run to preview changes.
+What it does:
+1) Adds three original mini-generators:
+   - gen_vault_frenzy
+   - gen_light_reactor
+   - gen_pressure_chamber
+2) Replaces gen_scene_mini() body to prefer those minis (legacy fallbacks kept)
+3) Updates ensure_daily_room() to mix a per-request salt from Flask (if present):
+   request.args['salt'] or request.args['rotate'].
+   → This makes /escape/api/admin/regen?date=...&salt=v2 produce a new variant
+     for the SAME date (fixes "Answer recently used").
 
-Usage (from repo root or from app/escape/):
-    python -m app.escape.apply_trailroom_patches
-    # or
-    python app/escape/apply_trailroom_patches.py
+Safe to re-run; creates a timestamped backup: core.py.bak_YYYYmmdd_HHMMSS
 
-Optional:
-    python -m app.escape.apply_trailroom_patches --core path/to/core.py --dry-run
+Usage:
+  python -m app.escape.apply_trailroom_patches --dry-run
+  python -m app.escape.apply_trailroom_patches
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from pathlib import Path
 
 MINI_FUNCS_BLOCK = r'''
 # ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
-def gen_vault_frenzy(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+def gen_vault_frenzy(rng, pid, blacklist, theme=""):
     """
     Vault Frenzy — “pop-lock windows”
     Deterministic sequence mini: players reproduce the action series using control chips.
@@ -62,11 +65,11 @@ def gen_vault_frenzy(rng: random.Random, pid: str, blacklist: set, theme: str = 
         }
     )
 
-def _letter_filler(rng: random.Random, avoid: str = "") -> str:
+def _letter_filler(rng, avoid=""):
     A = [c for c in string.ascii_uppercase if c not in set((avoid or "").upper())]
     return rng.choice(A) if A else rng.choice(string.ascii_uppercase)
 
-def _grid_with_path_for_word(rng: random.Random, word: str, side: int = 4):
+def _grid_with_path_for_word(rng, word, side=4):
     """
     Place `word` as an adjacent path on a side×side grid; fill the rest with random letters.
     Returns (grid, path_coords).
@@ -101,14 +104,15 @@ def _grid_with_path_for_word(rng: random.Random, word: str, side: int = 4):
                 grid[i][j] = _letter_filler(rng, avoid=w)
     return grid, path
 
-def gen_light_reactor(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+def gen_light_reactor(rng, pid, blacklist, theme=""):
     """
     Light Reactor — “chasing charge”
     Grid mini: collect letters by dragging a continuous path to spell a word.
     Server verifies the resulting string (letters joined without separators).
     """
     base_words = globals().get("ANAGRAM_WORDS", ["EMBER","CABLE","LUMEN","VAULT","PRESS","NOVA","CIRCUIT"])
-    cands = [w for w in base_words if 4 <= len(w) <= 6 and w.lower() not in set(x.lower() for x in (blacklist or set()))]
+    bl = set(x.lower() for x in (blacklist or set()))
+    cands = [w for w in base_words if 4 <= len(w) <= 6 and w.lower() not in bl]
     ans = (rng.choice(cands) if cands else "EMBER")
     ans = re.sub(r"[^A-Za-z]", "", ans).upper()
     side = 4 if len(ans) <= 5 else 5
@@ -140,7 +144,7 @@ def gen_light_reactor(rng: random.Random, pid: str, blacklist: set, theme: str =
         }
     )
 
-def gen_pressure_chamber(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+def gen_pressure_chamber(rng, pid, blacklist, theme=""):
     """
     Pressure Chamber — “dial & relief valves”
     Sequence mini: adjust pressure using control tokens; exact sequence is checked server-side.
@@ -181,7 +185,7 @@ def gen_pressure_chamber(rng: random.Random, pid: str, blacklist: set, theme: st
 '''.lstrip("\n")
 
 NEW_GEN_SCENE_MINI = r'''
-def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
+def gen_scene_mini(rng, pid, blacklist, theme=""):
     """
     Produce a *mini-game* puzzle spec.
     Bias heavily toward the three original minis, keep a couple of legacy generators as low-weight fallbacks.
@@ -198,7 +202,7 @@ def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = ""
     f = rng.choices(funcs, weights=weights, k=1)[0]
     try:
         return f()
-    except Exception as e:
+    except Exception:
         # Avoid hard failure; pick a safe fallback if something unexpected happens.
         try:
             return gen_pathcode(rng, pid, blacklist, theme)
@@ -206,77 +210,143 @@ def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = ""
             return gen_knightword(rng, pid, blacklist, theme)
 '''.lstrip("\n")
 
+ENSURE_SALT_SNIPPET = r'''
+    # Allow per-request variant via Flask query args (?salt=... or ?rotate=...)
+    # so /escape/api/admin/regen?date=YYYY-MM-DD&salt=v2 rotates safely.
+    try:
+        from flask import has_request_context, request
+        if has_request_context():
+            _qs_salt = request.args.get("salt") or request.args.get("rotate")
+            if _qs_salt:
+                secret = f"{secret}::{_qs_salt}"
+    except Exception:
+        pass
+'''
+
+# ───────────────────────── Helpers ─────────────────────────
+
+def _insert_before(src: str, marker_regex: str, payload: str) -> str:
+    m = re.search(marker_regex, src, flags=re.M)
+    if not m:
+        raise RuntimeError(f"Marker not found for insertion: {marker_regex}")
+    return src[:m.start()] + payload + "\n" + src[m.start():]
+
+def _replace_function_body(src: str, func_name: str, new_func_block: str) -> str:
+    """
+    Replace the entire function block `def func_name(...): ...` up to the next top-level def/class or EOF.
+    More robust than a single big regex; works with different signatures/whitespace.
+    """
+    # locate the start of the def line
+    m = re.search(rf'(?m)^def\s+{re.escape(func_name)}\s*\(', src)
+    if not m:
+        raise RuntimeError(f"Could not find {func_name}()")
+    start = m.start()
+
+    # find the next top-level 'def ' or 'class ' AFTER start
+    nxt = re.search(r'(?m)^(def|class)\s+\w', src[m.end():])
+    end = (m.end() + nxt.start()) if nxt else len(src)
+
+    # backtrack to the start of the line for 'def func'
+    line_start = src.rfind("\n", 0, start) + 1
+    # ensure we capture from line start to end
+    old_block = src[line_start:end]
+
+    # replace with new block; ensure trailing newline
+    return src[:line_start] + new_func_block.rstrip() + "\n\n" + src[end:]
+
+def _patch_ensure_daily_room_salt(src: str) -> str:
+    """
+    Insert ENSURE_SALT_SNIPPET right after the line where secret is read
+    inside ensure_daily_room(...).
+    """
+    # locate ensure_daily_room block
+    m = re.search(r'(?m)^def\s+ensure_daily_room\s*\(', src)
+    if not m:
+        raise RuntimeError("Could not find ensure_daily_room()")
+
+    # From function start to the next top-level def/class or EOF
+    nxt = re.search(r'(?m)^(def|class)\s+\w', src[m.end():])
+    block_end = (m.end() + nxt.start()) if nxt else len(src)
+    block = src[m.start():block_end]
+
+    if "request.args.get(\"salt\")" in block or "ESCAPE_REGEN_SALT" in block:
+        # already patched
+        return src
+
+    # Find the line where secret is loaded
+    sec_line = re.search(r'(?m)^\s*secret\s*=\s*os\.getenv\(', block)
+    if not sec_line:
+        raise RuntimeError("Could not find 'secret = os.getenv(...)' in ensure_daily_room()")
+
+    insert_at = m.start() + sec_line.end()
+    # Insert the snippet AFTER that line
+    # Find end-of-line after sec_line
+    eol = src.find("\n", insert_at)
+    if eol == -1:
+        eol = insert_at
+    return src[:eol+1] + ENSURE_SALT_SNIPPET + src[eol+1:]
+
 # ───────────────────────── Patcher ─────────────────────────
 
 def patch_core(core_path: Path, dry_run: bool = False) -> str:
     src = core_path.read_text(encoding="utf-8")
-
     actions = []
 
-    # 0) Ensure imports that our functions rely on are present (string, re, random are already in your original file,
-    # but this helps if they were moved).
-    # Most originals had: `import os, hmac, hashlib, random, string, re, json`
-    missing_imports = []
+    # 1) Ensure we have random/string/re imports (your file already does, but keep it resilient)
+    missing = []
     for mod in ("random", "string", "re"):
-        if not re.search(rf"\bimport\s+{mod}\b", src):
-            missing_imports.append(mod)
-    if missing_imports:
-        # place after the main import bundle line
-        src = re.sub(
-            r"(?m)^(import\s+[^\n]+)\n",
-            lambda m: m.group(0) + f"import {', '.join(missing_imports)}\n",
-            src, count=1
-        )
-        actions.append(f"added imports: {', '.join(missing_imports)}")
+        if not re.search(rf'(?m)^\s*import\s+{mod}\b', src):
+            missing.append(mod)
+    if missing:
+        # insert right after the first import line
+        src = re.sub(r'(?m)^(import\s+[^\n]+)\n', lambda m: m.group(0) + f"import {', '.join(missing)}\n", src, count=1)
+        actions.append(f"added imports: {', '.join(missing)}")
 
-    # 1) Insert the MINI_FUNCS_BLOCK if not already present
+    # 2) Insert mini-game generators before gen_scene_mini if not already present
     if "BEGIN CHATGPT MINI-GAMES" not in src:
-        # Insert just BEFORE the definition of gen_scene_mini (so helpers are in scope above it)
-        m = re.search(r"(?m)^def\s+gen_scene_mini\s*\(", src)
-        if not m:
-            raise RuntimeError("Could not find gen_scene_mini() in core.py.")
-        insert_at = m.start()
-        src = src[:insert_at] + MINI_FUNCS_BLOCK + "\n" + src[insert_at:]
+        src = _insert_before(src, r'(?m)^def\s+gen_scene_mini\s*\(', MINI_FUNCS_BLOCK)
         actions.append("inserted new mini-game generators")
     else:
         actions.append("mini-game generators already present (skipped)")
 
-    # 2) Replace gen_scene_mini body with the new weighted chooser
-    #    We capture from the `def gen_scene_mini(...):` line up to next top-level `def` or EOF.
-    pattern = re.compile(r"(?ms)^def\s+gen_scene_mini\s*\([^\)]*\):.*?(?=^\s*def\s+\w|\Z)")
-    if "gen_vault_frenzy" not in pattern.search(src).group(0):
-        src = pattern.sub(NEW_GEN_SCENE_MINI, src, count=1)
+    # 3) Replace gen_scene_mini function body
+    try:
+        src = _replace_function_body(src, "gen_scene_mini", NEW_GEN_SCENE_MINI)
         actions.append("replaced gen_scene_mini()")
-    else:
-        actions.append("gen_scene_mini already prefers new minis (skipped)")
+    except RuntimeError as e:
+        raise RuntimeError(f"Could not replace gen_scene_mini(): {e}")
+
+    # 4) Patch ensure_daily_room to read request salt (if not already patched)
+    try:
+        src = _patch_ensure_daily_room_salt(src)
+        actions.append("patched ensure_daily_room() to accept ?salt=/&rotate=")
+    except RuntimeError as e:
+        actions.append(f"ensure_daily_room salt patch skipped: {e}")
 
     if dry_run:
         return "DRY-RUN (no write)\n" + "\n".join(f"- {a}" for a in actions)
 
-    # 3) Backup and write
+    # 5) Backup + write
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     backup = core_path.with_suffix(f".py.bak_{ts}")
     backup.write_text(core_path.read_text(encoding="utf-8"), encoding="utf-8")
     core_path.write_text(src, encoding="utf-8")
-
     return f"Patched {core_path}.\nBackup: {backup.name}\n" + "\n".join(f"- {a}" for a in actions)
 
 # ───────────────────────── CLI ─────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Patch Trailroom core.py with original minigames.")
-    parser.add_argument("--core", type=str, default=None, help="Path to core.py (defaults to app/escape/core.py next to this file)")
-    parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing files")
+    parser = argparse.ArgumentParser(description="Patch original core.py with new minis + per-request salt regen.")
+    parser.add_argument("--core", type=str, default=None, help="Path to core.py (defaults to app/escape/core.py)")
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes only")
     args = parser.parse_args()
 
     here = Path(__file__).resolve().parent
     core_path = Path(args.core) if args.core else (here / "core.py")
-
     if not core_path.exists():
         raise SystemExit(f"core.py not found at: {core_path}")
 
-    result = patch_core(core_path, dry_run=args.dry_run)
-    print(result)
+    print(patch_core(core_path, dry_run=args.dry_run))
 
 if __name__ == "__main__":
     main()
