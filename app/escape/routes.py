@@ -92,25 +92,32 @@ def init_routes(bp: Blueprint):
         room = ensure_daily_room()
         return render_template("escape/play.html", date_key=room.date_key, difficulty=room.difficulty)
 
-    @bp.route("/admin/regen", methods=["GET", "POST"])
-    def admin_regen():
-        from .core import ensure_daily_room, get_today_key
-        token = request.args.get("token") or request.headers.get("X-Escape-Admin")
-        server_token = os.getenv("ESCAPE_ADMIN_TOKEN", "")
-        if not server_token:
-            return jsonify({"ok": False, "error": "server missing ESCAPE_ADMIN_TOKEN env"}), 500
-        if token != server_token:
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+    @bp.route("/api/admin/regen", methods=["GET", "POST"])
+    def admin_regen_api():
+        token = request.args.get("token") or (request.get_json(silent=True) or {}).get("token")
+        if token != os.getenv("ESCAPE_ADMIN_TOKEN"):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
 
         date_key = request.args.get("date") or get_today_key()
-        force = (request.args.get("force", "true").lower() != "false")
+        force = (str(request.args.get("force") or "").lower() in ("1","true","yes","y"))
+        # NEW: read optional salt/rotate
+        salt = request.args.get("salt") or request.args.get("rotate")
+
+        # NEW: temporarily set an env var the core will mix into its secret/seed
+        old = os.environ.get("ESCAPE_REGEN_SALT")
         try:
+            if salt:
+                os.environ["ESCAPE_REGEN_SALT"] = salt
             row = ensure_daily_room(date_key, force_regen=force)
-            puzzles = len(((row.json_blob or {}).get("puzzles") or []))
-            return jsonify({"ok": True, "date": date_key, "puzzles": puzzles})
-        except Exception as e:
-            current_app.logger.exception("[escape] admin_regen failed")
-            return jsonify({"ok": False, "error": str(e)}), 500
+        finally:
+            # restore env
+            if salt:
+                if old is None:
+                    os.environ.pop("ESCAPE_REGEN_SALT", None)
+                else:
+                    os.environ["ESCAPE_REGEN_SALT"] = old
+
+        return jsonify({"ok": True, "date": row.date_key})
 
     # --- Admin health & alias ---
     @bp.route("/admin/ping", methods=["GET"])

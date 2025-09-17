@@ -2662,6 +2662,18 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
         return existing
 
     secret = os.getenv("ESCAPE_SERVER_SECRET","dev_secret_change_me")
+    # Allow per-request variant via ?salt=... or ?rotate=...
+    try:
+        from flask import has_request_context, request
+        if has_request_context():
+            _qs_salt = request.args.get("salt") or request.args.get("rotate")
+            if not _qs_salt:
+                _qs_salt = os.getenv("ESCAPE_REGEN_SALT")  # fallback to env from routes.py
+            if _qs_salt:
+                secret = f"{secret}::{_qs_salt}"
+    except Exception:
+        pass
+
     for attempt in range(1, MAX_GEN_ATTEMPTS+1):
         try:
             room_blob = generate_room(date_key, secret)
