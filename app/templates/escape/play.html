@@ -373,7 +373,7 @@
     async function fetchToday() {
       const qs = new URLSearchParams(location.search);
       const date = qs.get('date');
-      const res = await fetch('/escape/api/today' + (date ? ('?date=' + encodeURIComponent(date)) : ''));
+      const res = await fetch(`/escape/api/today?format=minis&date=${encodeURIComponent(state.dateKey)}`)
       const js = await res.json();
       ROOM = js;
       todayMeta.textContent = `${js.date} • ${js.theme}`;

@@ -40,6 +40,45 @@ from .core import (
 # Blueprint initializer
 # ---------------------------------------------------------------------
 
+def _row_to_blob(row):
+    return row.json_blob or {}
+
+def _blob_to_minis_payload(blob, date_key):
+    # If it’s already minis-shaped, normalize and return
+    if isinstance(blob.get("minigames"), list):
+        return {
+            "date": blob.get("date") or blob.get("date_key") or date_key,
+            "theme": blob.get("theme") or blob.get("title") or "Daily Escape",
+            "minigames": blob["minigames"],
+        }
+
+    # Legacy trailroom → extract three mini puzzles (one per room)
+    trail = blob.get("trail") or {}
+    rooms = (trail.get("rooms") or [])[:3]
+    minis = []
+    labels = "ABC"
+    for i, rm in enumerate(rooms):
+        routes = rm.get("routes") or []
+        route = (next((r for r in routes if r.get("id") == "cautious"), None)
+                 or next((r for r in routes if r.get("id") == "brisk"), None)
+                 or next((r for r in routes if r.get("id") == "risky"), None)
+                 or (routes[0] if routes else {}))
+        p = (route.get("puzzle") or {}) if isinstance(route, dict) else {}
+        if (p.get("archetype") or "").lower() != "mini":
+            continue
+        minis.append({
+            "id": labels[i] if i < 3 else f"M{i+1}",
+            "mechanic": (p.get("mechanic") or "").lower(),   # "sequence_input" | "grid_input" | ...
+            "prompt": p.get("prompt") or "",
+            "ui_spec": p.get("ui_spec") or {},
+            "answer_format": p.get("answer_format") or {},
+        })
+    return {
+        "date": blob.get("date") or blob.get("date_key") or date_key,
+        "theme": blob.get("title") or blob.get("theme") or "Daily Escape",
+        "minigames": minis,
+    }
+
 def init_routes(bp: Blueprint):
     """
     Attach all route handlers to the provided blueprint.
@@ -104,16 +143,24 @@ def init_routes(bp: Blueprint):
     # -----------------------------
     @bp.route("/api/today", methods=["GET"])
     def api_today():
+        fmt = (request.args.get("format") or "").lower()  # 'minis' returns new view
         date_q = request.args.get("date")
+
         if date_q:
             existing = db.session.query(EscapeRoom).filter_by(date_key=date_q).first()
             room = existing or ensure_daily_room(date_q)
         else:
             room = ensure_daily_room()
 
-        payload = _strip_solutions(room.json_blob or {})
+        blob = _row_to_blob(room)
 
-        # If something went wrong and we ended up with 0 puzzles/routes, hard fallback to offline
+        if fmt == "minis":
+            payload = _blob_to_minis_payload(blob, room.date_key)
+            return jsonify(payload)
+
+        # legacy payload (solutions stripped) – unchanged for old UI
+        payload = _strip_solutions(blob)
+
         if not _has_any_puzzle(payload):
             current_app.logger.warning("[escape] api_today saw no puzzles/routes; attempting offline regen")
             from .core import generate_room_offline
