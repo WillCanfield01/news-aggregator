@@ -323,6 +323,41 @@
   </div>
 
   <script>
+    // Global page state
+    const qs = new URLSearchParams(location.search);
+    const initialDate = qs.get('date') || new Date().toISOString().slice(0, 10);
+
+    const state = {
+      dateKey: initialDate,
+      minis: [],
+      tokens: [],
+      soundOn: (localStorage.getItem('escape_sound') || 'on') === 'on',
+      startTs: 0
+    };
+
+    async function fetchToday() {
+      const date = state.dateKey;
+      const res = await fetch(`/escape/api/today?format=minis&date=${encodeURIComponent(date)}`);
+      if (!res.ok) throw new Error('today fetch failed');
+      const data = await res.json();
+
+      state.dateKey = data.date || date;
+      state.minis = Array.isArray(data.minigames) ? data.minigames : [];
+
+      // Update your header if you have these elements
+      const titleEl = document.querySelector('[data-today-title]');
+      const metaEl = document.querySelector('[data-today-meta]');
+      if (titleEl) titleEl.textContent = data.theme || 'Daily Escape';
+      if (metaEl) metaEl.textContent = `${state.dateKey} • ${state.minis.length} games`;
+
+      // Now render the first mini/tab, etc.
+      // renderTabs(); selectMini('A');  // whatever your code does here
+    }
+
+    // Make sure init() is called after the above definitions
+    document.addEventListener('DOMContentLoaded', () => {
+      init();           // your existing init that calls fetchToday()
+    });
     // Minimal SFX (optional)
     let SOUND_ON = true;
     const muteBtn = document.getElementById('muteBtn');
@@ -659,9 +694,9 @@
         totalMsEl.textContent = total.toString();
         const share =
           `◆◎✶
-Time: ${fmt(total)}
-${ROOM.date} • ${ROOM.theme}
-theroundup.com/escape`;
+      Time: ${fmt(total)}
+      ${ROOM.date} • ${ROOM.theme}
+      theroundup.com/escape`;
         shareBlock.textContent = share;
         finish.style.display = 'block';
         const introAd = document.querySelector('.ads'); if (introAd) introAd.remove();

@@ -1,24 +1,69 @@
-
 {# app/templates/escape/leaderboard.html (REWRITE) #}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Daily Escape — Leaderboard</title>
   <style>
     :root {
-      --bg: #0e1222; --panel:#151a2f; --panel2:#0f1427; --text:#f5f6fa;
-      --muted:#99a3c7; --line:#223057; --accent:#58bbff;
+      --bg: #0e1222;
+      --panel: #151a2f;
+      --panel2: #0f1427;
+      --text: #f5f6fa;
+      --muted: #99a3c7;
+      --line: #223057;
+      --accent: #58bbff;
     }
-    *{box-sizing:border-box} body{margin:0;background:#0e1222;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    .wrap{max-width:820px;margin:0 auto;padding:18px}
-    header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
-    th{color:var(--muted);font-weight:600}
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      background: #0e1222;
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial
+    }
+
+    .wrap {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 18px
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border: 1px solid var(--line);
+      border-radius: 14px
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px
+    }
+
+    th,
+    td {
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600
+    }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <header>
@@ -26,23 +71,38 @@
         <div style="font-weight:800">Daily Escape — Leaderboard</div>
         <div style="color:var(--muted)">Date: {{ date }}</div>
       </div>
-      <a href="/escape/play" style="text-decoration:none;background:#1cf29f;color:#08111e;border-radius:12px;padding:10px 14px;font-weight:700">Play</a>
+      <a href="/escape/play"
+        style="text-decoration:none;background:#1cf29f;color:#08111e;border-radius:12px;padding:10px 14px;font-weight:700">Play</a>
     </header>
 
     <table>
-      <thead><tr><th>#</th><th>Time</th><th>Finished</th></tr></thead>
-      <tbody>
-        {% for i, row in enumerate(rows, start=1) %}
+      <thead>
         <tr>
-          <td>{{ i }}</td>
-          <td>{{ "%.2f"|format(row.total_time_ms/1000.0) }}s</td>
-          <td>{{ row.finished_at }}</td>
+          <th>#</th>
+          <th>Time</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="rank">{{ loop.index }}</td>
+          <td class="name">{{ row.nickname or "Guest" }}</td>
+          <td class="time">
+            {% set secs = (row.total_time_ms or 0) // 1000 %}
+            {% set m = secs // 60 %}
+            {% set s = secs % 60 %}
+            {{ "%d:%02d" % (m, s) }}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="3" style="color:var(--muted)">No scores yet.</td></tr>
+        <tr>
+          <td colspan="3">No scores yet today.</td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </body>
+
 </html>
