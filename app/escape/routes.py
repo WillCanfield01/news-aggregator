@@ -41,7 +41,7 @@ def _row_to_blob(row):
     return row.json_blob or {}
 
 def _blob_to_minis_payload(blob, date_key):
-    # Already minis-shaped?
+    # If it’s already minis-shaped, just normalize
     if isinstance(blob.get("minigames"), list):
         return {
             "date": blob.get("date") or blob.get("date_key") or date_key,
@@ -49,27 +49,48 @@ def _blob_to_minis_payload(blob, date_key):
             "minigames": blob["minigames"],
         }
 
-    # Legacy trailroom → extract one mini per room
     trail = blob.get("trail") or {}
     rooms = (trail.get("rooms") or [])[:3]
     minis = []
     labels = "ABC"
+
+    def _is_mini(p):
+        return isinstance(p, dict) and (p.get("archetype") or "").lower() == "mini"
+
     for i, rm in enumerate(rooms):
         routes = rm.get("routes") or []
-        route = (next((r for r in routes if r.get("id") == "cautious"), None)
-                 or next((r for r in routes if r.get("id") == "brisk"), None)
-                 or next((r for r in routes if r.get("id") == "risky"), None)
+
+        # Prefer a specific route if present
+        route = (next((r for r in routes if (r.get("id") or "").lower() == "cautious"), None)
+                 or next((r for r in routes if (r.get("id") or "").lower() == "brisk"), None)
+                 or next((r for r in routes if (r.get("id") or "").lower() == "risky"), None)
                  or (routes[0] if routes else {}))
-        p = (route.get("puzzle") or {}) if isinstance(route, dict) else {}
-        if (p.get("archetype") or "").lower() != "mini":
-            continue
+
+        # MINI can live on the route OR directly on the room
+        p = None
+        if isinstance(route, dict) and _is_mini(route.get("puzzle")):
+            p = route.get("puzzle")
+        elif _is_mini(rm.get("puzzle")):
+            p = rm.get("puzzle")
+
+        if not _is_mini(p):
+            # Try any route that has a mini puzzle
+            for r in routes:
+                if _is_mini(r.get("puzzle")):
+                    p = r.get("puzzle")
+                    break
+
+        if not _is_mini(p):
+            continue  # this room has no mini
+
         minis.append({
             "id": labels[i] if i < 3 else f"M{i+1}",
-            "mechanic": (p.get("mechanic") or "").lower(),
+            "mechanic": (p.get("mechanic") or "").lower(),   # "sequence_input" | "grid_input" | ...
             "prompt": p.get("prompt") or "",
             "ui_spec": p.get("ui_spec") or {},
             "answer_format": p.get("answer_format") or {},
         })
+
     return {
         "date": blob.get("date") or blob.get("date_key") or date_key,
         "theme": blob.get("title") or blob.get("theme") or "Daily Escape",
@@ -277,6 +298,8 @@ def init_routes(bp: Blueprint):
             return jsonify(_blob_to_minis_payload(blob, room.date_key))
 
         payload = _strip_solutions(blob)
+        if not payload["minigames"]:
+            current_app.logger.warning("[escape] minis view built 0 games for %s", room.date_key)
 
         if not _has_any_puzzle(payload):
             current_app.logger.warning("[escape] api_today saw no puzzles/routes; attempting offline regen")

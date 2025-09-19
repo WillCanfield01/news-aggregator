@@ -1347,15 +1347,9 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
             ans = (p.get("solution") or {}).get("answer", "")
             if normalize_answer(ans) in recent_norm:
                 pid = p.get("id") or f"r{i}_auto_{j}"
-                typ = (p.get("type") or p.get("archetype") or "").lower()
-                if   typ == "acrostic": new_p = gen_acrostic(rng, pid, recent_lower, theme).to_json()
-                elif typ == "tapcode":  new_p = gen_tapcode(rng,  pid, recent_lower, theme).to_json()
-                elif typ == "pathcode": new_p = gen_pathcode(rng, pid, recent_lower, theme).to_json()
-                else:                   new_p = _synth_puzzle(rng, pid, recent_lower, theme)
-                new_p["id"] = pid
-                rt["puzzle"] = new_p
-
-        # re-coerce fragments across all routes
+                # Always regenerate as a MINI (don’t mirror original type)
+                rt["puzzle"] = gen_scene_mini(rng, pid, recent_lower, theme).to_json()
+                continue
         # re-coerce fragments across all routes (tolerant; sanitize happens later)
         puzzles = []
         for r in routes:
