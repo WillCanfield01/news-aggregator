@@ -55,7 +55,9 @@ def _blob_to_minis_payload(blob, date_key):
     labels = "ABC"
 
     def _is_mini(p):
-        return isinstance(p, dict) and (p.get("archetype") or "").lower() == "mini"
+        if not isinstance(p, dict): return False
+        t = (p.get("archetype") or p.get("type") or "").lower()
+        return t == "mini"
 
     for i, rm in enumerate(rooms):
         routes = rm.get("routes") or []
@@ -80,12 +82,18 @@ def _blob_to_minis_payload(blob, date_key):
                     p = r.get("puzzle")
                     break
 
+        # ... inside the for i, rm in enumerate(rooms): loop after p is chosen ...
         if not _is_mini(p):
             continue  # this room has no mini
 
         minis.append({
-            "id": labels[i] if i < 3 else f"M{i+1}",
-            "mechanic": (p.get("mechanic") or "").lower(),   # "sequence_input" | "grid_input" | ...
+            # for UI tab label (A/B/C)
+            "slot": labels[i] if i < 3 else f"M{i+1}",
+            # canonical id used by /api/submit server-side verification
+            "puzzle_id": p.get("id"),
+            # keep a simple id for legacy UIs (set to puzzle_id)
+            "id": p.get("id"),
+            "mechanic": (p.get("mechanic") or "").lower(),   # e.g. "sequence_input" | "grid_input"
             "prompt": p.get("prompt") or "",
             "ui_spec": p.get("ui_spec") or {},
             "answer_format": p.get("answer_format") or {},
