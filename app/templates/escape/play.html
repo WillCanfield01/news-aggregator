@@ -323,400 +323,382 @@
   </div>
 
   <script>
-    // Global page state
-    const qs = new URLSearchParams(location.search);
-    const initialDate = qs.get('date') || new Date().toISOString().slice(0, 10);
+    /* =======================  Daily Escape – minis client  ======================= */
 
-    const state = {
-      dateKey: initialDate,
-      minis: [],
-      tokens: [],
-      soundOn: (localStorage.getItem('escape_sound') || 'on') === 'on',
-      startTs: 0
-    };
-
-    async function fetchToday() {
-      const date = state.dateKey;
-      const res = await fetch(`/escape/api/today?format=minis&date=${encodeURIComponent(date)}`);
-      if (!res.ok) throw new Error('today fetch failed');
-      const data = await res.json();
-
-      state.dateKey = data.date || date;
-      state.minis = Array.isArray(data.minigames) ? data.minigames : [];
-
-      // Update your header if you have these elements
-      const titleEl = document.querySelector('[data-today-title]');
-      const metaEl = document.querySelector('[data-today-meta]');
-      if (titleEl) titleEl.textContent = data.theme || 'Daily Escape';
-      if (metaEl) metaEl.textContent = `${state.dateKey} • ${state.minis.length} games`;
-
-      // Now render the first mini/tab, etc.
-      // renderTabs(); selectMini('A');  // whatever your code does here
-    }
-
-    // Make sure init() is called after the above definitions
-    document.addEventListener('DOMContentLoaded', () => {
-      init();           // your existing init that calls fetchToday()
-    });
-    // Minimal SFX (optional)
-    let SOUND_ON = true;
-    const muteBtn = document.getElementById('muteBtn');
-    muteBtn.addEventListener('click', () => {
-      SOUND_ON = !SOUND_ON;
-      muteBtn.textContent = SOUND_ON ? '🔊 Sound' : '🔇 Sound';
-      muteBtn.style.background = SOUND_ON ? '#58bbff' : '#263a5f';
-      muteBtn.style.color = SOUND_ON ? '#08111e' : '#cfe2ff';
-    });
-    function bip(freq = 880, dur = 0.05) {
-      try {
-        if (!SOUND_ON) return; const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.type = 'sine'; o.frequency.value = freq; g.gain.value = 0.02; o.connect(g); g.connect(ctx.destination); o.start();
-        setTimeout(() => { o.stop(); ctx.close(); }, dur * 1000);
-      } catch (e) { }
-    }
-
-    const todayMeta = document.getElementById('todayMeta');
-    const globalTimer = document.getElementById('globalTimer');
-    const startBtn = document.getElementById('startBtn');
-    const intro = document.getElementById('intro');
-    const panel = document.getElementById('panel');
-    const gameA = document.getElementById('gameA');
-    const gameB = document.getElementById('gameB');
-    const gameC = document.getElementById('gameC');
-    const finish = document.getElementById('finish');
-    const totalMsEl = document.getElementById('totalMs');
-    const shareBlock = document.getElementById('shareBlock');
-
-    let ROOM = null;
-    let START_TS = 0;
-    let elapsedA = 0, elapsedB = 0, elapsedC = 0;
-    let tokenA = null, tokenB = null, tokenC = null;
-
-    function fmt(ms) {
-      const s = Math.floor(ms / 1000); const m = Math.floor(s / 60);
-      const rem = s % 60; return `${m}:${rem.toString().padStart(2, '0')}`;
-    }
-
-    function tickGlobal() {
-      if (!START_TS) return;
-      const ms = Date.now() - START_TS;
-      globalTimer.textContent = fmt(ms);
-      requestAnimationFrame(tickGlobal);
-    }
-
-    async function fetchToday() {
+    (function () {
+      // ---------- helpers ----------
       const qs = new URLSearchParams(location.search);
-      const date = qs.get('date');
-      const res = await fetch(`/escape/api/today?format=minis&date=${encodeURIComponent(state.dateKey)}`)
-      const js = await res.json();
-      ROOM = js;
-      todayMeta.textContent = `${js.date} • ${js.theme}`;
-    }
+      const todayISO = () => new Date().toISOString().slice(0, 10);
+      const $ = (sel) => document.querySelector(sel);
+      const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-    function setStep(id) {
-      for (const k of ['A', 'B', 'C']) {
-        document.getElementById('step' + k).classList.toggle('active', k === id);
-      }
-    }
+      // ---------- state ----------
+      const state = {
+        dateKey: qs.get("date") || todayISO(),
+        minis: [],             // [{slot, puzzleId, mechanic, prompt, ui}]
+        current: 0,
+        solved: [false, false, false],
+        startedMs: null,
+        timerHandle: null,
+        soundOn: (localStorage.getItem("escape_sound") || "on") === "on",
+      };
 
-    // ───────────────────── Vault Frenzy (A) ─────────────────────
-    function mountVaultFrenzy(cfg) {
-      gameA.innerHTML = '';
-      const wrap = document.createElement('div');
-      wrap.innerHTML = `<h3 style="margin:10px 0;">◆ Vault Frenzy</h3>`;
-      const grid = document.createElement('div');
-      grid.className = 'vf-grid';
-      grid.style.gridTemplateColumns = `repeat(${cfg.grid_cols}, 1fr)`;
+      // ---------- boot ----------
+      document.addEventListener("DOMContentLoaded", init);
 
-      const rows = cfg.grid_rows, cols = cfg.grid_cols;
-      const total = rows * cols;
-      const cells = [];
-      for (let i = 0; i < total; i++) {
-        const el = document.createElement('div');
-        el.className = 'vf-cell';
-        el.textContent = '';
-        el.dataset.idx = i;
-        grid.appendChild(el);
-        cells.push(el);
-      }
-      wrap.appendChild(grid);
-
-      const cta = document.createElement('div');
-      cta.style.marginTop = '10px';
-      cta.innerHTML = `<button class="btn" id="vfGo">Go</button>`;
-      wrap.appendChild(cta);
-
-      gameA.appendChild(wrap);
-      gameA.style.display = 'block';
-
-      const transcript = { rounds: [] };
-      let roundIdx = 0;
-      function runRound() {
-        const need = cfg.pops_per_round[roundIdx];
-        const decoys = cfg.decoys_per_round[roundIdx];
-        const roundStart = performance.now();
-        const taps = [];
-        const indexes = [...Array(total).keys()];
-
-        function flash() {
-          // fake, purely visual: randomly flash some cells quickly.
-          // Real verification is server-side and counts taps only.
-          for (const el of cells) {
-            el.style.background = '#121832';
-          }
-          const on = new Set();
-          for (let i = 0; i < need; i++) {
-            on.add(indexes[Math.floor(Math.random() * indexes.length)]);
-          }
-          for (let i = 0; i < decoys; i++) {
-            on.add(indexes[Math.floor(Math.random() * indexes.length)]);
-          }
-          for (const el of cells) {
-            if (on.has(parseInt(el.dataset.idx))) el.style.background = '#1b2a56';
-          }
+      async function init() {
+        try {
+          await fetchToday();
+          wireUI();
+        } catch (err) {
+          console.error(err);
+          alert("Failed to load today’s game. Please refresh.");
         }
-        flash();
-        const flashTimer = setInterval(flash, 400);
-
-        function onTap(ev) {
-          const el = ev.currentTarget;
-          const idx = parseInt(el.dataset.idx);
-          el.style.transform = 'scale(0.96)'; setTimeout(() => el.style.transform = '', 60);
-          taps.push({ idx, t: Math.floor(performance.now() - roundStart) });
-          bip(1200, .03);
-          if (taps.length >= need) { // allow finishing early
-            cleanup();
-          }
-        }
-        for (const el of cells) el.addEventListener('click', onTap);
-
-        function cleanup() {
-          clearInterval(flashTimer);
-          for (const el of cells) el.removeEventListener('click', onTap);
-          transcript.rounds.push({ taps, elapsed_ms: Math.floor(performance.now() - roundStart) });
-          roundIdx++;
-          if (roundIdx < cfg.rounds) { runRound(); }
-          else submit();
-        }
-        // hard cap
-        setTimeout(() => cleanup(), cfg.time_cap_sec * 1000);
       }
 
-      document.getElementById('vfGo').addEventListener('click', () => {
-        document.getElementById('vfGo').disabled = true;
-        runRound();
-      });
+      // ---------- data ----------
+      async function fetchToday() {
+        const url = `/escape/api/today?format=minis&date=${encodeURIComponent(state.dateKey)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("today fetch failed");
+        const data = await res.json();
 
-      async function submit() {
-        const body = { minigame_id: cfg.id, transcript, client_time_ms: transcript.rounds.reduce((a, r) => a + r.elapsed_ms, 0) };
-        const res = await fetch('/escape/api/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const js = await res.json();
-        if (js.passed) {
-          elapsedA = js.elapsed_ms; tokenA = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
-          gameA.style.display = 'none'; launchB();
+        // normalize minis (server provides puzzle_id; keep slot for tab label if present)
+        state.minis = (data.minigames || []).map((m) => ({
+          slot: m.slot || m.id,
+          puzzleId: m.puzzle_id || m.id,
+          mechanic: (m.mechanic || "").toLowerCase(), // 'sequence_input' | 'grid_input'
+          prompt: m.prompt || "",
+          ui: m.ui_spec || {},                         // {sequence:[...]} or {grid:[[]]}
+        }));
+
+        // header text
+        const metaEl = $("#todayMeta");
+        if (metaEl) {
+          const theme = data.theme || "Daily Escape";
+          metaEl.textContent = `${data.date || state.dateKey} • ${theme}`;
+        }
+      }
+
+      // ---------- ui wiring ----------
+      function wireUI() {
+        // “Start” button shows first mini
+        const startBtn = $("#startBtn");
+        if (startBtn) startBtn.onclick = startRun;
+
+        // Step tabs (A/B/C)
+        const steps = [$("#stepA"), $("#stepB"), $("#stepC")];
+        steps.forEach((el, i) => {
+          if (!el) return;
+          el.style.cursor = "pointer";
+          el.onclick = () => { setActiveStep(i); launch(i); };
+        });
+
+        // Sound toggle (optional)
+        const soundBtn = $("#soundToggle");
+        if (soundBtn) {
+          setSoundVisual(soundBtn, state.soundOn);
+          soundBtn.onclick = () => {
+            state.soundOn = !state.soundOn;
+            localStorage.setItem("escape_sound", state.soundOn ? "on" : "off");
+            setSoundVisual(soundBtn, state.soundOn);
+          };
+        }
+      }
+
+      function setSoundVisual(btn, on) {
+        btn.classList.toggle("is-on", !!on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      }
+
+      function startRun() {
+        const intro = $("#intro");
+        if (intro) intro.style.display = "none";
+        state.startedMs = Date.now();
+        startTimer();
+        setActiveStep(0);
+        launch(0);
+      }
+
+      function setActiveStep(i) {
+        ["#stepA", "#stepB", "#stepC"].forEach((sel, idx) => {
+          const el = $(sel);
+          if (!el) return;
+          el.classList.toggle("active", idx === i);
+          el.classList.toggle("solved", state.solved[idx]);
+        });
+      }
+
+      // ---------- timer ----------
+      function startTimer() {
+        const timerEl = $("#timer") || document.querySelector("[data-run-timer]");
+        stopTimer();
+        state.timerHandle = setInterval(() => {
+          if (!timerEl || !state.startedMs) return;
+          const secs = Math.max(0, Math.floor((Date.now() - state.startedMs) / 1000));
+          const m = Math.floor(secs / 60);
+          const s = secs % 60;
+          timerEl.textContent = `${m}:${s.toString().padStart(2, "0")}`;
+        }, 1000);
+      }
+      function stopTimer() {
+        if (state.timerHandle) {
+          clearInterval(state.timerHandle);
+          state.timerHandle = null;
+        }
+      }
+
+      // ---------- launch & mount ----------
+      function launch(i) {
+        state.current = i;
+
+        // swap visible panel (#gameA/B/C)
+        const hostIds = ["#gameA", "#gameB", "#gameC"];
+        hostIds.forEach((sel, idx) => {
+          const pane = $(sel);
+          if (!pane) return;
+          pane.style.display = idx === i ? "block" : "none";
+          if (idx !== i) pane.innerHTML = ""; // clear others
+        });
+
+        const host = $(hostIds[i]);
+        const mini = state.minis[i];
+        if (!host) return;
+        if (!mini) { host.textContent = "No mini available."; return; }
+
+        // title
+        const h = document.createElement("h2");
+        h.className = "mini-title";
+        h.textContent = titleFor(mini);
+        host.appendChild(h);
+
+        // prompt
+        if (mini.prompt) {
+          const p = document.createElement("p");
+          p.className = "mini-prompt";
+          p.textContent = mini.prompt;
+          host.appendChild(p);
+        }
+
+        if (mini.mechanic === "sequence_input") {
+          mountSequence(host, mini);
+        } else if (mini.mechanic === "grid_input") {
+          mountGrid(host, mini);
         } else {
-          alert('Failed Vault Frenzy — try again tomorrow!');
+          const p = document.createElement("p");
+          p.textContent = "Unknown mini type.";
+          host.appendChild(p);
         }
       }
-    }
 
-    // ───────────────────── Light Reactor (B) ─────────────────────
-    function mountLightReactor(cfg) {
-      gameB.innerHTML = '';
-      const wrap = document.createElement('div');
-      wrap.innerHTML = `<h3 style="margin:10px 0;">◎ Light Reactor</h3>`;
-      const arena = document.createElement('div');
-      arena.className = 'reactor';
-      const zone = document.createElement('div'); zone.className = 'zone';
-      const target = document.createElement('div'); target.className = 'target';
-      arena.appendChild(zone); arena.appendChild(target);
-      const orb1 = document.createElement('div'); orb1.className = 'orb';
-      const orb2 = document.createElement('div'); orb2.className = 'orb'; orb2.style.background = '#68f2a1';
-      arena.appendChild(orb1); arena.appendChild(orb2); orb2.style.display = 'none';
-      const cta = document.createElement('button'); cta.className = 'btn reactor cta'; cta.textContent = 'HIT';
-      arena.appendChild(cta);
-      wrap.appendChild(arena);
-      gameB.appendChild(wrap);
-      gameB.style.display = 'block';
+      function titleFor(mini) {
+        // Basic mapping; tweak labels as you like
+        return (mini.slot ? mini.slot + " • " : "") +
+          (mini.mechanic === "grid_input" ? "Light Reactor" : "Vault Frenzy");
+      }
 
-      const roundDur = 1000;
-      const t0 = performance.now();
-      const stops = [];
+      // ---------- minis: sequence ----------
+      function mountSequence(host, mini) {
+        const choices = Array.isArray(mini.ui.sequence) && mini.ui.sequence.length
+          ? mini.ui.sequence
+          : ["tap", "hold", "up", "down", "left", "right"]; // safe default
 
-      let roundIdx = 0;
-      function layoutRound() {
-        // purely visual spin — server verifies mathematically
-        const speed = cfg.speeds[roundIdx];
-        const reverse = cfg.reverse_rounds[roundIdx];
-        const orbs = cfg.orb_counts[roundIdx];
-        orb2.style.display = (orbs === 2) ? 'block' : 'none';
-        function paint() {
-          const now = performance.now();
-          const t = (now - t0) % (roundDur * (roundIdx + 1));
-          const rRel = (now - (t0 + roundIdx * roundDur));
-          const tt = Math.max(0, Math.min(roundDur, rRel));
-          const phase = (tt / roundDur) * 2 * Math.PI * speed * (reverse ? -1 : 1);
-          const cx = 160, cy = 160, rad = 120;
+        const bar = document.createElement("div");
+        bar.className = "chip-bar";
 
-          const x1 = cx + Math.cos(phase) * rad, y1 = cy + Math.sin(phase) * rad;
-          orb1.style.transform = `translate(${x1 - 8}px, ${y1 - 8}px)`;
-          if (orbs === 2) {
-            const phase2 = -phase * 1.05;
-            const x2 = cx + Math.cos(phase2) * rad, y2 = cy + Math.sin(phase2) * rad;
-            orb2.style.transform = `translate(${x2 - 8}px, ${y2 - 8}px)`;
+        const preview = document.createElement("div");
+        preview.className = "chip-output";
+
+        let out = [];
+
+        // chip buttons
+        choices.forEach((tok) => {
+          const b = document.createElement("button");
+          b.className = "chip";
+          b.textContent = tok;
+          b.onclick = () => {
+            out.push(tok);
+            preview.textContent = out.join(", ");
+            clickTick();
+          };
+          bar.appendChild(b);
+        });
+
+        // controls
+        const ctrl = document.createElement("div");
+        ctrl.className = "chip-controls";
+
+        const clearBtn = document.createElement("button");
+        clearBtn.textContent = "Clear";
+        clearBtn.onclick = () => { out = []; preview.textContent = ""; };
+
+        const backBtn = document.createElement("button");
+        backBtn.textContent = "⌫";
+        backBtn.title = "Backspace";
+        backBtn.onclick = () => { out.pop(); preview.textContent = out.join(", "); };
+
+        const goBtn = document.createElement("button");
+        goBtn.textContent = "Go";
+        goBtn.onclick = () => submit(mini.puzzleId, out.join(","));
+
+        ctrl.append(clearBtn, backBtn, goBtn);
+
+        host.append(bar, preview, ctrl);
+      }
+
+      // ---------- minis: grid ----------
+      function mountGrid(host, mini) {
+        const grid = Array.isArray(mini.ui.grid) ? mini.ui.grid : null;
+        if (!grid) {
+          const p = document.createElement("p");
+          p.textContent = "Grid missing.";
+          host.appendChild(p);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "grid";
+
+        const preview = document.createElement("div");
+        preview.className = "grid-preview";
+
+        const sel = []; // [{r,c,ch}]
+        function adjacent(a, b) {
+          if (!a || !b) return true;
+          const dr = Math.abs(a.r - b.r);
+          const dc = Math.abs(a.c - b.c);
+          return (dr + dc) === 1; // 4-neighborhood
+        }
+
+        for (let r = 0; r < grid.length; r++) {
+          const rowEl = document.createElement("div");
+          rowEl.className = "grid-row";
+          for (let c = 0; c < grid[r].length; c++) {
+            const cell = document.createElement("button");
+            cell.className = "grid-cell";
+            cell.textContent = grid[r][c];
+
+            cell.onclick = () => {
+              const last = sel[sel.length - 1] || null;
+              const next = { r, c, ch: grid[r][c] };
+              if (!adjacent(last, next)) return; // ignore non-adjacent taps
+              sel.push(next);
+              preview.textContent = sel.map(x => x.ch).join("");
+              cell.classList.add("picked");
+              clickTick();
+            };
+
+            rowEl.appendChild(cell);
           }
-          if (roundIdx < cfg.rounds) requestAnimationFrame(paint);
+          wrap.appendChild(rowEl);
         }
-        requestAnimationFrame(paint);
+
+        const ctrl = document.createElement("div");
+        ctrl.className = "grid-controls";
+
+        const clearBtn = document.createElement("button");
+        clearBtn.textContent = "Clear";
+        clearBtn.onclick = () => {
+          sel.length = 0;
+          preview.textContent = "";
+          $$(".grid-cell.picked").forEach((n) => n.classList.remove("picked"));
+        };
+
+        const backBtn = document.createElement("button");
+        backBtn.textContent = "⌫";
+        backBtn.onclick = () => {
+          if (!sel.length) return;
+          sel.pop();
+          preview.textContent = sel.map(x => x.ch).join("");
+          // remove last picked style
+          const picked = $$(".grid-cell.picked");
+          if (picked.length) picked[picked.length - 1].classList.remove("picked");
+        };
+
+        const goBtn = document.createElement("button");
+        goBtn.textContent = "Go";
+        goBtn.onclick = () => submit(mini.puzzleId, sel.map(x => x.ch).join(""));
+
+        ctrl.append(clearBtn, backBtn, goBtn);
+
+        host.append(wrap, preview, ctrl);
       }
-      layoutRound();
 
-      cta.addEventListener('click', () => {
-        bip(1000, .04);
-        stops.push({ t: Math.floor(performance.now() - t0) });
-        roundIdx++;
-        if (roundIdx < cfg.rounds) layoutRound();
-        else submit();
-      });
-
-      async function submit() {
-        const body = { minigame_id: cfg.id, transcript: { stops, elapsed_ms: Math.floor(performance.now() - t0) }, client_time_ms: Math.floor(performance.now() - t0) };
-        const res = await fetch('/escape/api/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const js = await res.json();
-        if (js.passed) {
-          elapsedB = js.elapsed_ms; tokenB = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
-          gameB.style.display = 'none'; launchC();
-        } else {
-          alert('Failed Light Reactor — try again tomorrow!');
+      // ---------- submit ----------
+      async function submit(puzzleId, answer) {
+        if (!puzzleId) {
+          alert("Internal error: missing puzzle id");
+          return;
         }
-      }
-    }
-
-    // ───────────────────── Pressure Chamber (C) ─────────────────────
-    function mountPressureChamber(cfg) {
-      gameC.innerHTML = '';
-      const wrap = document.createElement('div');
-      wrap.innerHTML = `<h3 style="margin:10px 0;">✶ Pressure Chamber</h3>`;
-      const row = document.createElement('div'); row.className = 'pc-wrap';
-      const valves = [];
-      for (let i = 0; i < cfg.valves; i++) {
-        const v = document.createElement('div'); v.className = 'pc-valve';
-        v.innerHTML = `<div class="pc-gauge"><div class="pc-fill" id="fill${i}"></div></div><button class="btn pc-btn" data-idx="${i}">Vent</button>`;
-        row.appendChild(v);
-        valves.push(v);
-      }
-      wrap.appendChild(row);
-      gameC.appendChild(wrap);
-      gameC.style.display = 'block';
-
-      const actions = [];
-      const start = performance.now();
-      let round = 0;
-      let levels = new Array(cfg.valves).fill(0);
-      let speeds = cfg.rise_speeds[round].slice();
-
-      function paint() {
-        const now = performance.now();
-        const elapsed = now - start;
-        const rStart = round * 1000, rEnd = (round + 1) * 1000;
-        const dt = Math.min(16, Math.max(0, now - (paint._last || now))); paint._last = now;
-        // update pressures
-        for (let i = 0; i < cfg.valves; i++) {
-          levels[i] += speeds[i] * (dt / 1000);
-          levels[i] = Math.max(0, levels[i]);
-          document.getElementById('fill' + i).style.height = Math.min(100, levels[i] * 100) + '%';
-          if (levels[i] >= cfg.overflow_threshold) {
-            // fail visuals; server will also fail
-            for (let j = 0; j < cfg.valves; j++) document.getElementById('fill' + j).style.background = 'linear-gradient(180deg,#ff6b6b,#8b2b2b)';
-            return;
+        try {
+          const res = await fetch("/escape/api/submit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date_key: state.dateKey, puzzle_id: puzzleId, answer })
+          });
+          const data = await res.json();
+          if (data.correct) {
+            solvedCurrent(data.fragment);
+          } else {
+            buzz();
+            alert("Try again.");
           }
+        } catch (e) {
+          console.error(e);
+          alert("Network error. Please try again.");
         }
-        if (elapsed >= rEnd) {
-          round++;
-          if (round >= cfg.rounds) { submit(); return; }
-          // next round
-          levels = new Array(cfg.valves).fill(0);
-          speeds = cfg.rise_speeds[round].slice();
-        }
-        requestAnimationFrame(paint);
       }
-      requestAnimationFrame(paint);
 
-      gameC.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('.pc-btn'); if (!btn) return;
-        const i = parseInt(btn.dataset.idx);
-        actions.push({ valve: i, t: Math.floor(performance.now() - start) });
-        levels[i] = 0;
-        if (cfg.reroll_speed_after_tap) {
-          // purely visual; server reenacts with its RNG
-          speeds[i] = (Math.random() * 0.4 + 0.25);
-        }
-        bip(900, .04);
-      });
+      function solvedCurrent(fragment) {
+        const i = state.current;
+        state.solved[i] = true;
+        ["#stepA", "#stepB", "#stepC"][i] && $(["#stepA", "#stepB", "#stepC"][i]).classList.add("solved");
 
-      async function submit() {
-        const body = { minigame_id: cfg.id, transcript: { actions, elapsed_ms: Math.floor(performance.now() - start) }, client_time_ms: Math.floor(performance.now() - start) };
-        const res = await fetch('/escape/api/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const js = await res.json();
-        if (js.passed) {
-          elapsedC = js.elapsed_ms; tokenC = { minigame_id: cfg.id, fragment: js.fragment, signed_token: js.signed_token, elapsed_ms: js.elapsed_ms };
-          gameC.style.display = 'none'; onFinish();
+        // Simple toast
+        if (fragment) console.log("Fragment:", fragment);
+
+        // Advance or finish
+        const next = state.solved.findIndex((v, idx) => !v && idx > i);
+        const firstUnsolved = state.solved.findIndex((v) => !v);
+        if (firstUnsolved === -1) {
+          finishRun(true);
         } else {
-          alert('Failed Pressure Chamber — try again tomorrow!');
+          setActiveStep(firstUnsolved);
+          launch(firstUnsolved);
         }
       }
-    }
 
-    // Flow control
-    function launchA() {
-      setStep('A');
-      const cfg = ROOM.minigames.find(m => m.id === 'A');
-      mountVaultFrenzy(cfg);
-    }
-    function launchB() {
-      setStep('B');
-      const cfg = ROOM.minigames.find(m => m.id === 'B');
-      mountLightReactor(cfg);
-    }
-    function launchC() {
-      setStep('C');
-      const cfg = ROOM.minigames.find(m => m.id === 'C');
-      mountPressureChamber(cfg);
-    }
-
-    async function onFinish() {
-      const body = { tokens: [tokenA, tokenB, tokenC] };
-      const res = await fetch('/escape/api/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const js = await res.json();
-      if (js.ok) {
-        const total = js.total_time_ms;
-        totalMsEl.textContent = total.toString();
-        const share =
-          `◆◎✶
-      Time: ${fmt(total)}
-      ${ROOM.date} • ${ROOM.theme}
-      theroundup.com/escape`;
-        shareBlock.textContent = share;
-        finish.style.display = 'block';
-        const introAd = document.querySelector('.ads'); if (introAd) introAd.remove();
-      } else {
-        alert('Finish failed');
+      async function finishRun(success) {
+        stopTimer();
+        try {
+          await fetch("/escape/api/finish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              date_key: state.dateKey,
+              started_ms: state.startedMs || Date.now(),
+              success: !!success,
+              meta: { chips_left: 0 } // optionally add extras (routes chosen, hints, etc.)
+            }),
+          });
+        } catch (e) {
+          console.warn("finish error:", e);
+        }
+        // Redirect to leaderboard for today's date
+        location.href = `/escape/leaderboard?date=${encodeURIComponent(state.dateKey)}`;
       }
-    }
 
-    startBtn.addEventListener('click', async () => {
-      startBtn.disabled = true;
-      intro.style.display = 'none';
-      START_TS = Date.now();
-      tickGlobal();
-      setStep('A'); launchA();
-    });
-
-    (async function init() {
-      await fetchToday();
+      // ---------- tiny sfx hooks ----------
+      function clickTick() {
+        // noop for now (soundOn gated); keep for future sfx
+      }
+      function buzz() {
+        if (!("vibrate" in navigator)) return;
+        try { navigator.vibrate(80); } catch (_) { }
+      }
     })();
   </script>
+
 </body>
 
 </html>

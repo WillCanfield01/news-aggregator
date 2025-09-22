@@ -41,27 +41,51 @@ def _row_to_blob(row):
     return row.json_blob or {}
 
 def _blob_to_minis_payload(blob, date_key):
-    # If it’s already minis-shaped, just normalize
+    """
+    Return {date, theme, minigames[]} where each mini has:
+      - slot: "A"/"B"/"C" (tab label)
+      - puzzle_id: canonical id used by /api/submit
+      - id: same as puzzle_id for legacy clients
+      - mechanic: 'sequence_input' | 'grid_input' | ...
+      - prompt: text
+      - ui_spec and ui: identical object so clients can read either key
+    Works for:
+      1) already-minis-shaped blobs, and
+      2) legacy trailroom blobs (extract one mini per room).
+    """
+    # 1) Already minis-shaped → normalize
     if isinstance(blob.get("minigames"), list):
+        norm = []
+        for m in blob["minigames"]:
+            ui = (m.get("ui_spec") or m.get("ui") or {})
+            pid = m.get("puzzle_id") or m.get("id")
+            norm.append({
+                **m,
+                "puzzle_id": pid,
+                "id": pid,
+                "ui_spec": ui,
+                "ui": ui,
+            })
         return {
             "date": blob.get("date") or blob.get("date_key") or date_key,
             "theme": blob.get("theme") or blob.get("title") or "Daily Escape",
-            "minigames": blob["minigames"],
+            "minigames": norm,
         }
 
+    # 2) Legacy trailroom → pick a mini per room
     trail = blob.get("trail") or {}
     rooms = (trail.get("rooms") or [])[:3]
-    minis = []
+    minis: List[Dict[str, Any]] = []
     labels = "ABC"
 
     def _is_mini(p):
-        if not isinstance(p, dict): return False
+        if not isinstance(p, dict):
+            return False
         t = (p.get("archetype") or p.get("type") or "").lower()
         return t == "mini"
 
     for i, rm in enumerate(rooms):
         routes = rm.get("routes") or []
-
         # Prefer a specific route if present
         route = (next((r for r in routes if (r.get("id") or "").lower() == "cautious"), None)
                  or next((r for r in routes if (r.get("id") or "").lower() == "brisk"), None)
@@ -74,29 +98,27 @@ def _blob_to_minis_payload(blob, date_key):
             p = route.get("puzzle")
         elif _is_mini(rm.get("puzzle")):
             p = rm.get("puzzle")
-
         if not _is_mini(p):
             # Try any route that has a mini puzzle
             for r in routes:
                 if _is_mini(r.get("puzzle")):
                     p = r.get("puzzle")
                     break
-
-        # ... inside the for i, rm in enumerate(rooms): loop after p is chosen ...
         if not _is_mini(p):
-            continue  # this room has no mini
+            continue  # no mini in this room
+
+        ui = p.get("ui_spec") or p.get("ui") or {}
+        pid = p.get("id") or f"mini_{i}"
+        slot = labels[i] if i < len(labels) else f"M{i+1}"
 
         minis.append({
-            # for UI tab label (A/B/C)
-            "slot": labels[i] if i < 3 else f"M{i+1}",
-            # canonical id used by /api/submit server-side verification
-            "puzzle_id": p.get("id"),
-            # keep a simple id for legacy UIs (set to puzzle_id)
-            "id": p.get("id"),
-            "mechanic": (p.get("mechanic") or "").lower(),   # e.g. "sequence_input" | "grid_input"
+            "slot": slot,
+            "puzzle_id": pid,
+            "id": pid,
+            "mechanic": (p.get("mechanic") or "").lower(),
             "prompt": p.get("prompt") or "",
-            "ui_spec": p.get("ui_spec") or {},
-            "answer_format": p.get("answer_format") or {},
+            "ui_spec": ui,
+            "ui": ui,
         })
 
     return {
@@ -110,9 +132,11 @@ def _has_any_puzzle(room_json: Dict[str, Any]) -> bool:
         return True
     trail = room_json.get("trail") or {}
     for rm in (trail.get("rooms") or []):
+        # room-level
+        if isinstance(rm.get("puzzle"), dict) and rm["puzzle"]:
+            return True
         for rt in (rm.get("routes") or []):
-            p = (rt.get("puzzle") or {})
-            if p:
+            if isinstance(rt, dict) and (rt.get("puzzle") or {}):
                 return True
     return False
 
@@ -134,6 +158,9 @@ def _strip_solutions(room_json: Dict[str, Any]) -> Dict[str, Any]:
     # New trail shape
     trail = out.get("trail") or {}
     for rm in (trail.get("rooms") or []):
+        # room-level
+        if isinstance(rm.get("puzzle"), dict):
+            rm["puzzle"].pop("solution", None)
         for rt in (rm.get("routes") or []):
             if isinstance(rt, dict):
                 pz = rt.get("puzzle")
@@ -163,6 +190,14 @@ def _fragment_for_submission(room_json: Dict[str, Any], puzzle_id: str, submitte
     trail = room_json.get("trail") or {}
     for rm in (trail.get("rooms") or []):
         rule = (rm.get("fragment_rule") or "FIRST2")
+        # room-level mini
+        p_room = rm.get("puzzle") or {}
+        if p_room.get("id") == puzzle_id:
+            try:
+                return apply_fragment_rule(submitted_answer, rule)
+            except Exception:
+                return None
+        # route-level
         for rt in (rm.get("routes") or []):
             pz = (rt.get("puzzle") or {})
             if pz.get("id") == puzzle_id:
@@ -303,11 +338,12 @@ def init_routes(bp: Blueprint):
         blob = _row_to_blob(room)
 
         if fmt == "minis":
-            return jsonify(_blob_to_minis_payload(blob, room.date_key))
+            payload = _blob_to_minis_payload(blob, room.date_key)
+            if not payload["minigames"]:
+                current_app.logger.warning("[escape] minis view built 0 games for %s", room.date_key)
+            return jsonify(payload)
 
         payload = _strip_solutions(blob)
-        if not payload["minigames"]:
-            current_app.logger.warning("[escape] minis view built 0 games for %s", room.date_key)
 
         if not _has_any_puzzle(payload):
             current_app.logger.warning("[escape] api_today saw no puzzles/routes; attempting offline regen")
