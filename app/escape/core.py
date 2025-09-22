@@ -2260,6 +2260,7 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     seed = daily_seed(date_key, server_secret + salt)   # ← was server_secret only
     rng = rng_from_seed(seed)
     room = _offline_trail(date_key, rng)
+    room = attach_daily_minis(room)
     room["source"] = "offline"
     return room
 

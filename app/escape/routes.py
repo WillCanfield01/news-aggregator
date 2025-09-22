@@ -19,6 +19,7 @@ from .core import (
     verify_puzzle,
     verify_meta_final,
     get_today_key,
+    attach_daily_minis,
 )
 
 # Optional: fragment rule import (fallback if core lacks it)
@@ -337,10 +338,15 @@ def init_routes(bp: Blueprint):
 
         blob = _row_to_blob(room)
 
+        # Ensure new-style minis exist (repairs older rows that lack them)
+        if not (blob.get("minigames") or []):
+            try:
+                blob = attach_daily_minis(blob)
+            except Exception as e:
+                current_app.logger.warning(f"[escape] attach_daily_minis failed: {e}")
+
         if fmt == "minis":
             payload = _blob_to_minis_payload(blob, room.date_key)
-            if not payload["minigames"]:
-                current_app.logger.warning("[escape] minis view built 0 games for %s", room.date_key)
             return jsonify(payload)
 
         payload = _strip_solutions(blob)
