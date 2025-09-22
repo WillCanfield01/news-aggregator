@@ -742,6 +742,140 @@ def gen_translate_with_legend(rng: random.Random, pid: str, blacklist: set, them
         mechanic="sequence_input",
         ui_spec={"sequence": SEQ_TOKENS[:]})
 
+# ----- New daily minis (Vault Frenzy, Phantom Doors, Pressure Chamber) -----
+
+def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
+    """
+    Grid of nodes that flash; some flashes are decoys (wrong color, double-blink, delayed).
+    Client replays flashes (seeded); player taps correct nodes in real time.
+    Server stores the canonical correct sequence as "r-c" tokens.
+    """
+    rows, cols = rng.choice([(3,4), (4,4), (4,5)])
+    length = rng.randrange(10, 16)                     # number of flashes
+    decoy_rate = rng.uniform(0.25, 0.40)               # ~1/3 decoys
+    tempo_ms = rng.randrange(420, 600)
+    # Build canonical (server) list of true targets
+    true_events = []
+    for _ in range(length):
+        r, c = rng.randrange(rows), rng.randrange(cols)
+        true_events.append(f"{r}-{c}")
+    answer = ",".join(true_events)
+
+    return {
+        "id": pid,
+        "type": "mini",
+        "archetype": "mini",
+        "mechanic": "vault_frenzy",                    # <- used by client router
+        "prompt": (
+            "A wall of vault nodes pulses. Pop only the *true* flashes; "
+            "decoys will mislead (wrong color, double-blink, delayed). Chain pops feel great—go fast!"
+        ),
+        "answer_format": {"pattern": r"^(\d-\d)(,(\d-\d))*$"},
+        "solution": {"answer": answer},
+        "hints": [f"Grid {rows}×{cols}. Tap when the *true* glow appears.", "Decoys are off-color or double-blink."],
+        "decoys": [],
+        "paraphrases": [],
+        "ui_spec": {
+            "kind": "vault_frenzy",
+            "grid": {"rows": rows, "cols": cols},
+            "seed": rng.randrange(2**31),
+            "tempo_ms": tempo_ms,
+            "length": length,
+            "decoy_rate": round(decoy_rate, 2),
+            # visual rules only; client never receives 'solution'
+            "rules": {"double_blink_prob": 0.15, "delayed_glow_prob": 0.15}
+        }
+    }
+
+def gen_mini_phantom_doors(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
+    """
+    Doors show glyphs; a short glyph sequence flashes above. Doors reshuffle each round;
+    some become phantoms (fade if tapped). Answer is the glyph code sequence, not positions.
+    """
+    # 8 simple glyph ids; theme just changes symbols/skin client-side
+    glyphs = ["◇","◆","○","●","△","▲","□","■"]
+    seq_len = rng.randrange(5, 8)
+    sequence = [rng.choice(glyphs) for _ in range(seq_len)]
+    answer = ",".join(sequence)
+
+    return {
+        "id": pid,
+        "type": "mini",
+        "archetype": "mini",
+        "mechanic": "phantom_doors",
+        "prompt": (
+            "Glyphs flash above the corridor. Open doors in that order. "
+            "After each pick, doors reshuffle; some become *phantoms* that fade when tapped."
+        ),
+        "answer_format": {"pattern": r"^.+(,.+)*$"},
+        "solution": {"answer": answer},
+        "hints": ["Keep your eyes on the symbols, not positions.", "Phantoms vanish on tap—don’t panic."],
+        "decoys": [],
+        "paraphrases": [],
+        "ui_spec": {
+            "kind": "phantom_doors",
+            "seed": rng.randrange(2**31),
+            "glyphs": glyphs,
+            "rounds": seq_len,
+            "phantom_rate": 0.25,               # ~25% of doors per round are phantoms
+            "flash_ms": 480,
+            "reshuffle": True,
+        }
+    }
+
+def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
+    """
+    3–5 valves with independent rising gauges; target order is pre-computed (server),
+    but client renders continuous motion so it feels like juggling.
+    """
+    n = rng.randrange(3, 6)
+    labels = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[:n]
+    # Each valve’s rise speed and reset time
+    valves = []
+    for i in range(n):
+        base = rng.uniform(0.16, 0.32)                # units per second
+        variance = rng.uniform(0.05, 0.12)
+        reset_ms = rng.randrange(600, 1200)
+        phase = rng.uniform(0, 1)
+        valves.append({"label": labels[i], "base": base, "var": variance, "reset_ms": reset_ms, "phase": round(phase,2)})
+
+    # Pre-compute a safe-but-tight order to release n*2 times
+    order = [rng.choice(labels) for _ in range(n * 2)]
+    answer = ",".join(order)
+
+    return {
+        "id": pid,
+        "type": "mini",
+        "archetype": "mini",
+        "mechanic": "pressure_chamber",
+        "prompt": (
+            "Pressure rises on each valve. Tap valves in the right order just before they max out. "
+            "They reset at different speeds—keep them all under control."
+        ),
+        "answer_format": {"pattern": r"^[A-Z](,[A-Z])+$"},
+        "solution": {"answer": answer},
+        "hints": [f"{n} valves; watch which climbs fastest.", "A tapped valve drops then accelerates again."],
+        "decoys": [],
+        "paraphrases": [],
+        "ui_spec": {
+            "kind": "pressure_chamber",
+            "seed": rng.randrange(2**31),
+            "valves": valves,
+            "threshold": 1.0,
+            "tempo_ms": 90,             # frame tick for animation
+            "target_count": len(order)   # client stops after this many correct taps
+        }
+    }
+
+def attach_daily_minis(room: Dict[str, Any], rng: random.Random, theme: str):
+    """Create today’s three minis and attach as top-level `minigames` so /api/today?format=minis works."""
+    minis = [
+        gen_mini_vault_frenzy(rng, "vault_frenzy", theme),
+        gen_mini_phantom_doors(rng, "phantom_doors", theme),
+        gen_mini_pressure_chamber(rng, "pressure_chamber", theme),
+    ]
+    room["minigames"] = minis
+
 # ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
 def gen_vault_frenzy(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
     """
