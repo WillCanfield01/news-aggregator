@@ -10,6 +10,8 @@ import json
 import datetime as dt
 from typing import Any, Dict, List, Optional, Tuple
 
+import os, hashlib
+from random import Random
 from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
 from app.extensions import db
@@ -19,8 +21,16 @@ from .core import (
     verify_puzzle,
     verify_meta_final,
     get_today_key,
-    attach_daily_minis,
+    attach_daily_minis,   # <-- we will call this correctly
 )
+
+def _rng_for_date(date_key: str) -> Random:
+    """Deterministic RNG per date using server secret (+ optional salt)."""
+    secret = os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me")
+    salt = os.getenv("ESCAPE_REGEN_SALT", "")
+    h = hashlib.sha256(f"{date_key}|{secret}|{salt}".encode()).digest()
+    seed = int.from_bytes(h[:4], "little")
+    return Random(seed)
 
 # Optional: fragment rule import (fallback if core lacks it)
 try:
@@ -335,19 +345,23 @@ def init_routes(bp: Blueprint):
             room = existing or ensure_daily_room(date_q)
         else:
             room = ensure_daily_room()
-
         blob = _row_to_blob(room)
 
-        # Ensure new-style minis exist (repairs older rows that lack them)
+        # Ensure new-style minis exist; attach if the blob predates minis.
         if not (blob.get("minigames") or []):
             try:
-                blob = attach_daily_minis(blob)
+                rng = _rng_for_date(room.date_key)
+                theme = blob.get("title") or blob.get("theme") or "Daily Escape"
+                attach_daily_minis(blob, rng, theme)   # <-- correct call (mutates blob in place)
             except Exception as e:
                 current_app.logger.warning(f"[escape] attach_daily_minis failed: {e}")
 
         if fmt == "minis":
             payload = _blob_to_minis_payload(blob, room.date_key)
+            if not payload.get("minigames"):
+                current_app.logger.warning("[escape] minis view built 0 games for %s", room.date_key)
             return jsonify(payload)
+
 
         payload = _strip_solutions(blob)
 

@@ -2260,9 +2260,21 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     seed = daily_seed(date_key, server_secret + salt)   # ← was server_secret only
     rng = rng_from_seed(seed)
     room = _offline_trail(date_key, rng)
-    room = attach_daily_minis(room)
-    room["source"] = "offline"
+    room = validate_trailroom(room)
+
+    # Attach the three arcade minis so the minis API always has content
+    try:
+        theme = room.get("title") or room.get("theme") or "Daily Escape"
+        attach_daily_minis(room, rng, theme)  # <-- correct arguments
+    except Exception as e:
+        # Don’t fail the whole build if minis attach ever errors
+        try:
+            current_app.logger.warning(f"[escape] attach_daily_minis error: {e}")
+        except Exception:
+            pass
+
     return room
+
 
 # ───────────────────────── Primary generation ─────────────────────────
 
