@@ -449,19 +449,22 @@
         const ui = mini.ui || {};
         const g = ui.grid || { rows: 3, cols: 4 };
         const tempo = ui.tempo_ms || 520;
-        const length = ui.length || 12;
-        const decoyRate = ui.decoy_rate ?? 0.3;
         const rules = ui.rules || {};
         const rng = m32(ui.seed || 1);
 
-        // --- help text
+        // Server now tells us EXACT counts; fall back gracefully if absent
+        const length = ui.length || 8;
+        const trueCount = ui.true_count ?? 6;
+        const decoyCount = ui.decoy_count ?? Math.max(0, length - trueCount);
+
+        // --- help
         const help = document.createElement("div");
         help.className = "muted";
         help.style.margin = "6px 0 12px";
         help.innerHTML =
           "Tap cells only while they glow <b>solid (green outline)</b>. " +
-          "Red outline = decoy and won't count. Use ▶ Play / ⟲ Replay. " +
-          "Go becomes active when you’ve tapped all true flashes.";
+          "Red outline = decoy and won't count. ▶ Play shows the exact pattern; ⟲ Replay repeats it. " +
+          "Go activates when you’ve tapped all true flashes.";
         host.appendChild(help);
 
         // --- grid
@@ -474,11 +477,10 @@
             const cell = document.createElement("div");
             cell.className = "vf-cell";
             cell.dataset.rc = `${r}-${c}`;
-            // Accept only while "live" AND good === "1"
             cell.onclick = () => {
               if (cell.dataset.live === "1" && cell.dataset.good === "1") {
                 picks.push(cell.dataset.rc);
-                cell.dataset.live = "0";       // prevent double taps on same flash
+                cell.dataset.live = "0"; // avoid double count on same flash
                 pulse(cell);
                 updateProgress();
               }
@@ -491,12 +493,12 @@
         // --- controls
         const ctrls = document.createElement("div");
         ctrls.style.display = "flex"; ctrls.style.gap = "8px"; ctrls.style.marginTop = "10px";
-        const playBtn = makeBtn("▶ Play", startPlayback);
-        const replayBtn = makeBtn("⟲ Replay", startPlayback);
-        const clearBtn = makeBtn("Clear", () => { picks = []; updateProgress(); });
-        const backBtn = makeBtn("⌫", () => { picks.pop(); updateProgress(); });
-        const goBtn = makeBtn("Go", () => submitAnswer(mini, picks.join(",")));
-        goBtn.disabled = true; // until complete
+        const playBtn = btn("▶ Play", startPlayback);
+        const replayBtn = btn("⟲ Replay", startPlayback);
+        const clearBtn = btn("Clear", () => { picks = []; updateProgress(); });
+        const backBtn = btn("⌫", () => { picks.pop(); updateProgress(); });
+        const goBtn = btn("Go", () => submitAnswer(mini, picks.join(",")));
+        goBtn.disabled = true;
         ctrls.append(playBtn, replayBtn, clearBtn, backBtn, goBtn);
         host.appendChild(ctrls);
 
@@ -504,10 +506,10 @@
         prog.className = "muted"; prog.style.marginTop = "4px";
         host.appendChild(prog);
 
-        function makeBtn(label, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = fn; return b; }
+        function btn(t, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = t; b.onclick = fn; return b; }
         function pulse(el) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 120); }
 
-        // Mark a cell as live/true/decoy for the current flash window
+        // Helpers to mark a cell "live" (and whether it's a true or decoy) for a specific flash window
         function setLive(cell, on, isDecoy, stamp) {
           if (on) {
             cell.dataset.live = "1";
@@ -515,25 +517,29 @@
             cell.dataset.stamp = String(stamp);
             cell.style.outline = isDecoy ? "2px solid #ff6b6b" : "2px solid #6bf2a9";
             cell.style.background = isDecoy ? "#2a1e27" : "#1e2a54";
-          } else {
-            // only clear if we’re closing the same window
-            if (cell.dataset.stamp === String(stamp)) {
-              cell.dataset.live = "0"; cell.dataset.good = "0"; cell.dataset.stamp = "";
-              cell.style.outline = ""; cell.style.background = "";
-            }
+          } else if (cell.dataset.stamp === String(stamp)) {
+            cell.dataset.live = "0"; cell.dataset.good = "0"; cell.dataset.stamp = "";
+            cell.style.outline = ""; cell.style.background = "";
           }
         }
 
-        // Precompute today’s events (seeded) so Play/Replays are identical
-        const events = [];
-        for (let i = 0; i < length; i++) {
-          const r = Math.floor(rng() * g.rows), c = Math.floor(rng() * g.cols);
-          const isDecoy = rng() < decoyRate;
-          const dbl = rng() < (rules.double_blink_prob || 0.15);
-          const delay = rng() < (rules.delayed_glow_prob || 0.15);
-          events.push({ r, c, isDecoy, dbl, delay });
+        // Build the SAME event stream the server used:
+        // 1) shuffle a mask of T/D with the seeded RNG
+        // 2) for each tag, draw coords and add small visual quirks
+        const mask = Array(trueCount).fill("T").concat(Array(decoyCount).fill("D"));
+        for (let i = mask.length - 1; i > 0; i--) {
+          const j = Math.floor(rng() * (i + 1));[mask[i], mask[j]] = [mask[j], mask[i]];
         }
-        const trueCount = events.filter(e => !e.isDecoy).length;
+        const events = mask.map(tag => {
+          const r = Math.floor(rng() * g.rows), c = Math.floor(rng() * g.cols);
+          return {
+            r, c,
+            isDecoy: tag === "D",
+            dbl: rng() < (rules.double_blink_prob ?? 0.12),
+            delay: rng() < (rules.delayed_glow_prob ?? 0.12),
+          };
+        });
+
         let picks = [];
         updateProgress();
 
@@ -542,19 +548,18 @@
           goBtn.disabled = (picks.length !== trueCount);
         }
 
-        // Replayable playback; only taps during the live window count
+        // Replayable playback; auto-start so it’s obvious
         function startPlayback() {
-          // clear any live markers
           cells.forEach(c => setLive(c, false, false, -1));
           let t = 0, stamp = 0;
-          const onMs = Math.floor(tempo * 0.55);
+          const onMs = Math.floor(tempo * 0.6);
 
           events.forEach(ev => {
             const cell = cells[ev.r * g.cols + ev.c];
             const show = () => {
-              const myStamp = ++stamp;
-              setLive(cell, true, ev.isDecoy, myStamp);
-              setTimeout(() => setLive(cell, false, ev.isDecoy, myStamp), onMs);
+              const s = ++stamp;
+              setLive(cell, true, ev.isDecoy, s);
+              setTimeout(() => setLive(cell, false, ev.isDecoy, s), onMs);
             };
             const lead = ev.delay ? Math.floor(tempo * 0.25) : 0;
             setTimeout(() => {
@@ -564,6 +569,9 @@
             t += tempo;
           });
         }
+
+        // Start automatically once so players see what to do
+        setTimeout(startPlayback, 150);
       }
 
       function mountPhantomDoors(host, mini) {

@@ -751,14 +751,22 @@ def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict
     Server stores the canonical correct sequence as "r-c" tokens.
     """
     rows, cols = rng.choice([(3,4), (4,4), (4,5)])
-    length = rng.randrange(10, 16)                     # number of flashes
-    decoy_rate = rng.uniform(0.25, 0.40)               # ~1/3 decoys
+    # Fixed mix: 6 true + 2 decoys (requested)
+    true_count  = 6
+    decoy_count = 2
+    length = true_count + decoy_count
     tempo_ms = rng.randrange(420, 600)
-    # Build canonical (server) list of true targets
+
+    # We’ll shuffle a mask of T/D and then pick coordinates; only T go into the answer
+    mask = ["T"] * true_count + ["D"] * decoy_count
+    rng.shuffle(mask)
+
     true_events = []
-    for _ in range(length):
+    for tag in mask:
         r, c = rng.randrange(rows), rng.randrange(cols)
-        true_events.append(f"{r}-{c}")
+        if tag == "T":
+            true_events.append(f"{r}-{c}")
+
     answer = ",".join(true_events)
 
     return {
@@ -772,18 +780,16 @@ def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict
         ),
         "answer_format": {"pattern": r"^(\d-\d)(,(\d-\d))*$"},
         "solution": {"answer": answer},
-        "hints": [f"Grid {rows}×{cols}. Tap when the *true* glow appears.", "Decoys are off-color or double-blink."],
-        "decoys": [],
-        "paraphrases": [],
         "ui_spec": {
             "kind": "vault_frenzy",
             "grid": {"rows": rows, "cols": cols},
             "seed": rng.randrange(2**31),
             "tempo_ms": tempo_ms,
-            "length": length,
-            "decoy_rate": round(decoy_rate, 2),
-            # visual rules only; client never receives 'solution'
-            "rules": {"double_blink_prob": 0.15, "delayed_glow_prob": 0.15}
+            "length": length,             # 8 total flashes
+            "true_count": true_count,     # NEW
+            "decoy_count": decoy_count,   # NEW
+            # keep some visual quirks, they don’t affect correctness
+            "rules": {"double_blink_prob": 0.12, "delayed_glow_prob": 0.12}
         }
     }
 
