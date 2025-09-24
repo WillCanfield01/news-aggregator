@@ -415,8 +415,14 @@ def init_routes(bp: Blueprint):
             return ",".join(rc)
 
         answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
-        ok = verify_puzzle(date_key, puzzle_id, answer)
-        return jsonify({"ok": ok})
+        try:
+            ok = verify_puzzle(date_key, puzzle_id, answer)
+            return jsonify({"ok": ok})
+        except Exception as e:
+            current_app.logger.exception("submit verify failed: %s", e)
+            # still respond so the UI doesn't hang
+            return jsonify({"ok": False, "error": "verify_failed"}), 200
+
 
     # API: finish a run (leaderboards)
     @bp.route("/api/finish", methods=["POST"])

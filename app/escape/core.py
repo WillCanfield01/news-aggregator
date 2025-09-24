@@ -164,9 +164,24 @@ def get_today_key(tz: Optional[str] = None) -> str:
 def normalize_answer(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
 
-def _as_dict_list(seq) -> List[Dict[str, Any]]:
-    """Filter any sequence down to dicts only."""
-    return [x for x in (seq or []) if isinstance(x, dict)]
+def _as_dict_list(x):
+    if not x:
+        return []
+    if isinstance(x, (str, bytes)):
+        # room trails shouldn’t be serialized here; ignore bad shapes
+        return []
+    if isinstance(x, list):
+        out = []
+        for y in x:
+            if isinstance(y, dict):
+                out.append(y)
+            elif hasattr(y, "to_json"):
+                try:
+                    out.append(y.to_json())
+                except Exception:
+                    pass
+        return out
+    return []
 
 def _shingles(text: str, k: int = 5) -> set:
     t = re.sub(r"\s+", " ", text.lower()).strip()
@@ -2874,8 +2889,18 @@ def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool
         return s == e
     return normalize_answer(s) == normalize_answer(e)
 
+
 def _iter_all_puzzles(room_json: Dict[str, Any]):
-    # 1) legacy trail/route puzzles
+    # Accept rows that are JSON strings or ORM objects
+    if isinstance(room_json, (str, bytes)):
+        try:
+            room_json = json.loads(room_json)
+        except Exception:
+            room_json = {}
+    elif not isinstance(room_json, dict):
+        # last-resort: try to use dictionary view of the object
+        room_json = dict(getattr(room_json, "__dict__", {})) or {}
+    # (rest of the function unchanged)
     for rm in _as_dict_list(room_json.get("trail", {}).get("rooms")):
         for rt in _as_dict_list(rm.get("routes")):
             p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
