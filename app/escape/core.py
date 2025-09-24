@@ -782,41 +782,61 @@ def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str,
         },
     }
 
-def gen_mini_phantom_doors(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
-    """
-    Doors show glyphs; a short glyph sequence flashes above. Doors reshuffle each round;
-    some become phantoms (fade if tapped). Answer is the glyph code sequence, not positions.
-    """
-    # 8 simple glyph ids; theme just changes symbols/skin client-side
-    glyphs = ["◇","◆","○","●","△","▲","□","■"]
-    seq_len = rng.randrange(5, 8)
-    sequence = [rng.choice(glyphs) for _ in range(seq_len)]
-    answer = ",".join(sequence)
+def gen_mini_phantom_doors(rng: random.Random, pid: str, theme: str = "") -> Puzzle:
+    # 6 unique glyphs, 3-round sequence with reshuffles and phantoms
+    glyphs = ["◆","◇","◼︎","△","✦","✪","✷","✚","✖︎","✿"]
+    rng.shuffle(glyphs)
+    symbols = glyphs[:6]
 
-    return {
-        "id": pid,
-        "type": "mini",
-        "archetype": "mini",
-        "mechanic": "phantom_doors",
-        "prompt": (
-            "Glyphs flash above the corridor. Open doors in that order. "
-            "After each pick, doors reshuffle; some become *phantoms* that fade when tapped."
-        ),
-        "answer_format": {"pattern": r"^.+(,.+)*$"},
-        "solution": {"answer": answer},
-        "hints": ["Keep your eyes on the symbols, not positions.", "Phantoms vanish on tap—don’t panic."],
-        "decoys": [],
-        "paraphrases": [],
-        "ui_spec": {
+    rounds = 3
+    base_seq = [rng.randrange(len(symbols)) for _ in range(rounds + 2)]  # 5 taps total
+
+    # build per-round shuffle maps and phantom positions
+    shuffles = []
+    phantoms = []
+    for _ in range(rounds):
+        perm = list(range(len(symbols)))
+        rng.shuffle(perm)
+        shuffles.append(perm)
+        # 1 phantom per round (index that's shown but fails)
+        phantoms.append(rng.randrange(len(symbols)))
+
+    # server solution is the symbol indices through each shuffle
+    answer_indices = []
+    for i, idx in enumerate(base_seq[:rounds]):
+        # after each shuffle apply perm mapping
+        perm = shuffles[i % rounds]
+        answer_indices.append(perm[idx])
+
+    answer = ",".join(str(i) for i in answer_indices)
+
+    prompt = (
+        f"{theme or 'Ghost Gallery'}: Memorize the symbol sequence. "
+        "Doors reshuffle each round. Avoid phantom doors (they fade)!"
+    )
+
+    return Puzzle(
+        id=pid,
+        archetype="mini",
+        mechanic="phantom_doors",
+        prompt=prompt,
+        answer_format={"pattern": r"^\d+(?:,\d+){2,4}$"},
+        solution={"answer": answer},
+        hints=[
+            "Look at the symbols above before each round.",
+            "Phantoms fade if tapped—skip them.",
+        ],
+        decoys=[],
+        paraphrases=[],
+        ui_spec={
             "kind": "phantom_doors",
-            "seed": rng.randrange(2**31),
-            "glyphs": glyphs,
-            "rounds": seq_len,
-            "phantom_rate": 0.25,               # ~25% of doors per round are phantoms
-            "flash_ms": 480,
-            "reshuffle": True,
-        }
-    }
+            "symbols": symbols,          # for drawing glyphs
+            "rounds": rounds,
+            "shuffles": shuffles,        # array of permutations per round
+            "phantoms": phantoms,        # one phantom index per round
+            "tempo_ms": 600
+        },
+    )
 
 def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
     """
@@ -862,8 +882,8 @@ def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> 
         }
     }
 
+# (This is correct wiring)
 def attach_daily_minis(room: Dict[str, Any], rng: random.Random, theme: str):
-    """Create today’s three minis and attach as top-level `minigames` so /api/today?format=minis works."""
     minis = [
         gen_mini_vault_frenzy(rng, "vault_frenzy", theme),
         gen_mini_phantom_doors(rng, "phantom_doors", theme),
@@ -872,39 +892,50 @@ def attach_daily_minis(room: Dict[str, Any], rng: random.Random, theme: str):
     room["minigames"] = minis
 
 # ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
-def gen_vault_frenzy(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    """
-    Vault Frenzy — “pop-lock windows”
-    Deterministic sequence mini: players reproduce the action series using control chips.
-    Server verifies exact token sequence (comma-separated).
-    """
-    actions = ["tap", "tap", "hold", "left", "right", "tap", "up", "down"]
-    L = rng.randint(8, 12)
-    seq = [rng.choice(actions) for _ in range(L)]
+# AFTER (grid-flash version that your UI expects)
+def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Puzzle:
+    rows, cols = 4, 4
+    total = rows * cols
+
+    # daily: 6 true flashes + 2 decoys (you asked to tighten this)
+    true_count = 6
+    decoy_count = 2
+
+    # pick unique indices
+    all_idx = list(range(total))
+    rng.shuffle(all_idx)
+    true_indices = sorted(all_idx[:true_count])
+    decoy_indices = sorted(all_idx[true_count:true_count + decoy_count])
+
     prompt = (
-        f"{theme or 'The Salt Vault'}: Lock pins blink in waves. "
-        "Hit the locks as they pop. Use the controls below; reproduce the full action series."
+        f"{theme or 'The Salt Vault'}: Watch the vault nodes. "
+        "Tap the ones that flash green, in order. Ignore the decoys."
     )
+
     return Puzzle(
         id=pid,
         archetype="mini",
-        mechanic="sequence_input",
+        mechanic="vault_frenzy",
         prompt=prompt,
-        answer_format={"pattern": r"^(?:[A-Za-z_]+(?:,\\s*)?){5,}$"},
-        solution={"answer": ",".join(seq)},
+        # accept comma-separated indices like "0,5,9,3, ..."
+        answer_format={"pattern": r"^\d+(?:,\d+){5}$"},  # exactly 6 indices
+        solution={"answer": ",".join(str(i) for i in true_indices)},
         hints=[
-            "Watch the glow rhythm; it loops.",
-            f"The series is {L} steps long.",
+            "You will see 6 true flashes. Decoys may double-blink.",
+            "Order matters—tap in the same order they turned green.",
         ],
-        decoys=["tap,hold,tap,left,right", "tap,tap,hold,right,left,up,down"],
-        paraphrases=[
-            "The lock pops in a fixed pattern—repeat it with the chips.",
-            "Recreate the popping sequence using the control tokens."
-        ],
+        decoys=[],
+        paraphrases=[],
         ui_spec={
-            "sequence": ["tap", "hold", "left", "right", "up", "down"],
-            "cue_set": {"style": "glow_windows", "tempo_ms": 550}
-        }
+            "kind": "vault_frenzy",
+            "grid_rows": rows,
+            "grid_cols": cols,
+            "tempo_ms": 550,
+            # sent so the client can replay the pattern; verification still uses server solution
+            "true_indices": true_indices,
+            "decoy_indices": decoy_indices,
+            "rules": {"double_blink_decoys": True}
+        },
     )
 
 def _letter_filler(rng: random.Random, avoid: str = "") -> str:

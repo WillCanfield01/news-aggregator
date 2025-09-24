@@ -387,15 +387,51 @@ def init_routes(bp: Blueprint):
     def api_submit():
         data = _json_body_or_400()
         date_key = data.get("date_key")
-        puzzle_id = data.get("puzzle_id")
-        answer = data.get("answer")
-        if not date_key or not puzzle_id or answer is None:
-            return _bad("Missing required fields: date_key, puzzle_id, answer")
+    puzzle_id = data.get("puzzle_id")
+    answer_raw = (data.get("answer") or "").strip()
 
-        room = _get_or_404(date_key)
-        ok = verify_puzzle(room.json_blob, puzzle_id, answer)
-        frag = _fragment_for_submission(room.json_blob, puzzle_id, answer) if ok else None
-        return jsonify({"correct": bool(ok), "fragment": frag})
+    # Canonicalize for minis, especially Vault Frenzy
+    room = _ensure_room(date_key)  # you already have this helper in routes
+    blob = _row_to_blob(room)
+
+    def _find_mini(pid):
+        for m in (blob.get("minigames") or []):
+            if (m.get("puzzle_id") or m.get("id")) == pid:
+                return m
+        return None
+
+    mini = _find_mini(puzzle_id)
+    ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
+
+    def _canon_for_vault_frenzy(ans: str) -> str:
+        # Accept either rc ("r-c") or linear indices ("7, 13, ...") and normalize to "r-c"
+        tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
+        if not tokens:
+            return ""
+        # If all digits, treat as indices
+        if all(t.isdigit() for t in tokens):
+            cols = ui.get("grid", {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
+            rc = []
+            for i in map(int, tokens):
+                r = i // cols
+                c = i % cols
+                rc.append(f"{r}-{c}")
+            return ",".join(rc)
+        # Otherwise already "r-c" – normalize spacing
+        rc = []
+        for t in tokens:
+            if "-" in t:
+                a,b = t.split("-",1)
+                rc.append(f"{int(a)}-{int(b)}")
+        return ",".join(rc)
+
+    answer = answer_raw
+    if (mini or {}).get("mechanic") == "vault_frenzy":
+        answer = _canon_for_vault_frenzy(answer_raw)
+
+    ok = verify_puzzle(date_key, puzzle_id, answer)
+    return jsonify({"ok": ok})
+
 
     # API: finish a run (leaderboards)
     @bp.route("/api/finish", methods=["POST"])
