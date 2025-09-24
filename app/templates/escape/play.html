@@ -673,8 +673,9 @@
             d.onclick = () => {
               if (d.dataset.phantom === "1") { d.style.opacity = 0.33; return; }
               picks.push(d.dataset.glyph);
-              if (picks.length === seq.length) {
-                submitAnswer(mini, picks.join(","));
+              if (picks.length === trueSeq.length) {
+                goBtn.disabled = false;
+                submitAnswer(mini, picks.join(",")); // turn on auto-submit
               } else {
                 reshuffle();
               }

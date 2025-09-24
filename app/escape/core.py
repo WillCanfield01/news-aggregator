@@ -744,53 +744,42 @@ def gen_translate_with_legend(rng: random.Random, pid: str, blacklist: set, them
 
 # ----- New daily minis (Vault Frenzy, Phantom Doors, Pressure Chamber) -----
 
-def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
-    """
-    Grid of nodes that flash; some flashes are decoys (wrong color, double-blink, delayed).
-    Client replays flashes (seeded); player taps correct nodes in real time.
-    Server stores the canonical correct sequence as "r-c" tokens.
-    """
-    rows, cols = rng.choice([(3,4), (4,4), (4,5)])
-    # Fixed mix: 6 true + 2 decoys (requested)
-    true_count  = 6
-    decoy_count = 2
-    length = true_count + decoy_count
-    tempo_ms = rng.randrange(420, 600)
+def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str,
+                          grid: int = 4, true_count: int = 6, decoys: int = 2):
+    total = grid * grid
+    true_idx = rng.sample(range(total), k=true_count)
+    # choose decoys that are not true targets
+    pool = [i for i in range(total) if i not in true_idx]
+    decoy_idx = rng.sample(pool, k=decoys) if decoys > 0 else []
 
-    # We’ll shuffle a mask of T/D and then pick coordinates; only T go into the answer
-    mask = ["T"] * true_count + ["D"] * decoy_count
-    rng.shuffle(mask)
+    # server-side canonical answer = the true indices in the exact play order
+    answer = ",".join(str(i) for i in true_idx)
 
-    true_events = []
-    for tag in mask:
-        r, c = rng.randrange(rows), rng.randrange(cols)
-        if tag == "T":
-            true_events.append(f"{r}-{c}")
-
-    answer = ",".join(true_events)
+    prompt = (
+        "A wall of vault nodes pulses. Pop only the *true* flashes; decoys will mislead "
+        "(wrong color, double-blink, delayed). Chain pops feel great—go fast!\n\n"
+        "Watch the pattern once, then tap back the true flashes in order. "
+        "True flashes highlight green; decoys are red and ignored. Press Play to see it again."
+    )
 
     return {
         "id": pid,
         "type": "mini",
         "archetype": "mini",
-        "mechanic": "vault_frenzy",                    # <- used by client router
-        "prompt": (
-            "A wall of vault nodes pulses. Pop only the *true* flashes; "
-            "decoys will mislead (wrong color, double-blink, delayed). Chain pops feel great—go fast!"
-        ),
-        "answer_format": {"pattern": r"^(\d-\d)(,(\d-\d))*$"},
+        "mechanic": "vault_frenzy",
+        "prompt": prompt,
         "solution": {"answer": answer},
+        "answer_format": {"pattern": r"^[0-9,\s]+$"},
         "ui_spec": {
             "kind": "vault_frenzy",
-            "grid": {"rows": rows, "cols": cols},
-            "seed": rng.randrange(2**31),
-            "tempo_ms": tempo_ms,
-            "length": length,             # 8 total flashes
-            "true_count": true_count,     # NEW
-            "decoy_count": decoy_count,   # NEW
-            # keep some visual quirks, they don’t affect correctness
-            "rules": {"double_blink_prob": 0.12, "delayed_glow_prob": 0.12}
-        }
+            "grid_cols": grid,
+            "grid_rows": grid,
+            "true_indices": true_idx,     # client replays & collects taps here
+            "decoy_indices": decoy_idx,
+            "intro_ms": 650,
+            "flash_ms": 550,
+            "delay_ms": 200,
+        },
     }
 
 def gen_mini_phantom_doors(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
@@ -2854,13 +2843,29 @@ def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool
         return s == e
     return normalize_answer(s) == normalize_answer(e)
 
-def _iter_all_puzzles(room_json: Dict[str,Any]):
+def _iter_all_puzzles(room_json: Dict[str, Any]):
+    # legacy trail/route puzzles
     for rm in _as_dict_list(room_json.get("trail", {}).get("rooms")):
         for rt in _as_dict_list(rm.get("routes")):
             p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
-            if p: yield p
+            if p:
+                yield p
+
+    # top-level puzzles
     for p in _as_dict_list(room_json.get("puzzles")):
         yield p
+
+    # NEW: minis (normalize to the same structure verify_puzzle expects)
+    for m in _as_dict_list(room_json.get("minigames")):
+        if not isinstance(m, dict):
+            continue
+        pid = m.get("puzzle_id") or m.get("id")
+        sol = (m.get("solution") or {}).get("answer")
+        yield {
+            "id": pid,
+            "solution": {"answer": sol},
+            "answer_format": m.get("answer_format") or {},
+        }
 
 def _numeric_lock_accept_alt(answer: str, puzzle: Dict[str, Any]) -> bool:
     """
