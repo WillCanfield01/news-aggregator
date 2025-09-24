@@ -2875,18 +2875,18 @@ def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool
     return normalize_answer(s) == normalize_answer(e)
 
 def _iter_all_puzzles(room_json: Dict[str, Any]):
-    # legacy trail/route puzzles
+    # 1) legacy trail/route puzzles
     for rm in _as_dict_list(room_json.get("trail", {}).get("rooms")):
         for rt in _as_dict_list(rm.get("routes")):
             p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
             if p:
                 yield p
 
-    # top-level puzzles
+    # 2) top-level puzzles
     for p in _as_dict_list(room_json.get("puzzles")):
         yield p
 
-    # NEW: minis (normalize to the same structure verify_puzzle expects)
+    # 3) NEW: minis (normalize to the structure verify_puzzle expects)
     for m in _as_dict_list(room_json.get("minigames")):
         if not isinstance(m, dict):
             continue
@@ -2896,6 +2896,8 @@ def _iter_all_puzzles(room_json: Dict[str, Any]):
             "id": pid,
             "solution": {"answer": sol},
             "answer_format": m.get("answer_format") or {},
+            "prompt": m.get("prompt") or "",
+            "type": m.get("type") or m.get("archetype") or "mini",
         }
 
 def _numeric_lock_accept_alt(answer: str, puzzle: Dict[str, Any]) -> bool:

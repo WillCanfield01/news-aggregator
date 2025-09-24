@@ -53,83 +53,71 @@ def _row_to_blob(row):
 
 def _blob_to_minis_payload(blob, date_key):
     """
-    Return {date, theme, minigames[]} where each mini has:
-      - slot: "A"/"B"/"C" (tab label)
-      - puzzle_id: canonical id used by /api/submit
-      - id: same as puzzle_id for legacy clients
-      - mechanic: 'sequence_input' | 'grid_input' | ...
-      - prompt: text
-      - ui_spec and ui: identical object so clients can read either key
-    Works for:
-      1) already-minis-shaped blobs, and
-      2) legacy trailroom blobs (extract one mini per room).
+    Normalize the room blob to the minis payload your front-end expects.
+    Handles both dict minis and legacy Puzzle objects.
     """
-    # 1) Already minis-shaped → normalize
-    if isinstance(blob.get("minigames"), list):
-        norm = []
-        for m in blob["minigames"]:
-            ui = (m.get("ui_spec") or m.get("ui") or {})
-            pid = m.get("puzzle_id") or m.get("id")
-            norm.append({
-                **m,
-                "puzzle_id": pid,
-                "id": pid,
-                "ui_spec": ui,
-                "ui": ui,
-            })
+    def _to_dict(x):
+        # already a dict
+        if isinstance(x, dict):
+            return x
+        # dataclass Puzzle with to_json()
+        if hasattr(x, "to_json"):
+            try:
+                return x.to_json()
+            except Exception:
+                pass
+        # last-resort shallow mapping
+        try:
+            return dict(getattr(x, "__dict__", {}))
+        except Exception:
+            return {}
+
+    # If already minis-shaped, normalize entries to dict and ensure puzzle_id
+    mg = blob.get("minigames")
+    if isinstance(mg, list):
+        minis = []
+        for m in mg:
+            md = _to_dict(m)
+            if not md:
+                continue
+            if not md.get("puzzle_id"):
+                md["puzzle_id"] = md.get("id")
+            mech = (md.get("mechanic") or "")
+            if mech:
+                md["mechanic"] = mech.lower()
+            minis.append(md)
         return {
             "date": blob.get("date") or blob.get("date_key") or date_key,
             "theme": blob.get("theme") or blob.get("title") or "Daily Escape",
-            "minigames": norm,
+            "minigames": minis,
         }
 
-    # 2) Legacy trailroom → pick a mini per room
+    # Legacy trailroom → extract three mini puzzles (one per room), but tolerate Puzzle objects
     trail = blob.get("trail") or {}
     rooms = (trail.get("rooms") or [])[:3]
-    minis: List[Dict[str, Any]] = []
+    minis = []
     labels = "ABC"
-
-    def _is_mini(p):
-        if not isinstance(p, dict):
-            return False
-        t = (p.get("archetype") or p.get("type") or "").lower()
-        return t == "mini"
-
     for i, rm in enumerate(rooms):
         routes = rm.get("routes") or []
-        # Prefer a specific route if present
-        route = (next((r for r in routes if (r.get("id") or "").lower() == "cautious"), None)
-                 or next((r for r in routes if (r.get("id") or "").lower() == "brisk"), None)
-                 or next((r for r in routes if (r.get("id") or "").lower() == "risky"), None)
+        route = (next((r for r in routes if isinstance(r, dict) and r.get("id") == "cautious"), None)
+                 or next((r for r in routes if isinstance(r, dict) and r.get("id") == "brisk"), None)
+                 or next((r for r in routes if isinstance(r, dict) and r.get("id") == "risky"), None)
                  or (routes[0] if routes else {}))
 
-        # MINI can live on the route OR directly on the room
-        p = None
-        if isinstance(route, dict) and _is_mini(route.get("puzzle")):
-            p = route.get("puzzle")
-        elif _is_mini(rm.get("puzzle")):
-            p = rm.get("puzzle")
-        if not _is_mini(p):
-            # Try any route that has a mini puzzle
-            for r in routes:
-                if _is_mini(r.get("puzzle")):
-                    p = r.get("puzzle")
-                    break
-        if not _is_mini(p):
-            continue  # no mini in this room
-
-        ui = p.get("ui_spec") or p.get("ui") or {}
-        pid = p.get("id") or f"mini_{i}"
-        slot = labels[i] if i < len(labels) else f"M{i+1}"
+        p_raw = route.get("puzzle") if isinstance(route, dict) else None
+        p = _to_dict(p_raw)
+        if not p:
+            continue
+        if (p.get("archetype") or p.get("type") or "").lower() != "mini":
+            continue
 
         minis.append({
-            "slot": slot,
-            "puzzle_id": pid,
-            "id": pid,
+            "id": labels[i] if i < 3 else f"M{i+1}",
+            "puzzle_id": p.get("id") or labels[i] if i < 3 else f"M{i+1}",
             "mechanic": (p.get("mechanic") or "").lower(),
             "prompt": p.get("prompt") or "",
-            "ui_spec": ui,
-            "ui": ui,
+            "ui_spec": p.get("ui_spec") or p.get("ui") or {},
+            "answer_format": p.get("answer_format") or {},
         })
 
     return {
