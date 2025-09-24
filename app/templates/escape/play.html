@@ -454,59 +454,77 @@
         const rules = ui.rules || {};
         const rng = m32(ui.seed || 1);
 
-        // --- layout
+        // --- help text
         const help = document.createElement("div");
         help.className = "muted";
         help.style.margin = "6px 0 12px";
-        help.innerHTML = "Tap cells only while they glow <b>solid</b> (true). "
-          + "Decoys are off-color, double-blink, or delayed. Use ▶ Play or ⟲ Replay.";
+        help.innerHTML =
+          "Tap cells only while they glow <b>solid (green outline)</b>. " +
+          "Red outline = decoy and won't count. Use ▶ Play / ⟲ Replay. " +
+          "Go becomes active when you’ve tapped all true flashes.";
         host.appendChild(help);
 
+        // --- grid
         const grid = document.createElement("div");
         grid.className = "vf-grid";
         grid.style.gridTemplateColumns = `repeat(${g.cols}, 86px)`;
         const cells = [];
         for (let r = 0; r < g.rows; r++) {
           for (let c = 0; c < g.cols; c++) {
-            const b = document.createElement("div");
-            b.className = "vf-cell";
-            b.dataset.rc = `${r}-${c}`;
-            b.onclick = () => {
-              if (b.classList.contains("live")) { picks.push(b.dataset.rc); pulse(b); updateProgress(); }
+            const cell = document.createElement("div");
+            cell.className = "vf-cell";
+            cell.dataset.rc = `${r}-${c}`;
+            // Accept only while "live" AND good === "1"
+            cell.onclick = () => {
+              if (cell.dataset.live === "1" && cell.dataset.good === "1") {
+                picks.push(cell.dataset.rc);
+                cell.dataset.live = "0";       // prevent double taps on same flash
+                pulse(cell);
+                updateProgress();
+              }
             };
-            cells.push(b); grid.appendChild(b);
+            cells.push(cell); grid.appendChild(cell);
           }
         }
         host.appendChild(grid);
 
+        // --- controls
         const ctrls = document.createElement("div");
         ctrls.style.display = "flex"; ctrls.style.gap = "8px"; ctrls.style.marginTop = "10px";
-        const playBtn = btn("▶ Play", startPlayback);
-        const replayBtn = btn("⟲ Replay", startPlayback);
-        const clearBtn = btn("Clear", () => { picks = []; updateProgress(); });
-        const backBtn = btn("⌫", () => { picks.pop(); updateProgress(); });
-        const goBtn = btn("Go", () => submitAnswer(mini, picks.join(",")));
+        const playBtn = makeBtn("▶ Play", startPlayback);
+        const replayBtn = makeBtn("⟲ Replay", startPlayback);
+        const clearBtn = makeBtn("Clear", () => { picks = []; updateProgress(); });
+        const backBtn = makeBtn("⌫", () => { picks.pop(); updateProgress(); });
+        const goBtn = makeBtn("Go", () => submitAnswer(mini, picks.join(",")));
+        goBtn.disabled = true; // until complete
         ctrls.append(playBtn, replayBtn, clearBtn, backBtn, goBtn);
+        host.appendChild(ctrls);
 
         const prog = document.createElement("div");
         prog.className = "muted"; prog.style.marginTop = "4px";
+        host.appendChild(prog);
 
-        host.append(ctrls, prog);
-
-        function btn(label, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = fn; return b; }
+        function makeBtn(label, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = fn; return b; }
         function pulse(el) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 120); }
-        function setLive(cell, on, isDecoy) {
+
+        // Mark a cell as live/true/decoy for the current flash window
+        function setLive(cell, on, isDecoy, stamp) {
           if (on) {
-            cell.classList.add("live");
+            cell.dataset.live = "1";
+            cell.dataset.good = isDecoy ? "0" : "1";
+            cell.dataset.stamp = String(stamp);
             cell.style.outline = isDecoy ? "2px solid #ff6b6b" : "2px solid #6bf2a9";
             cell.style.background = isDecoy ? "#2a1e27" : "#1e2a54";
           } else {
-            cell.classList.remove("live");
-            cell.style.outline = ""; cell.style.background = "";
+            // only clear if we’re closing the same window
+            if (cell.dataset.stamp === String(stamp)) {
+              cell.dataset.live = "0"; cell.dataset.good = "0"; cell.dataset.stamp = "";
+              cell.style.outline = ""; cell.style.background = "";
+            }
           }
         }
 
-        // Precompute today's cue list so we can replay identically (seeded, deterministic)
+        // Precompute today’s events (seeded) so Play/Replays are identical
         const events = [];
         for (let i = 0; i < length; i++) {
           const r = Math.floor(rng() * g.rows), c = Math.floor(rng() * g.cols);
@@ -521,20 +539,22 @@
 
         function updateProgress() {
           prog.textContent = `taps ${picks.length}/${trueCount}`;
+          goBtn.disabled = (picks.length !== trueCount);
         }
 
-        // One full playback of the day’s events; you can replay any time
+        // Replayable playback; only taps during the live window count
         function startPlayback() {
-          // turn everything off
-          cells.forEach(c => setLive(c, false, false));
-          let t = 0;
+          // clear any live markers
+          cells.forEach(c => setLive(c, false, false, -1));
+          let t = 0, stamp = 0;
           const onMs = Math.floor(tempo * 0.55);
 
-          events.forEach((ev, idx) => {
+          events.forEach(ev => {
             const cell = cells[ev.r * g.cols + ev.c];
             const show = () => {
-              setLive(cell, true, ev.isDecoy);
-              setTimeout(() => setLive(cell, false, ev.isDecoy), onMs);
+              const myStamp = ++stamp;
+              setLive(cell, true, ev.isDecoy, myStamp);
+              setTimeout(() => setLive(cell, false, ev.isDecoy, myStamp), onMs);
             };
             const lead = ev.delay ? Math.floor(tempo * 0.25) : 0;
             setTimeout(() => {
