@@ -452,7 +452,7 @@
         const rules = ui.rules || {};
         const rng = m32(ui.seed || 1);
 
-        // Server now tells us EXACT counts; fall back gracefully if absent
+        // Server declares exact counts (we fall back sensibly)
         const length = ui.length || 8;
         const trueCount = ui.true_count ?? 6;
         const decoyCount = ui.decoy_count ?? Math.max(0, length - trueCount);
@@ -462,9 +462,9 @@
         help.className = "muted";
         help.style.margin = "6px 0 12px";
         help.innerHTML =
-          "Tap cells only while they glow <b>solid (green outline)</b>. " +
-          "Red outline = decoy and won't count. ▶ Play shows the exact pattern; ⟲ Replay repeats it. " +
-          "Go activates when you’ve tapped all true flashes.";
+          "Watch the pattern once, then tap back the <b>true</b> flashes in order. " +
+          "True flashes highlight <b>green</b>; decoys are red and are ignored. " +
+          "Press <b>Play</b> to see it again (resets your input).";
         host.appendChild(help);
 
         // --- grid
@@ -477,15 +477,8 @@
             const cell = document.createElement("div");
             cell.className = "vf-cell";
             cell.dataset.rc = `${r}-${c}`;
-            cell.onclick = () => {
-              if (cell.dataset.live === "1" && cell.dataset.good === "1") {
-                picks.push(cell.dataset.rc);
-                cell.dataset.live = "0"; // avoid double count on same flash
-                pulse(cell);
-                updateProgress();
-              }
-            };
-            cells.push(cell); grid.appendChild(cell);
+            grid.appendChild(cell);
+            cells.push(cell);
           }
         }
         host.appendChild(grid);
@@ -493,13 +486,12 @@
         // --- controls
         const ctrls = document.createElement("div");
         ctrls.style.display = "flex"; ctrls.style.gap = "8px"; ctrls.style.marginTop = "10px";
-        const playBtn = btn("▶ Play", startPlayback);
-        const replayBtn = btn("⟲ Replay", startPlayback);
-        const clearBtn = btn("Clear", () => { picks = []; updateProgress(); });
-        const backBtn = btn("⌫", () => { picks.pop(); updateProgress(); });
+        const playBtn = btn("▶ Play", () => startPlayback(true));
+        const clearBtn = btn("Clear", resetInput);
+        const backBtn = btn("⌫", () => { if (!inputEnabled) return; picks.pop(); updateProgress(); redrawSelections(); });
         const goBtn = btn("Go", () => submitAnswer(mini, picks.join(",")));
         goBtn.disabled = true;
-        ctrls.append(playBtn, replayBtn, clearBtn, backBtn, goBtn);
+        ctrls.append(playBtn, clearBtn, backBtn, goBtn);
         host.appendChild(ctrls);
 
         const prog = document.createElement("div");
@@ -507,25 +499,9 @@
         host.appendChild(prog);
 
         function btn(t, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = t; b.onclick = fn; return b; }
-        function pulse(el) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 120); }
 
-        // Helpers to mark a cell "live" (and whether it's a true or decoy) for a specific flash window
-        function setLive(cell, on, isDecoy, stamp) {
-          if (on) {
-            cell.dataset.live = "1";
-            cell.dataset.good = isDecoy ? "0" : "1";
-            cell.dataset.stamp = String(stamp);
-            cell.style.outline = isDecoy ? "2px solid #ff6b6b" : "2px solid #6bf2a9";
-            cell.style.background = isDecoy ? "#2a1e27" : "#1e2a54";
-          } else if (cell.dataset.stamp === String(stamp)) {
-            cell.dataset.live = "0"; cell.dataset.good = "0"; cell.dataset.stamp = "";
-            cell.style.outline = ""; cell.style.background = "";
-          }
-        }
-
-        // Build the SAME event stream the server used:
-        // 1) shuffle a mask of T/D with the seeded RNG
-        // 2) for each tag, draw coords and add small visual quirks
+        // === Build the exact same event stream the server used ===
+        // Shuffle mask of T/D with seeded RNG (order matters)
         const mask = Array(trueCount).fill("T").concat(Array(decoyCount).fill("D"));
         for (let i = mask.length - 1; i > 0; i--) {
           const j = Math.floor(rng() * (i + 1));[mask[i], mask[j]] = [mask[j], mask[i]];
@@ -539,28 +515,84 @@
             delay: rng() < (rules.delayed_glow_prob ?? 0.12),
           };
         });
+        const trueSeq = events.filter(e => !e.isDecoy).map(e => `${e.r}-${e.c}`); // expected order
 
+        // Input state (post-playback)
+        let inputEnabled = false;
         let picks = [];
         updateProgress();
 
-        function updateProgress() {
-          prog.textContent = `taps ${picks.length}/${trueCount}`;
-          goBtn.disabled = (picks.length !== trueCount);
+        // Cell visuals
+        function setFlash(cell, color, on) {
+          if (on) {
+            cell.style.outline = `2px solid ${color}`;
+            cell.style.background = (color === "#6bf2a9") ? "#1e2a54" : "#2a1e27";
+          } else {
+            cell.style.outline = "";
+            cell.style.background = "";
+          }
+        }
+        function flashCell(cell, color, onMs) {
+          setFlash(cell, color, true);
+          setTimeout(() => setFlash(cell, color, false), onMs);
+        }
+        function redrawSelections() {
+          // Clear all selection rings, then add subtle ring for chosen cells
+          cells.forEach(c => c.style.boxShadow = "");
+          picks.forEach((rc, i) => {
+            const [r, c] = rc.split("-").map(Number);
+            const el = cells[r * g.cols + c];
+            el.style.boxShadow = "0 0 0 2px rgba(107,242,169,.65) inset";
+          });
         }
 
-        // Replayable playback; auto-start so it’s obvious
-        function startPlayback() {
-          cells.forEach(c => setLive(c, false, false, -1));
-          let t = 0, stamp = 0;
+        // Input handler (after playback)
+        grid.onclick = (ev) => {
+          if (!inputEnabled) return;
+          const cell = ev.target.closest(".vf-cell");
+          if (!cell) return;
+          const rc = cell.dataset.rc;
+
+          const need = trueSeq[picks.length];
+          if (rc === need) {
+            picks.push(rc);
+            updateProgress();
+            redrawSelections();
+            // Auto-submit when complete (or leave for Go)
+            if (picks.length === trueSeq.length) {
+              goBtn.disabled = false;
+              // submitAnswer(mini, picks.join(",")); // uncomment to auto-submit
+            }
+          } else {
+            // tiny error feedback
+            cell.classList.add("flash");
+            setTimeout(() => cell.classList.remove("flash"), 120);
+          }
+        };
+
+        function updateProgress() {
+          prog.textContent = `taps ${picks.length}/${trueSeq.length}`;
+          goBtn.disabled = (picks.length !== trueSeq.length);
+        }
+        function resetInput() {
+          if (!inputEnabled) return;
+          picks = [];
+          updateProgress();
+          redrawSelections();
+        }
+
+        // Playback: show full pattern; decoys flash red, trues green
+        function startPlayback(reset) {
+          inputEnabled = false;
+          if (reset) { picks = []; updateProgress(); redrawSelections(); }
+
+          cells.forEach(c => setFlash(c, "#000", false));
+          let t = 0;
           const onMs = Math.floor(tempo * 0.6);
 
           events.forEach(ev => {
             const cell = cells[ev.r * g.cols + ev.c];
-            const show = () => {
-              const s = ++stamp;
-              setLive(cell, true, ev.isDecoy, s);
-              setTimeout(() => setLive(cell, false, ev.isDecoy, s), onMs);
-            };
+            const show = () => flashCell(cell, ev.isDecoy ? "#ff6b6b" : "#6bf2a9", onMs);
             const lead = ev.delay ? Math.floor(tempo * 0.25) : 0;
             setTimeout(() => {
               show();
@@ -568,10 +600,13 @@
             }, t + lead);
             t += tempo;
           });
+
+          // enable input after the final flash
+          setTimeout(() => { inputEnabled = true; }, t + 30);
         }
 
-        // Start automatically once so players see what to do
-        setTimeout(startPlayback, 150);
+        // auto-play once so the player sees the pattern
+        setTimeout(() => startPlayback(false), 200);
       }
 
       function mountPhantomDoors(host, mini) {
