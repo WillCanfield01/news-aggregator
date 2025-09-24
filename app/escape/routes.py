@@ -382,56 +382,53 @@ def init_routes(bp: Blueprint):
         payload["server_hint_policy"] = {"first_hint_delay_s": 60, "second_hint_delay_s": 120}
         return jsonify(payload)
 
-    # API: submit an answer to a puzzle
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
         data = _json_body_or_400()
-        date_key = data.get("date_key")
-    puzzle_id = data.get("puzzle_id")
-    answer_raw = (data.get("answer") or "").strip()
+        date_key = data.get("date_key") or get_today_key()
+        puzzle_id = (data.get("puzzle_id") or "").strip()
+        answer_raw = (data.get("answer") or "").strip()
 
-    # Canonicalize for minis, especially Vault Frenzy
-    room = _ensure_room(date_key)  # you already have this helper in routes
-    blob = _row_to_blob(room)
+        # load the day
+        room = _get_or_404(date_key)
+        blob = _row_to_blob(room)
 
-    def _find_mini(pid):
-        for m in (blob.get("minigames") or []):
-            if (m.get("puzzle_id") or m.get("id")) == pid:
-                return m
-        return None
+        # locate the mini by id (or legacy puzzle)
+        def _find_mini(pid):
+            for m in (blob.get("minigames") or []):
+                if (m.get("puzzle_id") or m.get("id")) == pid:
+                    return m
+            return None
 
-    mini = _find_mini(puzzle_id)
-    ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
+        mini = _find_mini(puzzle_id)
+        ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
+        mech = ((mini or {}).get("mechanic") or "").lower()
 
-    def _canon_for_vault_frenzy(ans: str) -> str:
-        # Accept either rc ("r-c") or linear indices ("7, 13, ...") and normalize to "r-c"
-        tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
-        if not tokens:
-            return ""
-        # If all digits, treat as indices
-        if all(t.isdigit() for t in tokens):
-            cols = ui.get("grid", {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
+        # normalize Vault Frenzy answers so server/client match (“r-c” tokens)
+        def _canon_for_vault_frenzy(ans: str) -> str:
+            tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
+            if not tokens:
+                return ""
+            # index form: "7, 13, 5" -> "r-c,r-c,..."
+            if all(t.isdigit() for t in tokens):
+                cols = (ui.get("grid", {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
+                rc = []
+                for i in map(int, tokens):
+                    r = i // cols
+                    c = i % cols
+                    rc.append(f"{r}-{c}")
+                return ",".join(rc)
+            # already "r-c": normalize
             rc = []
-            for i in map(int, tokens):
-                r = i // cols
-                c = i % cols
-                rc.append(f"{r}-{c}")
+            for t in tokens:
+                if "-" in t:
+                    a, b = t.split("-", 1)
+                    rc.append(f"{int(a)}-{int(b)}")
             return ",".join(rc)
-        # Otherwise already "r-c" – normalize spacing
-        rc = []
-        for t in tokens:
-            if "-" in t:
-                a,b = t.split("-",1)
-                rc.append(f"{int(a)}-{int(b)}")
-        return ",".join(rc)
 
-    answer = answer_raw
-    if (mini or {}).get("mechanic") == "vault_frenzy":
-        answer = _canon_for_vault_frenzy(answer_raw)
-
-    ok = verify_puzzle(date_key, puzzle_id, answer)
-    return jsonify({"ok": ok})
-
+        answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
+        ok = verify_puzzle(date_key, puzzle_id, answer)
+        return jsonify({"ok": ok})
 
     # API: finish a run (leaderboards)
     @bp.route("/api/finish", methods=["POST"])
