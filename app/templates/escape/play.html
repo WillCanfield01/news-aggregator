@@ -177,6 +177,11 @@
       transition: transform .06s ease;
     }
 
+    .vf-cell.flash {
+      transform: scale(1.04);
+      transition: transform .08s;
+    }
+
     .vf-cell:active {
       transform: scale(0.96);
     }
@@ -440,10 +445,23 @@
       function flash(el, color = "#68f2a1") { el.style.boxShadow = `0 0 0 2px ${color}`; setTimeout(() => el.style.boxShadow = "", 220); }
 
       // ---------- Minis ----------
-
-      // VAULT FRENZY: seed reproduces flashes; we push "r-c" on accepted taps
       function mountVaultFrenzy(host, mini) {
-        const ui = mini.ui || {}; const g = ui.grid || { rows: 3, cols: 4 };
+        const ui = mini.ui || {};
+        const g = ui.grid || { rows: 3, cols: 4 };
+        const tempo = ui.tempo_ms || 520;
+        const length = ui.length || 12;
+        const decoyRate = ui.decoy_rate ?? 0.3;
+        const rules = ui.rules || {};
+        const rng = m32(ui.seed || 1);
+
+        // --- layout
+        const help = document.createElement("div");
+        help.className = "muted";
+        help.style.margin = "6px 0 12px";
+        help.innerHTML = "Tap cells only while they glow <b>solid</b> (true). "
+          + "Decoys are off-color, double-blink, or delayed. Use ▶ Play or ⟲ Replay.";
+        host.appendChild(help);
+
         const grid = document.createElement("div");
         grid.className = "vf-grid";
         grid.style.gridTemplateColumns = `repeat(${g.cols}, 86px)`;
@@ -451,119 +469,179 @@
         for (let r = 0; r < g.rows; r++) {
           for (let c = 0; c < g.cols; c++) {
             const b = document.createElement("div");
-            b.className = "vf-cell"; b.textContent = ""; b.dataset.rc = `${r}-${c}`;
+            b.className = "vf-cell";
+            b.dataset.rc = `${r}-${c}`;
             b.onclick = () => {
-              // accept only while 'true' glow is live
-              if (b.classList.contains("live")) { picks.push(b.dataset.rc); flash(b); }
+              if (b.classList.contains("live")) { picks.push(b.dataset.rc); pulse(b); updateProgress(); }
             };
             cells.push(b); grid.appendChild(b);
           }
         }
-        const ctl = document.createElement("div");
-        ctl.style.marginTop = "10px";
-        const go = document.createElement("button"); go.className = "btn"; go.textContent = "Go";
-        go.onclick = () => submitAnswer(mini, picks.join(","));
-        ctl.appendChild(go);
+        host.appendChild(grid);
 
-        host.appendChild(grid); host.appendChild(ctl);
+        const ctrls = document.createElement("div");
+        ctrls.style.display = "flex"; ctrls.style.gap = "8px"; ctrls.style.marginTop = "10px";
+        const playBtn = btn("▶ Play", startPlayback);
+        const replayBtn = btn("⟲ Replay", startPlayback);
+        const clearBtn = btn("Clear", () => { picks = []; updateProgress(); });
+        const backBtn = btn("⌫", () => { picks.pop(); updateProgress(); });
+        const goBtn = btn("Go", () => submitAnswer(mini, picks.join(",")));
+        ctrls.append(playBtn, replayBtn, clearBtn, backBtn, goBtn);
 
-        const picks = [];
-        const rng = m32(ui.seed || 1);
-        const tempo = ui.tempo_ms || 520;
-        const length = ui.length || 12;
-        const decoyRate = ui.decoy_rate || 0.3;
+        const prog = document.createElement("div");
+        prog.className = "muted"; prog.style.marginTop = "4px";
 
-        let i = 0;
-        function tick() {
-          if (i >= length) { return; }
-          // choose a target cell
-          const r = Math.floor(rng() * g.rows), c = Math.floor(rng() * g.cols);
-          const idx = r * g.cols + c, cell = cells[idx];
-          const isDecoy = rng() < decoyRate;
-          const doubleBlink = rng() < ((ui.rules || {}).double_blink_prob || 0.15);
-          const delayed = rng() < ((ui.rules || {}).delayed_glow_prob || 0.15);
+        host.append(ctrls, prog);
 
-          const on = () => { cell.classList.add("live"); cell.style.background = "#1e2a54"; };
-          const off = () => { cell.classList.remove("live"); cell.style.background = ""; };
-
-          const flashOnce = (good) => {
-            on(); if (!good) cell.style.outline = "2px solid #ff6b6b";
-            setTimeout(() => { off(); cell.style.outline = ""; }, Math.floor(tempo * 0.55));
-          };
-
-          setTimeout(() => {
-            flashOnce(!isDecoy);
-            if (doubleBlink) setTimeout(() => flashOnce(!isDecoy), Math.floor(tempo * 0.35));
-          }, delayed ? Math.floor(tempo * 0.25) : 0);
-
-          i++; setTimeout(tick, tempo);
+        function btn(label, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = fn; return b; }
+        function pulse(el) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 120); }
+        function setLive(cell, on, isDecoy) {
+          if (on) {
+            cell.classList.add("live");
+            cell.style.outline = isDecoy ? "2px solid #ff6b6b" : "2px solid #6bf2a9";
+            cell.style.background = isDecoy ? "#2a1e27" : "#1e2a54";
+          } else {
+            cell.classList.remove("live");
+            cell.style.outline = ""; cell.style.background = "";
+          }
         }
-        tick();
+
+        // Precompute today's cue list so we can replay identically (seeded, deterministic)
+        const events = [];
+        for (let i = 0; i < length; i++) {
+          const r = Math.floor(rng() * g.rows), c = Math.floor(rng() * g.cols);
+          const isDecoy = rng() < decoyRate;
+          const dbl = rng() < (rules.double_blink_prob || 0.15);
+          const delay = rng() < (rules.delayed_glow_prob || 0.15);
+          events.push({ r, c, isDecoy, dbl, delay });
+        }
+        const trueCount = events.filter(e => !e.isDecoy).length;
+        let picks = [];
+        updateProgress();
+
+        function updateProgress() {
+          prog.textContent = `taps ${picks.length}/${trueCount}`;
+        }
+
+        // One full playback of the day’s events; you can replay any time
+        function startPlayback() {
+          // turn everything off
+          cells.forEach(c => setLive(c, false, false));
+          let t = 0;
+          const onMs = Math.floor(tempo * 0.55);
+
+          events.forEach((ev, idx) => {
+            const cell = cells[ev.r * g.cols + ev.c];
+            const show = () => {
+              setLive(cell, true, ev.isDecoy);
+              setTimeout(() => setLive(cell, false, ev.isDecoy), onMs);
+            };
+            const lead = ev.delay ? Math.floor(tempo * 0.25) : 0;
+            setTimeout(() => {
+              show();
+              if (ev.dbl) setTimeout(show, Math.floor(onMs * 0.8));
+            }, t + lead);
+            t += tempo;
+          });
+        }
       }
 
-      // PHANTOM DOORS: show sequence of glyphs; doors reshuffle each round; record glyph tokens
       function mountPhantomDoors(host, mini) {
         const ui = mini.ui || {};
-        const layout = document.createElement("div");
-        layout.style.display = "grid"; layout.style.gridTemplateColumns = "repeat(4, 1fr)";
-        layout.style.gap = "10px";
-
         const glyphs = (ui.glyphs || ["◇", "◆", "○", "●", "△", "▲", "□", "■"]).slice(0, 8);
-        let sequence = []; // we will show it; answer still verified server-side
+
+        // Seeded, deterministic sequence for today
         const rng = m32(ui.seed || 1);
-        for (let i = 0; i < (ui.rounds || 6); i++) sequence.push(glyphs[Math.floor(rng() * glyphs.length)]);
+        const seq = [];
+        for (let i = 0; i < (ui.rounds || 6); i++) {
+          seq.push(glyphs[Math.floor(rng() * glyphs.length)]);
+        }
 
-        const seqBar = document.createElement("div");
-        seqBar.className = "muted"; seqBar.style.margin = "8px 0 12px";
-        seqBar.textContent = "Sequence: " + sequence.join(" ");
-        host.appendChild(seqBar);
+        // Top bar: ▶ Show sequence (replay any time)
+        const top = document.createElement("div");
+        top.style.display = "flex"; top.style.alignItems = "center"; top.style.gap = "10px";
+        const seqBar = document.createElement("div"); seqBar.className = "muted"; seqBar.textContent = "Sequence shown";
+        const showBtn = document.createElement("button"); showBtn.className = "btn"; showBtn.textContent = "▶ Show";
+        showBtn.onclick = () => {
+          seqBar.textContent = ""; let i = 0;
+          const timer = setInterval(() => {
+            seqBar.textContent = seq.slice(0, ++i).join(" ");
+            if (i >= seq.length) clearInterval(timer);
+          }, ui.flash_ms || 480);
+        };
+        top.append(showBtn, seqBar);
+        host.appendChild(top);
 
-        const doors = new Array(8).fill(0).map(() => {
-          const d = document.createElement("button");
-          d.className = "btn"; d.style.background = "#22345d"; d.style.color = "#cfe0ff"; d.textContent = "◇";
-          d.style.padding = "18px 0"; return d;
-        });
-        doors.forEach(d => layout.appendChild(d));
+        // Door grid (this was missing)
+        const layout = document.createElement("div");
+        layout.style.display = "grid";
+        layout.style.gridTemplateColumns = "repeat(4, 1fr)";
+        layout.style.gap = "10px";
         host.appendChild(layout);
 
-        // shuffle + assign glyphs each pick
+        // Create 8 door buttons
+        const doors = new Array(8).fill(0).map(() => {
+          const d = document.createElement("button");
+          d.className = "btn";
+          d.style.background = "#22345d";
+          d.style.color = "#cfe0ff";
+          d.style.padding = "18px 0";
+          d.textContent = "◇";
+          layout.appendChild(d);
+          return d;
+        });
+
         const picks = [];
-        function reshuffle(nextIdx) {
-          // assign glyphs randomly; some doors are phantom
+
+        function reshuffle() {
+          // assign random glyphs; some doors are phantoms
           const phCount = Math.max(1, Math.floor(doors.length * (ui.phantom_rate || 0.25)));
           const phantomSet = new Set();
           while (phantomSet.size < phCount) phantomSet.add(Math.floor(rng() * doors.length));
 
-          const pool = glyphs.slice();
           doors.forEach((d, i) => {
             d.disabled = false;
-            d.textContent = pool[Math.floor(rng() * pool.length)];
+            d.textContent = glyphs[Math.floor(rng() * glyphs.length)];
             d.dataset.glyph = d.textContent;
             d.style.opacity = 1;
+
             if (phantomSet.has(i)) d.dataset.phantom = "1"; else delete d.dataset.phantom;
+
             d.onclick = () => {
-              if (d.dataset.phantom === "1") { d.style.opacity = 0.35; return; }
+              if (d.dataset.phantom === "1") { d.style.opacity = 0.33; return; }
               picks.push(d.dataset.glyph);
-              if (picks.length === sequence.length) {
+              if (picks.length === seq.length) {
                 submitAnswer(mini, picks.join(","));
               } else {
-                reshuffle(picks.length);
+                reshuffle();
               }
             };
           });
         }
-        reshuffle(0);
+
+        reshuffle();
       }
 
       // PRESSURE CHAMBER: animate gauges; accept a pre-computed order of labels
       function mountPressureChamber(host, mini) {
         const ui = mini.ui || {};
-        const wrap = document.createElement("div"); wrap.className = "pc-wrap";
+        const targetCount = ui.target_count || 8;
+        let picks = [];
+
+        // HUD (taps left + ⟲ Restart)
+        const hud = document.createElement("div");
+        hud.className = "muted"; hud.style.margin = "6px 0 12px";
+        const left = document.createElement("span");
+        const rst = document.createElement("button"); rst.className = "btn"; rst.textContent = "⟲ Restart";
+        hud.append(left, document.createTextNode(" "), rst);
+        host.appendChild(hud);
+
+        // Container for valves (this was missing in your file)
+        const wrap = document.createElement("div");
+        wrap.className = "pc-wrap";
         host.appendChild(wrap);
 
         const valves = (ui.valves || []).map(v => ({ ...v, level: 0 }));
-        const labels = valves.map(v => v.label || "?");
-        const targetCount = ui.target_count || (labels.length * 2);
         const rng = m32(ui.seed || 1);
 
         const buttons = [];
@@ -576,6 +654,7 @@
           b.onclick = () => {
             picks.push(v.label);
             v.level = Math.max(0, v.level - 0.6); // drop pressure
+            updateLeft();
             if (picks.length >= targetCount) submitAnswer(mini, picks.join(","));
           };
           col.appendChild(g); col.appendChild(b);
@@ -583,23 +662,32 @@
           buttons.push({ fill, btn: b, valve: v });
         });
 
-        const picks = [];
+        function updateLeft() { left.textContent = `taps left: ${Math.max(0, targetCount - picks.length)}`; }
+        updateLeft();
+
+        rst.onclick = () => {
+          picks = [];
+          valves.forEach(v => v.level = 0);
+          buttons.forEach(({ fill }) => (fill.style.height = "0%"));
+          updateLeft();
+        };
+
         const tickMs = ui.tempo_ms || 90;
         function frame() {
           buttons.forEach(({ fill, valve }) => {
-            // quasi-random rise
             const drift = (valve.base || 0.2) + (rng() - 0.5) * (valve.var || 0.1);
             valve.level = Math.min(1.2, valve.level + Math.max(0.02, drift) * (tickMs / 1000));
             fill.style.height = Math.max(0, Math.min(100, valve.level * 100)) + "%";
             if (valve.level >= 1.0) {
-              // overflow: fail the run quickly (soft)
-              valve.level = 1.0; fill.style.background = "linear-gradient(180deg,#ff6b6b,#9b2e2e)";
+              valve.level = 1.0;
+              fill.style.background = "linear-gradient(180deg,#ff6b6b,#9b2e2e)"; // overflow warning
             }
           });
           setTimeout(frame, tickMs);
         }
         frame();
       }
+
     })();
   </script>
 
