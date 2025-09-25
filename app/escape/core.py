@@ -39,8 +39,8 @@ TIMEZONE = os.getenv("ESCAPE_TZ", "America/Boise")
 SUPPLIES_START_DEFAULT = 3
 
 COMMON_STOCK_ANSWERS = {
-    "piano","keyboard","silence","time","shadow","map","echo","fire","ice",
-    "darkness","light","egg","door","wind","river"
+    # keep this lean to avoid over-blocking generation
+    "time", "shadow", "echo", "map", "silence", "egg"
 }
 
 ANAGRAM_WORDS = [
@@ -74,44 +74,33 @@ NUM_WORDS = {
 }
 
 def _looks_trivial_multiple_choice(p: Dict[str, Any]) -> bool:
-    if (p.get("type") != "mini") or (p.get("mechanic") != "multiple_choice"):
+    """
+    Returns True only for obviously trivial MC questions on TEXT puzzles.
+    Never blocks mini-games or non-MC mechanics.
+    """
+    # Only judge classic text puzzles; skip minis entirely
+    ptype = (p.get("type") or p.get("archetype") or "").lower()
+    mech  = (p.get("mechanic") or "").lower()
+    if ptype == "mini" or mech != "multiple_choice":
         return False
 
     ui = p.get("ui_spec") or {}
     opts = ui.get("options") or []
     prompt = (p.get("prompt") or "").lower()
 
-    # Too few options
-    if len(opts) < 4:
+    # Too few options is the only strict rule we keep
+    if len(opts) < 3:
         return True
 
-    # “name that number”-style wording (existing)
-    if re.search(r"(which|what).*(name|names|word).*(number|digit)", prompt):
-        return True
-
-    # All options are simple number words or digits (existing)
+    # Relaxed numeric-only check: require *all* options numeric AND a very short prompt
     def _is_num_token(x: Any) -> bool:
         s = str(x).strip().lower()
         return bool(re.fullmatch(r"\d{1,2}", s) or s in NUM_WORDS)
-    if opts and all(_is_num_token(o) for o in opts):
+
+    if opts and all(_is_num_token(o) for o in opts) and len(prompt) < 60:
         return True
 
-    # NEW: generic shape/pattern guessing (“which pattern/shape/figure?”) with stocky options
-    generic = {"loop","spiral","echo","pulse","wave","circle","ring","arc","line"}
-    if re.search(r"\b(which|what)\b.*\b(pattern|shape|figure|symbol)\b", prompt):
-        hits = sum(1 for o in opts if str(o).strip().lower() in generic)
-        if hits >= max(2, len(opts) - 2):   # most options are generic shapes
-            return True
-
-    # NEW: any option is a known cliché/stock riddle answer → trivial
-    if any(str(o).strip().lower() in {s.lower() for s in COMMON_STOCK_ANSWERS} for o in opts):
-        return True
-
-    # NEW: enforce “≥2 clues” heuristic for MC — require at least two bullet/numbered lines
-    clue_lines = re.findall(r"(?m)^\s*(?:[-•]|[0-9]+\)|[0-9]+\.)", prompt)
-    if re.search(r"\b(which|what)\b", prompt) and len(clue_lines) < 2:
-        return True
-
+    # Drop generic-shape, stock-answer-in-options, and "≥2 clues" heuristics
     return False
 
 def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, Any]:
