@@ -10,7 +10,7 @@ Trailroom core: daily 3 rooms -> 1 final lock.
 """
 
 from __future__ import annotations
-
+import json
 import os, hmac, hashlib, random, string, re, json
 import random, string, re
 import datetime as dt
@@ -138,6 +138,36 @@ def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, A
     }
 
 # ───────────────────────── Utilities ─────────────────────────
+def _puzzle_to_dict(x: Any) -> Dict[str, Any]:
+    """Convert Puzzle or similar objects to plain dicts."""
+    if isinstance(x, dict):
+        return x
+    if hasattr(x, "to_json"):
+        try:
+            j = x.to_json()
+            return j if isinstance(j, dict) else {}
+        except Exception:
+            return {}
+    # last resort shallow mapping
+    d = getattr(x, "__dict__", None)
+    return dict(d) if isinstance(d, dict) else {}
+
+def _json_sanitize(val: Any) -> Any:
+    """Recursively convert a nested structure into JSON-serializable primitives."""
+    if isinstance(val, dict):
+        return {k: _json_sanitize(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_json_sanitize(v) for v in val]
+    if hasattr(val, "to_json"):
+        try:
+            return _json_sanitize(val.to_json())
+        except Exception:
+            return repr(val)
+    # primitives are fine
+    if isinstance(val, (str, int, float, bool)) or val is None:
+        return val
+    # fall back to string
+    return repr(val)
 
 def _is_numeric(s: str) -> bool:
     return bool(re.fullmatch(r"\d+", str(s or "")))
@@ -898,13 +928,18 @@ def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> 
     }
 
 # (This is correct wiring)
-def attach_daily_minis(room: Dict[str, Any], rng: random.Random, theme: str):
+def attach_daily_minis(room: Dict[str, Any], rng, theme: str):
     minis = [
-        gen_mini_vault_frenzy(rng, "vault_frenzy", theme),
-        gen_mini_phantom_doors(rng, "phantom_doors", theme),
-        gen_mini_pressure_chamber(rng, "pressure_chamber", theme),
+        _puzzle_to_dict(gen_mini_vault_frenzy(rng, "vault_frenzy", theme)),
+        _puzzle_to_dict(gen_mini_phantom_doors(rng, "phantom_doors", theme)),
+        _puzzle_to_dict(gen_mini_pressure_chamber(rng, "pressure_chamber", theme)),
     ]
+    # ensure each has a puzzle_id the client/verify use
+    for m in minis:
+        if m and not m.get("puzzle_id"):
+            m["puzzle_id"] = m.get("id")
     room["minigames"] = minis
+    return room
 
 # ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
 # AFTER (grid-flash version that your UI expects)
@@ -2872,15 +2907,39 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
             except Exception: pass
 
     # last resort
+    # If a previous flush in this request failed, reset the session first
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+
     room_blob = generate_room_offline(date_key, secret)
-    if existing:
-        existing.json_blob = room_blob
-        existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
-        db.session.add(existing); db.session.commit(); return existing
-    else:
-        new_room = EscapeRoom(date_key=date_key, json_blob=room_blob,
-                              difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY))
-        db.session.add(new_room); db.session.commit(); return new_room
+
+    # Make sure minis are attached & JSON-safe
+    try:
+        theme = room_blob.get("title") or room_blob.get("theme") or "Daily Escape"
+        attach_daily_minis(room_blob, random.Random(hash(date_key) & 0xFFFFFFFF), theme)
+    except Exception as e:
+        try:
+            current_app.logger.warning(f"[escape] attach_daily_minis at save failed: {e}")
+        except Exception:
+            pass
+
+    blob_clean = _json_sanitize(room_blob)
+
+    row = EscapeRoom.query.filter_by(date_key=date_key).first()
+    if not row:
+        row = EscapeRoom(date_key=date_key)
+
+    # Save JSON fields (adjust to your actual column names)
+    row.theme = blob_clean.get("theme") or blob_clean.get("title")
+    row.minigames_json = json.dumps(blob_clean.get("minigames", []), separators=(",", ":"))
+    row.server_private_json = json.dumps(blob_clean.get("server_private", {}), separators=(",", ":"))
+    row.room_json = json.dumps(blob_clean, separators=(",", ":"))  # if you store the full blob
+
+    db.session.add(row)
+    db.session.commit()
+
 
 def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool:
     if submitted is None: return False
