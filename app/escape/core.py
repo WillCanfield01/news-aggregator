@@ -928,18 +928,55 @@ def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> 
     }
 
 # (This is correct wiring)
-def attach_daily_minis(room: Dict[str, Any], rng, theme: str):
-    minis = [
-        _puzzle_to_dict(gen_mini_vault_frenzy(rng, "vault_frenzy", theme)),
-        _puzzle_to_dict(gen_mini_phantom_doors(rng, "phantom_doors", theme)),
-        _puzzle_to_dict(gen_mini_pressure_chamber(rng, "pressure_chamber", theme)),
-    ]
-    # ensure each has a puzzle_id the client/verify use
-    for m in minis:
-        if m and not m.get("puzzle_id"):
-            m["puzzle_id"] = m.get("id")
-    room["minigames"] = minis
-    return room
+def attach_daily_minis(room_json: Dict[str, Any], rng: random.Random, theme: str) -> Dict[str, Any]:
+    """
+    Ensure the given room_json has a 'minigames' list of dicts (not Puzzle objects).
+    Called on generation and also retroactively when serving old rows.
+    """
+    if not isinstance(room_json, dict):
+        return room_json
+
+    if "minigames" in room_json and isinstance(room_json["minigames"], list):
+        # sanitize to dicts
+        clean = []
+        for m in room_json["minigames"]:
+            if isinstance(m, dict):
+                md = dict(m)
+            elif hasattr(m, "to_json"):
+                md = m.to_json()
+            else:
+                md = getattr(m, "__dict__", {}) or {}
+            if not md.get("puzzle_id"):
+                md["puzzle_id"] = md.get("id")
+            clean.append(_json_sanitize(md))
+        room_json["minigames"] = clean
+        return room_json
+
+    # Otherwise, generate minis deterministically
+    labels = ["A", "B", "C"]
+    minis = []
+    for i, mech in enumerate(["vault_frenzy", "phantom_doors", "pressure_chamber"]):
+        pid = f"{labels[i]}-{room_json.get('date') or room_json.get('date_key')}"
+        if mech == "vault_frenzy":
+            ui_spec = {"kind": "vault_frenzy", "grid_rows": 4, "grid_cols": 4,
+                       "seed": rng.randint(1, 1_000_000), "true_count": 6, "decoy_count": 2,
+                       "tempo_ms": rng.randint(450, 600)}
+        elif mech == "phantom_doors":
+            ui_spec = {"kind": "phantom_doors", "rounds": 3}
+        else:
+            ui_spec = {"kind": "pressure_chamber", "valves": 3 + rng.randint(0, 1)}
+
+        minis.append({
+            "id": labels[i],
+            "puzzle_id": pid,
+            "mechanic": mech,
+            "prompt": f"Play {mech.replace('_',' ').title()}!",
+            "ui_spec": ui_spec,
+            "answer_format": {}
+        })
+
+    room_json["minigames"] = minis
+    return room_json
 
 # ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
 # AFTER (grid-flash version that your UI expects)

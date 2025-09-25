@@ -53,76 +53,42 @@ def _row_to_blob(row):
 
 def _blob_to_minis_payload(blob, date_key):
     """
-    Normalize the room blob to the minis payload your front-end expects.
-    Handles both dict minis and legacy Puzzle objects.
+    Normalize the room blob to {date,theme,minigames:[]} for API.
+    Tolerates dicts, Puzzle objects, or missing minis (attaches them).
     """
+    from .core import attach_daily_minis, rng_from_seed, daily_seed
+
     def _to_dict(x):
-        # already a dict
         if isinstance(x, dict):
             return x
-        # dataclass Puzzle with to_json()
         if hasattr(x, "to_json"):
             try:
                 return x.to_json()
             except Exception:
-                pass
-        # last-resort shallow mapping
-        try:
-            return dict(getattr(x, "__dict__", {}))
-        except Exception:
-            return {}
+                return {}
+        return dict(getattr(x, "__dict__", {}) or {})
 
-    # If already minis-shaped, normalize entries to dict and ensure puzzle_id
     mg = blob.get("minigames")
-    if isinstance(mg, list):
-        minis = []
-        for m in mg:
-            md = _to_dict(m)
-            if not md:
-                continue
-            if not md.get("puzzle_id"):
-                md["puzzle_id"] = md.get("id")
-            mech = (md.get("mechanic") or "")
-            if mech:
-                md["mechanic"] = mech.lower()
-            minis.append(md)
-        return {
-            "date": blob.get("date") or blob.get("date_key") or date_key,
-            "theme": blob.get("theme") or blob.get("title") or "Daily Escape",
-            "minigames": minis,
-        }
+    if not mg:
+        # backfill deterministically
+        seed = daily_seed(date_key, os.getenv("ESCAPE_SERVER_SECRET", "dev_secret"))
+        rng = rng_from_seed(seed)
+        blob = attach_daily_minis(blob, rng, blob.get("theme") or blob.get("title") or "Daily Escape")
+        mg = blob.get("minigames")
 
-    # Legacy trailroom → extract three mini puzzles (one per room), but tolerate Puzzle objects
-    trail = blob.get("trail") or {}
-    rooms = (trail.get("rooms") or [])[:3]
     minis = []
-    labels = "ABC"
-    for i, rm in enumerate(rooms):
-        routes = rm.get("routes") or []
-        route = (next((r for r in routes if isinstance(r, dict) and r.get("id") == "cautious"), None)
-                 or next((r for r in routes if isinstance(r, dict) and r.get("id") == "brisk"), None)
-                 or next((r for r in routes if isinstance(r, dict) and r.get("id") == "risky"), None)
-                 or (routes[0] if routes else {}))
-
-        p_raw = route.get("puzzle") if isinstance(route, dict) else None
-        p = _to_dict(p_raw)
-        if not p:
+    for m in (mg or []):
+        md = _to_dict(m)
+        if not md:
             continue
-        if (p.get("archetype") or p.get("type") or "").lower() != "mini":
-            continue
-
-        minis.append({
-            "id": labels[i] if i < 3 else f"M{i+1}",
-            "puzzle_id": p.get("id") or labels[i] if i < 3 else f"M{i+1}",
-            "mechanic": (p.get("mechanic") or "").lower(),
-            "prompt": p.get("prompt") or "",
-            "ui_spec": p.get("ui_spec") or p.get("ui") or {},
-            "answer_format": p.get("answer_format") or {},
-        })
+        if not md.get("puzzle_id"):
+            md["puzzle_id"] = md.get("id")
+        md["mechanic"] = (md.get("mechanic") or "").lower()
+        minis.append(md)
 
     return {
         "date": blob.get("date") or blob.get("date_key") or date_key,
-        "theme": blob.get("title") or blob.get("theme") or "Daily Escape",
+        "theme": blob.get("theme") or blob.get("title") or "Daily Escape",
         "minigames": minis,
     }
 
@@ -294,6 +260,7 @@ def init_routes(bp: Blueprint):
         return redirect(url_for("escape.play_today"), code=302)
 
     # Admin: regenerate a date; support salt/rotate to vary RNG path
+    # Admin: regenerate a date; support salt/rotate to vary RNG path
     @bp.route("/api/admin/regen", methods=["GET", "POST"])
     def admin_regen_api():
         token = request.args.get("token") or (request.get_json(silent=True) or {}).get("token")
@@ -304,12 +271,44 @@ def init_routes(bp: Blueprint):
         force = (str(request.args.get("force") or "").lower() in ("1","true","yes","y"))
         salt = request.args.get("salt") or request.args.get("rotate")
 
+        # Make sure any previous failed flush doesn't poison this request
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
         # temporarily set an env var the core will mix into its secret/seed
         old = os.environ.get("ESCAPE_REGEN_SALT")
         try:
             if salt:
                 os.environ["ESCAPE_REGEN_SALT"] = salt
+
+            # Deterministic regeneration, honoring ?force and ?rotate
             row = ensure_daily_room(date_key, force_regen=force)
+
+            # Optional: increment a regen counter and sanitize JSON before save
+            try:
+                blob = row.json_blob or {}
+                # attach minis on the fly if missing (deterministic per date/secret)
+                if not (blob.get("minigames") or []):
+                    rng = _rng_for_date(row.date_key)
+                    theme = blob.get("title") or blob.get("theme") or "Daily Escape"
+                    attach_daily_minis(blob, rng, theme)
+                    row.json_blob = blob
+
+                # bump regen_count if present
+                if hasattr(row, "regen_count"):
+                    row.regen_count = int(getattr(row, "regen_count") or 0) + 1
+
+                db.session.add(row)
+                db.session.commit()
+            except Exception as e:
+                current_app.logger.warning(f"[escape] regen post-process failed: {e}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+
         finally:
             if salt:
                 if old is None:
@@ -373,56 +372,37 @@ def init_routes(bp: Blueprint):
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
         data = _json_body_or_400()
-        date_key = data.get("date_key") or get_today_key()
-        puzzle_id = (data.get("puzzle_id") or "").strip()
-        answer_raw = (data.get("answer") or "").strip()
+        date_key = data.get("date") or get_today_key()
+        puzzle_id = str(data.get("puzzle_id") or "")
+        answer = str(data.get("answer") or "")
 
-        # load the day
-        room = _get_or_404(date_key)
-        blob = _row_to_blob(room)
+        row = _get_or_404(date_key)
+        blob = row.json_blob or {}
+        minis = _blob_to_minis_payload(blob, date_key)["minigames"]
+        target = next((m for m in minis if m.get("puzzle_id") == puzzle_id), None)
+        if not target:
+            return _abort_json(404, "Puzzle not found")
 
-        # locate the mini by id (or legacy puzzle)
-        def _find_mini(pid):
-            for m in (blob.get("minigames") or []):
-                if (m.get("puzzle_id") or m.get("id")) == pid:
-                    return m
-            return None
+        mech = target.get("mechanic")
+        # Vault Frenzy normalization: linear indices → r-c
+        if mech == "vault_frenzy":
+            toks = []
+            for t in re.split(r"[,\s]+", answer.strip()):
+                if t.isdigit():
+                    idx = int(t)
+                    r, c = divmod(idx, target["ui_spec"].get("grid_cols", 4))
+                    toks.append(f"{r}-{c}")
+                elif "-" in t:
+                    toks.append(t)
+            answer = ",".join(toks)
 
-        mini = _find_mini(puzzle_id)
-        ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
-        mech = ((mini or {}).get("mechanic") or "").lower()
-
-        # normalize Vault Frenzy answers so server/client match (“r-c” tokens)
-        def _canon_for_vault_frenzy(ans: str) -> str:
-            tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
-            if not tokens:
-                return ""
-            # index form: "7, 13, 5" -> "r-c,r-c,..."
-            if all(t.isdigit() for t in tokens):
-                cols = (ui.get("grid", {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
-                rc = []
-                for i in map(int, tokens):
-                    r = i // cols
-                    c = i % cols
-                    rc.append(f"{r}-{c}")
-                return ",".join(rc)
-            # already "r-c": normalize
-            rc = []
-            for t in tokens:
-                if "-" in t:
-                    a, b = t.split("-", 1)
-                    rc.append(f"{int(a)}-{int(b)}")
-            return ",".join(rc)
-
-        answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
+        ok = False
         try:
-            ok = verify_puzzle(date_key, puzzle_id, answer)
-            return jsonify({"ok": ok})
+            ok = verify_puzzle(target, answer)
         except Exception as e:
-            current_app.logger.exception("submit verify failed: %s", e)
-            # still respond so the UI doesn't hang
-            return jsonify({"ok": False, "error": "verify_failed"}), 200
+            current_app.logger.error(f"verify_puzzle failed: {e}")
 
+        return jsonify({"ok": bool(ok)})
 
     # API: finish a run (leaderboards)
     @bp.route("/api/finish", methods=["POST"])
