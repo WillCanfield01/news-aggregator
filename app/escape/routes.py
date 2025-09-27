@@ -345,19 +345,19 @@ def init_routes(bp: Blueprint):
 
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
-        # tolerate both 'date' and 'date_key'
         data = _json_body_or_400()
+        # accept both "date" and "date_key"
         date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
         puzzle_id = (data.get("puzzle_id") or "").strip()
         answer_raw = (data.get("answer") or "").strip()
         if not puzzle_id:
             return _bad("Missing puzzle_id")
 
-        # load the day
+        # load the day JSON (verify_puzzle requires the blob, not the date string)
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
 
-        # locate the mini by id (or legacy puzzle)
+        # locate the mini (to read grid cols for canonicalization)
         def _find_mini(pid):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
@@ -368,13 +368,13 @@ def init_routes(bp: Blueprint):
         ui  = (mini.get("ui_spec") or mini.get("ui") or {})
         mech = (mini.get("mechanic") or "").lower()
 
-        # Canonicalize Vault Frenzy answers to server's likely format (indices),
-        # but also try the r-c form as a fallback to be robust across days.
-        def _canon_indices(ans: str) -> str:
+        # Canonicalize Vault Frenzy to INDICES (matches your stored solution)
+        def _vf_to_indices(ans: str) -> str:
             tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
             if not tokens:
                 return ""
             if all(t.isdigit() for t in tokens):
+                # already indices
                 return ",".join(str(int(t)) for t in tokens)
             cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
             idx = []
@@ -388,38 +388,15 @@ def init_routes(bp: Blueprint):
                         pass
             return ",".join(idx)
 
-        def _canon_rc(ans: str) -> str:
-            tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
-            rc = []
-            for t in tokens:
-                if "-" in t:
-                    a, b = t.split("-", 1)
-                    try:
-                        rc.append(f"{int(a)}-{int(b)}")
-                    except Exception:
-                        pass
-                elif t.isdigit():
-                    cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
-                    i = int(t); rc.append(f"{i // cols}-{i % cols}")
-            return ",".join(rc)
+        answer = _vf_to_indices(answer_raw) if mech == "vault_frenzy" else answer_raw
 
-        answer = answer_raw
-        correct = False
         try:
-            if mech == "vault_frenzy":
-                # try indices first, then r-c (covers both historical storage formats)
-                ans_idx = _canon_indices(answer_raw)
-                correct = bool(verify_puzzle(date_key, puzzle_id, ans_idx))
-                if not correct:
-                    correct = bool(verify_puzzle(date_key, puzzle_id, _canon_rc(answer_raw)))
-            else:
-                correct = bool(verify_puzzle(date_key, puzzle_id, answer_raw))
+            correct = bool(verify_puzzle(blob, puzzle_id, answer))
+            return jsonify({"ok": True, "correct": correct})
         except Exception as e:
             current_app.logger.exception("submit verify failed: %s", e)
+            # never 500 to the browser
             return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
-
-        # CRITICAL: the client checks 'data.correct', not 'ok'
-        return jsonify({"ok": True, "correct": correct})
 
     # API: finish a run (leaderboards)
     @bp.route("/api/finish", methods=["POST"])
