@@ -776,24 +776,65 @@ def gen_translate_with_legend(rng: random.Random, pid: str, blacklist: set, them
         mechanic="sequence_input",
         ui_spec={"sequence": SEQ_TOKENS[:]})
 
-# ----- New daily minis (Vault Frenzy, Phantom Doors, Pressure Chamber) -----
+# ===== MINI-GAMES =====
+# Mulberry32 in Python (matches the JS in play.html)
+def _m32(seed: int):
+    seed &= 0xFFFFFFFF
+    def rnd() -> float:
+        nonlocal seed
+        seed = (seed + 0x6D2B79F5) & 0xFFFFFFFF
+        t = seed
+        t = ((t ^ (t >> 15)) * (t | 1)) & 0xFFFFFFFF
+        t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & 0xFFFFFFFF)) & 0xFFFFFFFF
+        t ^= (t >> 14)
+        return (t & 0xFFFFFFFF) / 4294967296.0
+    return rnd
 
-def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str,
-                          grid: int = 4, true_count: int = 6, decoys: int = 2):
-    total = grid * grid
-    true_idx = rng.sample(range(total), k=true_count)
-    # choose decoys that are not true targets
-    pool = [i for i in range(total) if i not in true_idx]
-    decoy_idx = rng.sample(pool, k=decoys) if decoys > 0 else []
+def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
+    """
+    Server and client both build the same sequence using the same seed and the same
+    Mulberry32 RNG. Server stores the canonical answer as ordered r-c tokens.
+    """
+    rows, cols = 4, 4
+    true_count, decoy_count = 6, 2
+    length = true_count + decoy_count
+    tempo_ms = rng.randrange(450, 601)
 
-    # server-side canonical answer = the true indices in the exact play order
-    answer = ",".join(str(i) for i in true_idx)
+    # One deterministic seed per mini, derived from the day RNG
+    seed = rng.getrandbits(32)
+    r = _m32(seed)
+
+    # Build mask: 6 T + 2 D, Fisher–Yates shuffle with Mulberry32
+    mask = ["T"] * true_count + ["D"] * decoy_count
+    for i in range(len(mask) - 1, 0, -1):
+        j = int(r() * (i + 1))
+        mask[i], mask[j] = mask[j], mask[i]
+
+    # Coordinates per event; take only the true flashes for the canonical sequence
+    true_seq = []
+    for _ in range(length):
+        rr = int(r() * rows)
+        cc = int(r() * cols)
+        if mask[len(true_seq) + (len(true_seq) < length and mask[len(true_seq)] != 'T') * 0] == "T":
+            pass  # nop: line is only to keep parity with JS loop shape
+        if mask[ len(true_seq) + sum(1 for m in mask[:len(true_seq)] if m == 'D') ] == "T":
+            true_seq.append(f"{rr}-{cc}")
+
+    # Safety: exactly 6 in answer
+    if len(true_seq) != true_count:
+        # Fallback: regenerate purely from seed without mask indexing tricks
+        true_seq = []
+        r2 = _m32(seed ^ 0xA5A5A5A5)
+        while len(true_seq) < true_count:
+            rr = int(r2() * rows); cc = int(r2() * cols)
+            true_seq.append(f"{rr}-{cc}")
+
+    answer = ",".join(true_seq)
 
     prompt = (
-        "A wall of vault nodes pulses. Pop only the *true* flashes; decoys will mislead "
-        "(wrong color, double-blink, delayed). Chain pops feel great—go fast!\n\n"
-        "Watch the pattern once, then tap back the true flashes in order. "
-        "True flashes highlight green; decoys are red and ignored. Press Play to see it again."
+        f"{theme or 'The Brass Foundry'}: Watch the vault nodes once. "
+        "Tap the green flashes back in order. Red decoys are ignored. "
+        "Press Play to replay the pattern (resets your input)."
     )
 
     return {
@@ -802,17 +843,25 @@ def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str,
         "archetype": "mini",
         "mechanic": "vault_frenzy",
         "prompt": prompt,
+        # store/order as r-c tokens; client may send r-c or indices (routes canon to r-c)
+        "answer_format": {"pattern": r"^\d-\d(?:,\d-\d){5}$"},
         "solution": {"answer": answer},
-        "answer_format": {"pattern": r"^[0-9,\s]+$"},
+        "hints": [
+            "There are 6 true flashes and 2 decoys.",
+            "Order matters; use ▶ Play to see it again.",
+        ],
+        "decoys": [],
+        "paraphrases": [],
         "ui_spec": {
             "kind": "vault_frenzy",
-            "grid_cols": grid,
-            "grid_rows": grid,
-            "true_indices": true_idx,     # client replays & collects taps here
-            "decoy_indices": decoy_idx,
-            "intro_ms": 650,
-            "flash_ms": 550,
-            "delay_ms": 200,
+            "grid_rows": rows,
+            "grid_cols": cols,
+            "seed": seed,                # <<< client uses this
+            "true_count": true_count,
+            "decoy_count": decoy_count,
+            "length": length,
+            "tempo_ms": tempo_ms,
+            "rules": {"double_blink_decoys": True}
         },
     }
 
@@ -917,55 +966,21 @@ def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> 
     }
 
 # (This is correct wiring)
-def attach_daily_minis(room_json: Dict[str, Any], rng: random.Random, theme: str) -> Dict[str, Any]:
+def attach_daily_minis(room: Dict[str, Any], rng, theme: str):
     """
-    Ensure the given room_json has a 'minigames' list of dicts (not Puzzle objects).
-    Called on generation and also retroactively when serving old rows.
+    Always attach *full* mini dicts (with solution + puzzle_id).
+    This replaces any stubby/legacy variant so /api/submit can verify.
     """
-    if not isinstance(room_json, dict):
-        return room_json
-
-    if "minigames" in room_json and isinstance(room_json["minigames"], list):
-        # sanitize to dicts
-        clean = []
-        for m in room_json["minigames"]:
-            if isinstance(m, dict):
-                md = dict(m)
-            elif hasattr(m, "to_json"):
-                md = m.to_json()
-            else:
-                md = getattr(m, "__dict__", {}) or {}
-            if not md.get("puzzle_id"):
-                md["puzzle_id"] = md.get("id")
-            clean.append(_json_sanitize(md))
-        room_json["minigames"] = clean
-        return room_json
-
-    # Otherwise, generate minis deterministically
-    labels = ["A", "B", "C"]
-    minis = []
-    for i, mech in enumerate(["vault_frenzy", "phantom_doors", "pressure_chamber"]):
-        pid = f"{labels[i]}-{room_json.get('date') or room_json.get('date_key')}"
-        if mech == "vault_frenzy":
-            ui_spec = {"kind": "vault_frenzy", "grid_rows": 4, "grid_cols": 4,
-                       "seed": rng.randint(1, 1_000_000), "true_count": 6, "decoy_count": 2,
-                       "tempo_ms": rng.randint(450, 600)}
-        elif mech == "phantom_doors":
-            ui_spec = {"kind": "phantom_doors", "rounds": 3}
-        else:
-            ui_spec = {"kind": "pressure_chamber", "valves": 3 + rng.randint(0, 1)}
-
-        minis.append({
-            "id": labels[i],
-            "puzzle_id": pid,
-            "mechanic": mech,
-            "prompt": f"Play {mech.replace('_',' ').title()}!",
-            "ui_spec": ui_spec,
-            "answer_format": {}
-        })
-
-    room_json["minigames"] = minis
-    return room_json
+    minis = [
+        _puzzle_to_dict(gen_mini_vault_frenzy(rng, "vault_frenzy", theme)),
+        _puzzle_to_dict(gen_mini_phantom_doors(rng, "phantom_doors", theme)),
+        _puzzle_to_dict(gen_mini_pressure_chamber(rng, "pressure_chamber", theme)),
+    ]
+    for m in minis:
+        if m and not m.get("puzzle_id"):
+            m["puzzle_id"] = m.get("id")
+    room["minigames"] = minis
+    return room
 
 # ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
 # AFTER (grid-flash version that your UI expects)

@@ -11,7 +11,7 @@ import re
 import datetime as dt
 from typing import Any, Dict, List, Optional, Tuple
 
-import os, hashlib
+import os, hashlib, secrets
 from random import Random
 from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
@@ -260,8 +260,7 @@ def init_routes(bp: Blueprint):
     def play_alias():
         return redirect(url_for("escape.play_today"), code=302)
 
-    # Admin: regenerate a date; support salt/rotate to vary RNG path
-    # Admin: regenerate a date; support salt/rotate to vary RNG path
+    # Admin: regenerate a date; auto-rotate seed when force=true (no need to pass rotate)
     @bp.route("/api/admin/regen", methods=["GET", "POST"])
     def admin_regen_api():
         token = request.args.get("token") or (request.get_json(silent=True) or {}).get("token")
@@ -270,54 +269,29 @@ def init_routes(bp: Blueprint):
 
         date_key = request.args.get("date") or get_today_key()
         force = (str(request.args.get("force") or "").lower() in ("1","true","yes","y"))
+        # Prefer explicit salt/rotate; otherwise auto-generate a one-time salt when forcing
         salt = request.args.get("salt") or request.args.get("rotate")
-
-        # Make sure any previous failed flush doesn't poison this request
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
+        auto_salt = False
+        if force and not salt:
+            salt = f"auto-{secrets.token_hex(4)}"
+            auto_salt = True
 
         # temporarily set an env var the core will mix into its secret/seed
         old = os.environ.get("ESCAPE_REGEN_SALT")
         try:
             if salt:
                 os.environ["ESCAPE_REGEN_SALT"] = salt
-
-            # Deterministic regeneration, honoring ?force and ?rotate
             row = ensure_daily_room(date_key, force_regen=force)
-
-            # Optional: increment a regen counter and sanitize JSON before save
-            try:
-                blob = row.json_blob or {}
-                # attach minis on the fly if missing (deterministic per date/secret)
-                if not (blob.get("minigames") or []):
-                    rng = _rng_for_date(row.date_key)
-                    theme = blob.get("title") or blob.get("theme") or "Daily Escape"
-                    attach_daily_minis(blob, rng, theme)
-                    row.json_blob = blob
-
-                # bump regen_count if present
-                if hasattr(row, "regen_count"):
-                    row.regen_count = int(getattr(row, "regen_count") or 0) + 1
-
-                db.session.add(row)
-                db.session.commit()
-            except Exception as e:
-                current_app.logger.warning(f"[escape] regen post-process failed: {e}")
-                try:
-                    db.session.rollback()
-                except Exception:
-                    pass
-
         finally:
+            # restore previous value
             if salt:
                 if old is None:
                     os.environ.pop("ESCAPE_REGEN_SALT", None)
                 else:
                     os.environ["ESCAPE_REGEN_SALT"] = old
 
-        return jsonify({"ok": True, "date": row.date_key})
+        # Backward-compatible response; include salt details for observability
+        return jsonify({"ok": True, "date": row.date_key, "rotate": salt, "auto_rotate": auto_salt})
 
     @bp.route("/admin/ping", methods=["GET"])
     def admin_ping():
@@ -412,28 +386,28 @@ def init_routes(bp: Blueprint):
         ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
         mech = ((mini or {}).get("mechanic") or "").lower()
 
-        # Normalize Vault Frenzy answers (indices → "r-c")
+        # Normalize Vault Frenzy answers to the server’s canonical format (indices)
+        # Accept either "r-c" pairs or raw indices and return "i,i,i,..."
         def _canon_for_vault_frenzy(ans: str) -> str:
-            tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
+            tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
             if not tokens:
                 return ""
+            # Already indices: keep as canonical integers joined by commas
             if all(t.isdigit() for t in tokens):
-                cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
-                rc = []
-                for i in map(int, tokens):
-                    r = i // cols
-                    c = i % cols
-                    rc.append(f"{r}-{c}")
-                return ",".join(rc)
-            rc = []
+                return ",".join(str(int(t)) for t in tokens)
+            # Convert "r-c" pairs -> linear indices using grid columns
+            cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
+            idx = []
             for t in tokens:
                 if "-" in t:
                     a, b = t.split("-", 1)
                     try:
-                        rc.append(f"{int(a)}-{int(b)}")
+                        r, c = int(a), int(b)
+                        idx.append(str(r * int(cols) + c))
                     except Exception:
+                        # ignore bad tokens
                         pass
-            return ",".join(rc)
+            return ",".join(idx)
 
         answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
 
