@@ -372,19 +372,36 @@ def init_routes(bp: Blueprint):
 
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
+        from .core import attach_daily_minis, daily_seed, rng_from_seed
+
         data = _json_body_or_400()
-        date_key = (data.get("date_key") or get_today_key()).strip()
+        # Accept both keys; many clients post "date"
+        date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
         puzzle_id = (data.get("puzzle_id") or "").strip()
         answer_raw = (data.get("answer") or "").strip()
-
         if not puzzle_id:
             return _bad("Missing puzzle_id")
 
-        # Load the room JSON for the given date
+        # Load day blob
         room = _get_or_404(date_key)
-        blob = _row_to_blob(room)  # full room JSON blob
+        blob = _row_to_blob(room)
 
-        # Try to locate the mini (for mechanic-specific normalization)
+        # Ensure minis exist in the blob (legacy rows may miss them)
+        def _ensure_minis(b: Dict[str, Any]) -> Dict[str, Any]:
+            if b.get("minigames"):
+                return b
+            seed = daily_seed(date_key, os.getenv("ESCAPE_SERVER_SECRET", "dev_secret"))
+            rng = rng_from_seed(seed)
+            theme = b.get("title") or b.get("theme") or "Daily Escape"
+            try:
+                attach_daily_minis(b, rng, theme)
+            except Exception as e:
+                current_app.logger.warning(f"[escape] minis backfill failed: {e}")
+            return b
+
+        blob = _ensure_minis(blob)
+
+        # Find the mini for mechanic-specific normalization
         def _find_mini(pid: str):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
@@ -395,12 +412,11 @@ def init_routes(bp: Blueprint):
         ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
         mech = ((mini or {}).get("mechanic") or "").lower()
 
-        # Normalize Vault Frenzy answers so server/client match (“r-c” tokens)
+        # Normalize Vault Frenzy answers (indices → "r-c")
         def _canon_for_vault_frenzy(ans: str) -> str:
             tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
             if not tokens:
                 return ""
-            # index form: "7,13,5" -> "r-c,r-c,..."
             if all(t.isdigit() for t in tokens):
                 cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
                 rc = []
@@ -409,7 +425,6 @@ def init_routes(bp: Blueprint):
                     c = i % cols
                     rc.append(f"{r}-{c}")
                 return ",".join(rc)
-            # already "r-c": normalize tokens to integers
             rc = []
             for t in tokens:
                 if "-" in t:
@@ -423,13 +438,10 @@ def init_routes(bp: Blueprint):
         answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
 
         try:
-            # verify_puzzle expects the room JSON, not a date string
             correct = bool(verify_puzzle(blob, puzzle_id, answer))
-            # Return both keys to satisfy old/new clients
             return jsonify({"ok": True, "correct": correct})
         except Exception as e:
             current_app.logger.exception("submit verify failed: %s", e)
-            # Never 500 to the browser; return a safe JSON response
             return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
 
     # API: finish a run (leaderboards)
