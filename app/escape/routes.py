@@ -373,37 +373,64 @@ def init_routes(bp: Blueprint):
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
         data = _json_body_or_400()
-        date_key = data.get("date") or get_today_key()
-        puzzle_id = str(data.get("puzzle_id") or "")
-        answer = str(data.get("answer") or "")
+        date_key = (data.get("date_key") or get_today_key()).strip()
+        puzzle_id = (data.get("puzzle_id") or "").strip()
+        answer_raw = (data.get("answer") or "").strip()
 
-        row = _get_or_404(date_key)
-        blob = row.json_blob or {}
-        minis = _blob_to_minis_payload(blob, date_key)["minigames"]
-        target = next((m for m in minis if m.get("puzzle_id") == puzzle_id), None)
-        if not target:
-            return _abort_json(404, "Puzzle not found")
+        if not puzzle_id:
+            return _bad("Missing puzzle_id")
 
-        mech = target.get("mechanic")
-        # Vault Frenzy normalization: linear indices → r-c
-        if mech == "vault_frenzy":
-            toks = []
-            for t in re.split(r"[,\s]+", answer.strip()):
-                if t.isdigit():
-                    idx = int(t)
-                    r, c = divmod(idx, target["ui_spec"].get("grid_cols", 4))
-                    toks.append(f"{r}-{c}")
-                elif "-" in t:
-                    toks.append(t)
-            answer = ",".join(toks)
+        # Load the room JSON for the given date
+        room = _get_or_404(date_key)
+        blob = _row_to_blob(room)  # full room JSON blob
 
-        ok = False
+        # Try to locate the mini (for mechanic-specific normalization)
+        def _find_mini(pid: str):
+            for m in (blob.get("minigames") or []):
+                if (m.get("puzzle_id") or m.get("id")) == pid:
+                    return m
+            return None
+
+        mini = _find_mini(puzzle_id)
+        ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
+        mech = ((mini or {}).get("mechanic") or "").lower()
+
+        # Normalize Vault Frenzy answers so server/client match (“r-c” tokens)
+        def _canon_for_vault_frenzy(ans: str) -> str:
+            tokens = [t.strip() for t in ans.replace(";", ",").split(",") if t.strip()]
+            if not tokens:
+                return ""
+            # index form: "7,13,5" -> "r-c,r-c,..."
+            if all(t.isdigit() for t in tokens):
+                cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
+                rc = []
+                for i in map(int, tokens):
+                    r = i // cols
+                    c = i % cols
+                    rc.append(f"{r}-{c}")
+                return ",".join(rc)
+            # already "r-c": normalize tokens to integers
+            rc = []
+            for t in tokens:
+                if "-" in t:
+                    a, b = t.split("-", 1)
+                    try:
+                        rc.append(f"{int(a)}-{int(b)}")
+                    except Exception:
+                        pass
+            return ",".join(rc)
+
+        answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
+
         try:
-            ok = verify_puzzle(target, answer)
+            # verify_puzzle expects the room JSON, not a date string
+            correct = bool(verify_puzzle(blob, puzzle_id, answer))
+            # Return both keys to satisfy old/new clients
+            return jsonify({"ok": True, "correct": correct})
         except Exception as e:
-            current_app.logger.error(f"verify_puzzle failed: {e}")
-
-        return jsonify({"ok": bool(ok)})
+            current_app.logger.exception("submit verify failed: %s", e)
+            # Never 500 to the browser; return a safe JSON response
+            return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
 
     # API: finish a run (leaderboards)
     @bp.route("/api/finish", methods=["POST"])
