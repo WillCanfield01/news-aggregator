@@ -406,9 +406,18 @@
       }
 
       async function submitAnswer(mini, answerStr) {
-        state.answers[mini.id] = answerStr;
-        const body = { date_key: state.dateKey, puzzle_id: mini.id, answer: answerStr };
-        const res = await fetch("/escape/api/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        // send the REAL saved id the server verifies against
+        const body = {
+          date_key: state.dateKey,           // keep for server
+          date: state.dateKey,               // also send 'date' for tolerance
+          puzzle_id: mini.puzzle_id || mini.id,
+          answer: answerStr
+        };
+        const res = await fetch("/escape/api/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
         const data = await res.json();
         if (data && data.correct) {
           advance();
@@ -546,29 +555,25 @@
           });
         }
 
-        // Input handler (after playback) — allow any taps; server verifies order
+        // Allow any taps; server verifies the ordered sequence.
         grid.onclick = (ev) => {
           if (!inputEnabled) return;
           const cell = ev.target.closest(".vf-cell");
           if (!cell) return;
           const rc = cell.dataset.rc;
 
-          // Ignore extra taps beyond the required length
-          if (picks.length >= trueSeq.length) return;
-
-          // Record the tap regardless of correctness; server will verify sequence
+          if (picks.length >= trueSeq.length) return;  // don't overrun
           picks.push(rc);
           updateProgress();
           redrawSelections();
 
-          // Give subtle feedback if the tap wasn't the expected next one
+          // subtle feedback if not the expected next cell
           const need = trueSeq[picks.length - 1];
           if (rc !== need) {
             cell.classList.add("flash");
             setTimeout(() => cell.classList.remove("flash"), 120);
           }
 
-          // Enable Go once the player has entered the full sequence
           if (picks.length === trueSeq.length) {
             goBtn.disabled = false;
           }

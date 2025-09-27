@@ -346,52 +346,37 @@ def init_routes(bp: Blueprint):
 
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
-        # We may need minis for legacy rows; import helpers locally
-        from .core import attach_daily_minis, daily_seed, rng_from_seed
-
+        # tolerate both 'date' and 'date_key'
         data = _json_body_or_400()
-        # Accept both "date" and "date_key" from clients
         date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
         puzzle_id = (data.get("puzzle_id") or "").strip()
         answer_raw = (data.get("answer") or "").strip()
-
         if not puzzle_id:
             return _bad("Missing puzzle_id")
 
-        # Load the day
+        # load the day
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
 
-        # Backfill minis deterministically if a legacy blob lacks them
-        if not (blob.get("minigames") or []):
-            seed = daily_seed(date_key, os.getenv("ESCAPE_SERVER_SECRET", "dev_secret_change_me"))
-            rng = rng_from_seed(seed)
-            theme = blob.get("title") or blob.get("theme") or "Daily Escape"
-            try:
-                attach_daily_minis(blob, rng, theme)
-            except Exception as e:
-                current_app.logger.warning(f"[escape] minis backfill failed: {e}")
-
-        # Find the target mini (accepts either puzzle_id or id)
-        def _find_mini(pid: str):
+        # locate the mini by id (or legacy puzzle)
+        def _find_mini(pid):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
                     return m
             return None
 
-        mini = _find_mini(puzzle_id)
-        ui  = (mini or {}).get("ui_spec") or (mini or {}).get("ui") or {}
-        mech = ((mini or {}).get("mechanic") or "").lower()
+        mini = _find_mini(puzzle_id) or {}
+        ui  = (mini.get("ui_spec") or mini.get("ui") or {})
+        mech = (mini.get("mechanic") or "").lower()
 
-        # Canonicalize Vault Frenzy answers to *indices* (server stores indices)
-        def _canon_for_vault_frenzy(ans: str) -> str:
+        # Canonicalize Vault Frenzy answers to server's likely format (indices),
+        # but also try the r-c form as a fallback to be robust across days.
+        def _canon_indices(ans: str) -> str:
             tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
             if not tokens:
                 return ""
-            # Already indices?
             if all(t.isdigit() for t in tokens):
                 return ",".join(str(int(t)) for t in tokens)
-            # Convert "r-c" pairs -> linear indices using grid columns
             cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
             idx = []
             for t in tokens:
@@ -401,19 +386,40 @@ def init_routes(bp: Blueprint):
                         r, c = int(a), int(b)
                         idx.append(str(r * int(cols) + c))
                     except Exception:
-                        # ignore bad tokens
                         pass
             return ",".join(idx)
 
-        answer = _canon_for_vault_frenzy(answer_raw) if mech == "vault_frenzy" else answer_raw
+        def _canon_rc(ans: str) -> str:
+            tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
+            rc = []
+            for t in tokens:
+                if "-" in t:
+                    a, b = t.split("-", 1)
+                    try:
+                        rc.append(f"{int(a)}-{int(b)}")
+                    except Exception:
+                        pass
+                elif t.isdigit():
+                    cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
+                    i = int(t); rc.append(f"{i // cols}-{i % cols}")
+            return ",".join(rc)
 
+        answer = answer_raw
+        correct = False
         try:
-            # IMPORTANT: verify_puzzle takes the room JSON, not the date string
-            correct = bool(verify_puzzle(blob, puzzle_id, answer))
+            if mech == "vault_frenzy":
+                # try indices first, then r-c (covers both historical storage formats)
+                ans_idx = _canon_indices(answer_raw)
+                correct = bool(verify_puzzle(date_key, puzzle_id, ans_idx))
+                if not correct:
+                    correct = bool(verify_puzzle(date_key, puzzle_id, _canon_rc(answer_raw)))
+            else:
+                correct = bool(verify_puzzle(date_key, puzzle_id, answer_raw))
         except Exception as e:
             current_app.logger.exception("submit verify failed: %s", e)
             return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
 
+        # CRITICAL: the client checks 'data.correct', not 'ok'
         return jsonify({"ok": True, "correct": correct})
 
     # API: finish a run (leaderboards)
