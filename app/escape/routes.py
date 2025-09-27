@@ -260,7 +260,6 @@ def init_routes(bp: Blueprint):
     def play_alias():
         return redirect(url_for("escape.play_today"), code=302)
 
-    # Admin: regenerate a date; auto-rotate seed when force=true (no need to pass rotate)
     @bp.route("/api/admin/regen", methods=["GET", "POST"])
     def admin_regen_api():
         token = request.args.get("token") or (request.get_json(silent=True) or {}).get("token")
@@ -269,28 +268,28 @@ def init_routes(bp: Blueprint):
 
         date_key = request.args.get("date") or get_today_key()
         force = (str(request.args.get("force") or "").lower() in ("1","true","yes","y"))
+
         # Prefer explicit salt/rotate; otherwise auto-generate a one-time salt when forcing
         salt = request.args.get("salt") or request.args.get("rotate")
         auto_salt = False
         if force and not salt:
+            import secrets
             salt = f"auto-{secrets.token_hex(4)}"
             auto_salt = True
 
-        # temporarily set an env var the core will mix into its secret/seed
         old = os.environ.get("ESCAPE_REGEN_SALT")
         try:
             if salt:
                 os.environ["ESCAPE_REGEN_SALT"] = salt
             row = ensure_daily_room(date_key, force_regen=force)
         finally:
-            # restore previous value
             if salt:
                 if old is None:
                     os.environ.pop("ESCAPE_REGEN_SALT", None)
                 else:
                     os.environ["ESCAPE_REGEN_SALT"] = old
 
-        # Backward-compatible response; include salt details for observability
+        # Include salt details for observability
         return jsonify({"ok": True, "date": row.date_key, "rotate": salt, "auto_rotate": auto_salt})
 
     @bp.route("/admin/ping", methods=["GET"])

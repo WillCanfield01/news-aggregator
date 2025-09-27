@@ -792,49 +792,46 @@ def _m32(seed: int):
 
 def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
     """
-    Server and client both build the same sequence using the same seed and the same
-    Mulberry32 RNG. Server stores the canonical answer as ordered r-c tokens.
+    Server now mirrors the client’s seed-driven playback.
+    We generate the same T/D mask and coordinates using a JS-compatible Mulberry32 RNG,
+    store the canonical solution as ordered "r-c" tokens, and send the seed to the client.
     """
     rows, cols = 4, 4
     true_count, decoy_count = 6, 2
-    length = true_count + decoy_count
-    tempo_ms = rng.randrange(450, 601)
+    tempo_ms = 550
 
-    # One deterministic seed per mini, derived from the day RNG
-    seed = rng.getrandbits(32)
-    r = _m32(seed)
+    # JS-compatible Mulberry32 (matches the one used in play.html)
+    def _mulberry32(seed: int):
+        s = seed & 0xFFFFFFFF
+        def rnd() -> float:
+            nonlocal s
+            s = (s + 0x6D2B79F5) & 0xFFFFFFFF
+            t = s ^ (s >> 15)
+            t = (t * ((s | 1) & 0xFFFFFFFF)) & 0xFFFFFFFF
+            t = (t ^ (t + (((t ^ (t >> 7)) * ((61 | s) & 0xFFFFFFFF)) & 0xFFFFFFFF))) & 0xFFFFFFFF
+            return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+        return rnd
 
-    # Build mask: 6 T + 2 D, Fisher–Yates shuffle with Mulberry32
+    seed = rng.randrange(2**31)
+    rnd = _mulberry32(seed)
+
+    # Build and Fisher–Yates shuffle the mask with the same RNG the client uses
     mask = ["T"] * true_count + ["D"] * decoy_count
     for i in range(len(mask) - 1, 0, -1):
-        j = int(r() * (i + 1))
+        j = int(rnd() * (i + 1))
         mask[i], mask[j] = mask[j], mask[i]
 
-    # Coordinates per event; take only the true flashes for the canonical sequence
-    true_seq = []
-    for _ in range(length):
-        rr = int(r() * rows)
-        cc = int(r() * cols)
-        if mask[len(true_seq) + (len(true_seq) < length and mask[len(true_seq)] != 'T') * 0] == "T":
-            pass  # nop: line is only to keep parity with JS loop shape
-        if mask[ len(true_seq) + sum(1 for m in mask[:len(true_seq)] if m == 'D') ] == "T":
-            true_seq.append(f"{rr}-{cc}")
-
-    # Safety: exactly 6 in answer
-    if len(true_seq) != true_count:
-        # Fallback: regenerate purely from seed without mask indexing tricks
-        true_seq = []
-        r2 = _m32(seed ^ 0xA5A5A5A5)
-        while len(true_seq) < true_count:
-            rr = int(r2() * rows); cc = int(r2() * cols)
-            true_seq.append(f"{rr}-{cc}")
-
-    answer = ",".join(true_seq)
+    # Generate coordinates in the same sequence; collect only the true flashes
+    true_rc: List[str] = []
+    for tag in mask:
+        r = int(rnd() * rows)
+        c = int(rnd() * cols)
+        if tag == "T":
+            true_rc.append(f"{r}-{c}")
 
     prompt = (
-        f"{theme or 'The Brass Foundry'}: Watch the vault nodes once. "
-        "Tap the green flashes back in order. Red decoys are ignored. "
-        "Press Play to replay the pattern (resets your input)."
+        f"{theme or 'The Salt Vault'}: Watch the vault nodes. "
+        "Tap the ones that flash green, in order. Ignore the decoys."
     )
 
     return {
@@ -843,12 +840,13 @@ def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict
         "archetype": "mini",
         "mechanic": "vault_frenzy",
         "prompt": prompt,
-        # store/order as r-c tokens; client may send r-c or indices (routes canon to r-c)
-        "answer_format": {"pattern": r"^\d-\d(?:,\d-\d){5}$"},
-        "solution": {"answer": answer},
+        # Accept either r-c tokens or indices
+        "answer_format": {"pattern": r"^(\d+-\d+|\d+)(?:[ ,;](\d+-\d+|\d+)){5,}$"},
+        # Canonical solution is ordered r-c tokens
+        "solution": {"answer": ",".join(true_rc)},
         "hints": [
-            "There are 6 true flashes and 2 decoys.",
-            "Order matters; use ▶ Play to see it again.",
+            "You will see 6 true flashes. Decoys may double-blink.",
+            "Order matters—tap in the same order they turned green.",
         ],
         "decoys": [],
         "paraphrases": [],
@@ -856,12 +854,11 @@ def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict
             "kind": "vault_frenzy",
             "grid_rows": rows,
             "grid_cols": cols,
-            "seed": seed,                # <<< client uses this
+            "seed": seed,
             "true_count": true_count,
             "decoy_count": decoy_count,
-            "length": length,
             "tempo_ms": tempo_ms,
-            "rules": {"double_blink_decoys": True}
+            "rules": {"double_blink_decoys": True},
         },
     }
 
