@@ -346,19 +346,19 @@ def init_routes(bp: Blueprint):
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
         data = _json_body_or_400()
-        # accept both "date" and "date_key"
+        # accept both keys from clients
         date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
         puzzle_id = (data.get("puzzle_id") or "").strip()
         answer_raw = (data.get("answer") or "").strip()
         if not puzzle_id:
             return _bad("Missing puzzle_id")
 
-        # load the day JSON (verify_puzzle requires the blob, not the date string)
+        # Load the full room JSON (verify_puzzle expects the BLOB, not the date string)
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
 
-        # locate the mini (to read grid cols for canonicalization)
-        def _find_mini(pid):
+        # Find the mini for mechanic/grid info
+        def _find_mini(pid: str):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
                     return m
@@ -368,13 +368,12 @@ def init_routes(bp: Blueprint):
         ui  = (mini.get("ui_spec") or mini.get("ui") or {})
         mech = (mini.get("mechanic") or "").lower()
 
-        # Canonicalize Vault Frenzy to INDICES (matches your stored solution)
+        # Canonicalize Vault Frenzy to INDICES (your stored solution is indices)
         def _vf_to_indices(ans: str) -> str:
             tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
             if not tokens:
                 return ""
             if all(t.isdigit() for t in tokens):
-                # already indices
                 return ",".join(str(int(t)) for t in tokens)
             cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
             idx = []
@@ -395,7 +394,7 @@ def init_routes(bp: Blueprint):
             return jsonify({"ok": True, "correct": correct})
         except Exception as e:
             current_app.logger.exception("submit verify failed: %s", e)
-            # never 500 to the browser
+            # Never 500 to the browser
             return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
 
     # API: finish a run (leaderboards)
