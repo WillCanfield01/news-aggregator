@@ -345,6 +345,7 @@ def init_routes(bp: Blueprint):
 
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
+        from .core import attach_daily_minis  # deterministic with our rng
         data = _json_body_or_400()
         # accept both "date" and "date_key"
         date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
@@ -356,6 +357,16 @@ def init_routes(bp: Blueprint):
         # Load the full room JSON (verify_puzzle expects the blob, not the date string)
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
+
+        # **Backfill minis if this DB row predates minis.**
+        # Use the same deterministic per-day RNG used elsewhere so the minis match /api/today.
+        if not (blob.get("minigames") or []):
+            try:
+                rng = _rng_for_date(date_key)
+                theme = blob.get("title") or blob.get("theme") or "Daily Escape"
+                attach_daily_minis(blob, rng, theme)  # mutates blob in place to add minis
+            except Exception as e:
+                current_app.logger.warning(f"[escape] submit: minis backfill failed for {date_key}: {e}")
 
         # locate the mini for mechanic/grid info
         def _find_mini(pid):
@@ -391,6 +402,13 @@ def init_routes(bp: Blueprint):
 
         answer = _vf_to_indices(answer_raw) if mech == "vault_frenzy" else answer_raw
 
+        current_app.logger.info(
+    "[submit] date=%s pid=%s mech=%s answer_raw=%r canon=%r stored=%r",
+    date_key, puzzle_id, mech, answer_raw, answer,
+    next((m.get("solution",{}).get("answer")
+          for m in (blob.get("minigames") or [])
+          if (m.get("puzzle_id") or m.get("id")) == puzzle_id), None)
+    )
         try:
             correct = bool(verify_puzzle(blob, puzzle_id, answer))
             # Include `correct` because the UI reads it
