@@ -346,18 +346,18 @@ def init_routes(bp: Blueprint):
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
         data = _json_body_or_400()
-        # accept both keys from clients
+        # accept both "date" and "date_key"
         date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
         puzzle_id = (data.get("puzzle_id") or "").strip()
         answer_raw = (data.get("answer") or "").strip()
         if not puzzle_id:
             return _bad("Missing puzzle_id")
 
-        # Load the full room JSON (verify_puzzle expects the BLOB, not the date string)
+        # Load the full room JSON (verify_puzzle expects the blob, not the date string)
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
 
-        # Locate the mini (to read grid cols if needed)
+        # locate the mini for mechanic/grid info
         def _find_mini(pid):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
@@ -368,7 +368,7 @@ def init_routes(bp: Blueprint):
         ui  = (mini.get("ui_spec") or mini.get("ui") or {})
         mech = (mini.get("mechanic") or "").lower()
 
-        # Canonicalize Vault Frenzy to INDICES (matches stored solution like "2,3,8,9,13,15")
+        # Canonicalize Vault Frenzy answers to INDICES (matches stored solution like "2,3,8,9,13,15")
         def _vf_to_indices(ans: str) -> str:
             tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
             if not tokens:
@@ -393,10 +393,11 @@ def init_routes(bp: Blueprint):
 
         try:
             correct = bool(verify_puzzle(blob, puzzle_id, answer))
+            # Include `correct` because the UI reads it
             return jsonify({"ok": True, "correct": correct})
         except Exception as e:
             current_app.logger.exception("submit verify failed: %s", e)
-            # Never 500 to the browser
+            # never 500 to the browser
             return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
 
     # API: finish a run (leaderboards)
