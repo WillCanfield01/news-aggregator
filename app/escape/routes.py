@@ -357,8 +357,8 @@ def init_routes(bp: Blueprint):
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
 
-        # Find the mini for mechanic/grid info
-        def _find_mini(pid: str):
+        # Locate the mini (to read grid cols if needed)
+        def _find_mini(pid):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
                     return m
@@ -368,13 +368,15 @@ def init_routes(bp: Blueprint):
         ui  = (mini.get("ui_spec") or mini.get("ui") or {})
         mech = (mini.get("mechanic") or "").lower()
 
-        # Canonicalize Vault Frenzy to INDICES (your stored solution is indices)
+        # Canonicalize Vault Frenzy to INDICES (matches stored solution like "2,3,8,9,13,15")
         def _vf_to_indices(ans: str) -> str:
             tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
             if not tokens:
                 return ""
+            # Already indices?
             if all(t.isdigit() for t in tokens):
                 return ",".join(str(int(t)) for t in tokens)
+            # Convert "r-c" -> linear index using grid columns
             cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
             idx = []
             for t in tokens:
