@@ -345,7 +345,7 @@ def init_routes(bp: Blueprint):
 
     @bp.route("/api/submit", methods=["POST"])
     def api_submit():
-        from .core import attach_daily_minis  # deterministic with our rng
+        from .core import attach_daily_minis  # for legacy rows without minis
         data = _json_body_or_400()
         # accept both "date" and "date_key"
         date_key = (data.get("date") or data.get("date_key") or get_today_key()).strip()
@@ -354,21 +354,20 @@ def init_routes(bp: Blueprint):
         if not puzzle_id:
             return _bad("Missing puzzle_id")
 
-        # Load the full room JSON (verify_puzzle expects the blob, not the date string)
+        # load the day blob the verifier expects
         room = _get_or_404(date_key)
         blob = _row_to_blob(room)
 
-        # **Backfill minis if this DB row predates minis.**
-        # Use the same deterministic per-day RNG used elsewhere so the minis match /api/today.
+        # Backfill minis deterministically if this row predates minis
         if not (blob.get("minigames") or []):
             try:
                 rng = _rng_for_date(date_key)
                 theme = blob.get("title") or blob.get("theme") or "Daily Escape"
-                attach_daily_minis(blob, rng, theme)  # mutates blob in place to add minis
+                attach_daily_minis(blob, rng, theme)
             except Exception as e:
-                current_app.logger.warning(f"[escape] submit: minis backfill failed for {date_key}: {e}")
+                current_app.logger.warning(f"[escape] submit backfill minis failed: {e}")
 
-        # locate the mini for mechanic/grid info
+        # locate the mini and mechanic
         def _find_mini(pid):
             for m in (blob.get("minigames") or []):
                 if (m.get("puzzle_id") or m.get("id")) == pid:
@@ -379,43 +378,31 @@ def init_routes(bp: Blueprint):
         ui  = (mini.get("ui_spec") or mini.get("ui") or {})
         mech = (mini.get("mechanic") or "").lower()
 
-        # Canonicalize Vault Frenzy answers to INDICES (matches stored solution like "2,3,8,9,13,15")
+        # Canonicalize Vault Frenzy **to indices** (server stores indices)
         def _vf_to_indices(ans: str) -> str:
             tokens = [t.strip() for t in str(ans).replace(";", ",").split(",") if t.strip()]
-            if not tokens:
-                return ""
-            # Already indices?
+            if not tokens: return ""
             if all(t.isdigit() for t in tokens):
                 return ",".join(str(int(t)) for t in tokens)
-            # Convert "r-c" -> linear index using grid columns
             cols = ((ui.get("grid") or {}) or {}).get("cols") or ui.get("grid_cols") or ui.get("gridCols") or 4
-            idx = []
+            out = []
             for t in tokens:
                 if "-" in t:
                     a, b = t.split("-", 1)
                     try:
                         r, c = int(a), int(b)
-                        idx.append(str(r * int(cols) + c))
+                        out.append(str(r * int(cols) + c))
                     except Exception:
                         pass
-            return ",".join(idx)
+            return ",".join(out)
 
         answer = _vf_to_indices(answer_raw) if mech == "vault_frenzy" else answer_raw
 
-        current_app.logger.info(
-    "[submit] date=%s pid=%s mech=%s answer_raw=%r canon=%r stored=%r",
-    date_key, puzzle_id, mech, answer_raw, answer,
-    next((m.get("solution",{}).get("answer")
-          for m in (blob.get("minigames") or [])
-          if (m.get("puzzle_id") or m.get("id")) == puzzle_id), None)
-    )
         try:
             correct = bool(verify_puzzle(blob, puzzle_id, answer))
-            # Include `correct` because the UI reads it
             return jsonify({"ok": True, "correct": correct})
         except Exception as e:
             current_app.logger.exception("submit verify failed: %s", e)
-            # never 500 to the browser
             return jsonify({"ok": False, "correct": False, "error": "verify_failed"}), 200
 
     # API: finish a run (leaderboards)

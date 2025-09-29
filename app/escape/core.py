@@ -2932,13 +2932,30 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
     for attempt in range(1, MAX_GEN_ATTEMPTS+1):
         try:
             room_blob = generate_room(date_key, secret)
+
+            # ← Persist minis deterministically using date_key + secret (includes ?rotate/&salt)
+            try:
+                from .core import daily_seed, rng_from_seed, attach_daily_minis
+                theme = room_blob.get("title") or room_blob.get("theme") or "Daily Escape"
+                seed = daily_seed(date_key, secret)
+                rng = rng_from_seed(seed)
+                attach_daily_minis(room_blob, rng, theme)  # mutates room_blob
+            except Exception as e:
+                try: current_app.logger.warning(f"[escape] attach_daily_minis at save failed: {e}")
+                except Exception: pass
+
+            blob_clean = _json_sanitize(room_blob)
+
             if existing:
-                existing.json_blob = room_blob
-                existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
+                existing.json_blob = blob_clean
+                existing.difficulty = blob_clean.get("difficulty", DEFAULT_DIFFICULTY)
                 db.session.add(existing); db.session.commit(); return existing
             else:
-                new_room = EscapeRoom(date_key=date_key, json_blob=room_blob,
-                                      difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY))
+                new_room = EscapeRoom(
+                    date_key=date_key,
+                    json_blob=blob_clean,
+                    difficulty=blob_clean.get("difficulty", DEFAULT_DIFFICULTY),
+                )
                 db.session.add(new_room); db.session.commit(); return new_room
         except Exception as e:
             try: current_app.logger.warning(f"[escape] generation attempt {attempt} failed: {e}")
@@ -2953,31 +2970,30 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
 
     room_blob = generate_room_offline(date_key, secret)
 
-    # Make sure minis are attached & JSON-safe
+    # Attach minis deterministically (same seed rule as online path)
     try:
+        from .core import daily_seed, rng_from_seed, attach_daily_minis
         theme = room_blob.get("title") or room_blob.get("theme") or "Daily Escape"
-        attach_daily_minis(room_blob, random.Random(hash(date_key) & 0xFFFFFFFF), theme)
+        seed = daily_seed(date_key, secret)
+        rng = rng_from_seed(seed)
+        attach_daily_minis(room_blob, rng, theme)
     except Exception as e:
-        try:
-            current_app.logger.warning(f"[escape] attach_daily_minis at save failed: {e}")
-        except Exception:
-            pass
+        try: current_app.logger.warning(f"[escape] attach_daily_minis at save failed: {e}")
+        except Exception: pass
 
     blob_clean = _json_sanitize(room_blob)
 
     row = EscapeRoom.query.filter_by(date_key=date_key).first()
-    if not row:
-        row = EscapeRoom(date_key=date_key)
-
-    # Save JSON fields (adjust to your actual column names)
-    row.theme = blob_clean.get("theme") or blob_clean.get("title")
-    row.minigames_json = json.dumps(blob_clean.get("minigames", []), separators=(",", ":"))
-    row.server_private_json = json.dumps(blob_clean.get("server_private", {}), separators=(",", ":"))
-    row.room_json = json.dumps(blob_clean, separators=(",", ":"))  # if you store the full blob
-
-    db.session.add(row)
-    db.session.commit()
-
+    if row:
+        row.json_blob = blob_clean
+        row.difficulty = blob_clean.get("difficulty", DEFAULT_DIFFICULTY)
+    else:
+        row = EscapeRoom(
+            date_key=date_key,
+            json_blob=blob_clean,
+            difficulty=blob_clean.get("difficulty", DEFAULT_DIFFICULTY),
+        )
+    db.session.add(row); db.session.commit(); return row
 
 def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool:
     if submitted is None: return False
