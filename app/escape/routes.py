@@ -56,8 +56,9 @@ def _blob_to_minis_payload(blob, date_key):
     """
     Normalize the room blob to {date,theme,minigames:[]} for API.
     Tolerates dicts, Puzzle objects, or missing minis (attaches them).
+    Uses the SAME per-day RNG as /api/today so results never drift.
     """
-    from .core import attach_daily_minis, rng_from_seed, daily_seed
+    from .core import attach_daily_minis
 
     def _to_dict(x):
         if isinstance(x, dict):
@@ -71,10 +72,9 @@ def _blob_to_minis_payload(blob, date_key):
 
     mg = blob.get("minigames")
     if not mg:
-        # backfill deterministically
-        seed = daily_seed(date_key, os.getenv("ESCAPE_SERVER_SECRET", "dev_secret"))
-        rng = rng_from_seed(seed)
-        blob = attach_daily_minis(blob, rng, blob.get("theme") or blob.get("title") or "Daily Escape")
+        # backfill deterministically with our unified RNG path
+        rng = _rng_for_date(date_key)
+        attach_daily_minis(blob, rng, blob.get("theme") or blob.get("title") or "Daily Escape")
         mg = blob.get("minigames")
 
     minis = []
@@ -282,6 +282,22 @@ def init_routes(bp: Blueprint):
             if salt:
                 os.environ["ESCAPE_REGEN_SALT"] = salt
             row = ensure_daily_room(date_key, force_regen=force)
+
+            # ⤵ Persist minis NOW (while rotate/salt is active) so future reads match.
+            try:
+                from .core import attach_daily_minis
+                rng = _rng_for_date(date_key)
+                blob = _row_to_blob(row)
+                theme = blob.get("title") or blob.get("theme") or "Daily Escape"
+                # Regenerate minis when forced, or create if missing
+                if force or not (blob.get("minigames") or []):
+                    attach_daily_minis(blob, rng, theme)
+                    row.json_blob = blob
+                    db.session.add(row)
+                    db.session.commit()
+            except Exception as e:
+                current_app.logger.warning(f"[escape] admin_regen minis persist failed: {e}")
+
         finally:
             if salt:
                 if old is None:
@@ -313,7 +329,11 @@ def init_routes(bp: Blueprint):
             try:
                 rng = _rng_for_date(room.date_key)
                 theme = blob.get("title") or blob.get("theme") or "Daily Escape"
-                attach_daily_minis(blob, rng, theme)   # <-- correct call (mutates blob in place)
+                attach_daily_minis(blob, rng, theme)   # mutate in place
+                # ⤵ persist once so future reads don't re-generate different minis
+                room.json_blob = blob
+                db.session.add(room)
+                db.session.commit()
             except Exception as e:
                 current_app.logger.warning(f"[escape] attach_daily_minis failed: {e}")
 
@@ -322,7 +342,6 @@ def init_routes(bp: Blueprint):
             if not payload.get("minigames"):
                 current_app.logger.warning("[escape] minis view built 0 games for %s", room.date_key)
             return jsonify(payload)
-
 
         payload = _strip_solutions(blob)
 
