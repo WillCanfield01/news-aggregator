@@ -456,15 +456,20 @@
       // ---------- Minis ----------
       function mountVaultFrenzy(host, mini) {
         const ui = mini.ui || {};
-        const g = ui.grid || { rows: 3, cols: 4 };
+        // normalize grid from ui_spec (server sends grid_rows/grid_cols)
+        const g = {
+          rows: (ui.grid && ui.grid.rows) || ui.grid_rows || 4,
+          cols: (ui.grid && ui.grid.cols) || ui.grid_cols || 4
+        };
         const tempo = ui.tempo_ms || 520;
-        const rules = ui.rules || {};
-        const rng = m32(ui.seed || 1);
 
-        // Server declares exact counts (we fall back sensibly)
-        const length = ui.length || 8;
-        const trueCount = ui.true_count ?? 6;
-        const decoyCount = ui.decoy_count ?? Math.max(0, length - trueCount);
+        // ---- USE SERVER DATA (deterministic + refreshes after regen)
+        // true_indices define the exact ordered solution; decoys can be shown anywhere.
+        const trueIdx = (ui.true_indices || []).slice();
+        const decoyIdx = (ui.decoy_indices || []).slice();
+
+        const idxToRC = (i) => `${Math.floor(i / g.cols)}-${i % g.cols}`;
+        const trueSeq = trueIdx.map(idxToRC); // expected tap order (matches server)
 
         // --- help
         const help = document.createElement("div");
@@ -498,7 +503,14 @@
         const playBtn = btn("▶ Play", () => startPlayback(true));
         const clearBtn = btn("Clear", resetInput);
         const backBtn = btn("⌫", () => { if (!inputEnabled) return; picks.pop(); updateProgress(); redrawSelections(); });
-        const goBtn = btn("Go", () => submitAnswer(mini, picks.join(",")));
+        // Submit indices so it matches any server canonicalization path
+        const goBtn = btn("Go", () => {
+          const answer = picks.map(rc => {
+            const [r, c] = rc.split("-").map(Number);
+            return (r * g.cols + c);
+          }).join(",");
+          submitAnswer(mini, answer);
+        });
         goBtn.disabled = true;
         ctrls.append(playBtn, clearBtn, backBtn, goBtn);
         host.appendChild(ctrls);
@@ -509,22 +521,20 @@
 
         function btn(t, fn) { const b = document.createElement("button"); b.className = "btn"; b.textContent = t; b.onclick = fn; return b; }
 
-        // === Build the exact same event stream the server used ===
-        // Shuffle mask of T/D with seeded RNG (order matters)
-        const mask = Array(trueCount).fill("T").concat(Array(decoyCount).fill("D"));
-        for (let i = mask.length - 1; i > 0; i--) {
-          const j = Math.floor(rng() * (i + 1));[mask[i], mask[j]] = [mask[j], mask[i]];
+        // === Build the playback event timeline from server indices ===
+        // We interleave decoys at a couple of fixed slots; solution order is still trueSeq.
+        const events = [];
+        const decoySlots = decoyIdx.length === 2 ? [1, 4] : (decoyIdx.length === 1 ? [2] : []);
+        let d = 0;
+        for (let i = 0; i < trueIdx.length; i++) {
+          if (decoySlots.includes(i) && d < decoyIdx.length) {
+            const di = decoyIdx[d++]; events.push({ r: Math.floor(di / g.cols), c: (di % g.cols), isDecoy: true, dbl: true, delay: false });
+          }
+          const ti = trueIdx[i]; events.push({ r: Math.floor(ti / g.cols), c: (ti % g.cols), isDecoy: false, dbl: false, delay: false });
         }
-        const events = mask.map(tag => {
-          const r = Math.floor(rng() * g.rows), c = Math.floor(rng() * g.cols);
-          return {
-            r, c,
-            isDecoy: tag === "D",
-            dbl: rng() < (rules.double_blink_prob ?? 0.12),
-            delay: rng() < (rules.delayed_glow_prob ?? 0.12),
-          };
-        });
-        const trueSeq = events.filter(e => !e.isDecoy).map(e => `${e.r}-${e.c}`); // expected order
+        while (d < decoyIdx.length) {
+          const di = decoyIdx[d++]; events.push({ r: Math.floor(di / g.cols), c: (di % g.cols), isDecoy: true, dbl: true, delay: false });
+        }
 
         // Input state (post-playback)
         let inputEnabled = false;
@@ -546,9 +556,8 @@
           setTimeout(() => setFlash(cell, color, false), onMs);
         }
         function redrawSelections() {
-          // Clear all selection rings, then add subtle ring for chosen cells
           cells.forEach(c => c.style.boxShadow = "");
-          picks.forEach((rc, i) => {
+          picks.forEach((rc) => {
             const [r, c] = rc.split("-").map(Number);
             const el = cells[r * g.cols + c];
             el.style.boxShadow = "0 0 0 2px rgba(107,242,169,.65) inset";
@@ -574,9 +583,7 @@
             setTimeout(() => cell.classList.remove("flash"), 120);
           }
 
-          if (picks.length === trueSeq.length) {
-            goBtn.disabled = false;
-          }
+          if (picks.length === trueSeq.length) goBtn.disabled = false;
         };
 
         function updateProgress() {
@@ -596,8 +603,8 @@
           function startClock() {
             if (__clockStarted) return;
             __clockStarted = true;
-            const label = document.getElementById("escape-elapsed");
-            if (!label) return; // gracefully no-op if header doesn't expose the label
+            const label = document.getElementById("globalTimer"); // ← was #escape-elapsed
+            if (!label) return;
             const t0 = Date.now();
             const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
             setInterval(() => {
@@ -608,6 +615,9 @@
           inputEnabled = false;
           if (reset) { picks = []; updateProgress(); redrawSelections(); }
 
+          // Start the clock on first playback
+          startClock();
+
           cells.forEach(c => setFlash(c, "#000", false));
           let t = 0;
           const onMs = Math.floor(tempo * 0.6);
@@ -615,11 +625,10 @@
           events.forEach(ev => {
             const cell = cells[ev.r * g.cols + ev.c];
             const show = () => flashCell(cell, ev.isDecoy ? "#ff6b6b" : "#6bf2a9", onMs);
-            const lead = ev.delay ? Math.floor(tempo * 0.25) : 0;
             setTimeout(() => {
               show();
               if (ev.dbl) setTimeout(show, Math.floor(onMs * 0.8));
-            }, t + lead);
+            }, t);
             t += tempo;
           });
 
