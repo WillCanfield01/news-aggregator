@@ -668,7 +668,7 @@
           ? String(mini.solution.answer).split(",").map(x => parseInt(x, 10))
           : [];
 
-        // Build helpers per round
+        // Helpers for mapping between door position <-> symbol index for each round
         const posToSym = (r) => (shuffles[r] && shuffles[r].length) ? shuffles[r] : symbols.map((_, i) => i);
         const symToPos = (r) => {
           const p2s = posToSym(r), inv = new Array(p2s.length);
@@ -676,21 +676,25 @@
           return inv;
         };
 
-        // Derive the SYMBOL sequence to *show*.
-        // Prefer ui.sequence; otherwise choose the interpretation (positions vs symbols)
-        // that round-trips back to `stored` when mapped to positions.
+        // Derive the SYMBOL sequence to *show* (per-round detection).
+        // If ui.sequence is provided, trust it. Otherwise, for each round r:
+        // - If mapping stored[r] as a POSITION round-trips back to the same value, treat it as a position
+        //   and convert to symbol index via posToSym(r)[stored[r]].
+        // - Else treat stored[r] as a symbol index directly.
         let seqSymIdx = [];
         if (Array.isArray(ui.sequence) && ui.sequence.length) {
           seqSymIdx = ui.sequence.slice(0, rounds).map(Number);
-        } else if (stored.length === rounds && (shuffles[0] || []).length) {
-          const asPositions = stored.map((pos, r) => posToSym(r)[pos]);            // interpret stored as POS
-          const posRoundTripA = asPositions.map((sym, r) => symToPos(r)[sym]);     // -> back to POS
-          const asSymbols = stored.slice(0, rounds);                              // interpret stored as SYM
-          const posRoundTripB = asSymbols.map((sym, r) => symToPos(r)[sym]);        // -> POS
-          // If A maps back exactly to stored, stored was positions; otherwise prefer symbols.
-          seqSymIdx = (JSON.stringify(posRoundTripA) === JSON.stringify(stored)) ? asPositions : asSymbols;
         } else {
-          seqSymIdx = stored.slice(0, rounds); // fallback
+          seqSymIdx = new Array(rounds).fill(0).map((_, r) => {
+            const val = stored[r];
+            if (val == null || Number.isNaN(val)) return 0;
+            const p2s = posToSym(r);
+            const s2p = symToPos(r);
+            const asPosSym = p2s[val];                 // interpret stored as POS -> sym
+            const roundTripPos = s2p[asPosSym];        // POS -> sym -> POS
+            return (roundTripPos === val) ? asPosSym   // looks like a POS for this round
+              : Number(val); // looks like a SYM for this round
+          });
         }
 
         // ---- Layout ----
@@ -839,10 +843,17 @@
         backBtn.onclick = () => { if (!inputEnabled || !picksSym.length) return; picksSym.pop(); round = Math.max(0, round - 1); renderCorridor(); updateProg(); };
 
         goBtn.onclick = () => {
-          // Submit in the format the server expects.
-          const posSeq = picksSym.map((sym, r) => symToPos(r)[sym]); // our picks as POSITIONS
-          const storedIsPos = (stored.length === rounds) && JSON.stringify(stored) === JSON.stringify(posSeq);
-          submitAnswer(mini, (storedIsPos ? posSeq : picksSym).join(","));
+          // Decide the server format *for the whole puzzle*.
+          // If stored exactly matches our picks as POSITIONS, send positions; else if stored matches
+          // our picks as SYMBOLS, send symbols; otherwise default to POSITIONS (most common for this mini).
+          const picksPos = picksSym.map((sym, r) => symToPos(r)[sym]);
+          const sameAsStoredPos = (stored.length === rounds) &&
+            stored.every((v, i) => v === picksPos[i]);
+          const sameAsStoredSym = (stored.length === rounds) &&
+            stored.every((v, i) => v === picksSym[i]);
+
+          const payload = sameAsStoredPos ? picksPos : (sameAsStoredSym ? picksSym : picksPos);
+          submitAnswer(mini, payload.join(","));
         };
 
         // initial paint + auto-show once
