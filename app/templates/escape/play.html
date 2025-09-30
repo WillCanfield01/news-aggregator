@@ -740,47 +740,62 @@
 
         function renderCorridor() {
           corridor.innerHTML = "";
-          const p2s = posToSym(round);
-          const phantomPos = Number(phantoms[round] ?? -1);
-          const wantSymIdx = seqSymIdx[Math.min(round, rounds - 1)];
+
+          // pos -> symbol index mapping for this round
+          const p2s = posToSym(round).slice(); // copy so we can defensively adjust
+          let wantSymIdx = Number(seqSymIdx[Math.min(round, rounds - 1)]);
+
+          // --- GUARANTEE the target exists on the board ---
+          // If the computed target symbol isn't present, try interpreting today's
+          // stored value as a *position* for this round; else force-place it.
+          if (!p2s.includes(wantSymIdx)) {
+            const sv = stored[round];
+            if (sv != null && !Number.isNaN(sv) && sv >= 0 && sv < p2s.length) {
+              wantSymIdx = p2s[sv]; // treat stored as a position → symbol index
+            }
+          }
+          if (!p2s.includes(wantSymIdx)) {
+            // final safety: swap the last slot to the target symbol
+            p2s[p2s.length - 1] = wantSymIdx;
+          }
+
+          // Avoid the target being a phantom door (would make round impossible)
+          const phantomOrig = Number(phantoms[round] ?? -1);
+          const posTarget = p2s.indexOf(wantSymIdx);
+          const phantomPos = (phantomOrig === posTarget) ? -1 : phantomOrig;
 
           for (let pos = 0; pos < p2s.length; pos++) {
             const symIdx = p2s[pos];
             const sym = symbols[symIdx];
             const isPhantom = (pos === phantomPos);
+
             const d = doorEl(sym, isPhantom);
-            d.dataset.pos = String(pos); d.dataset.symi = String(symIdx);
+            d.dataset.pos = String(pos);
+            d.dataset.symi = String(symIdx);
 
             d.onclick = () => {
-              if (!inputEnabled || lockedRound) return;
+              if (!inputEnabled) return;
 
               if (isPhantom) {
-                d.style.transition = "opacity 200ms ease"; d.style.opacity = "0.28";
+                d.style.transition = "opacity 200ms ease";
+                d.style.opacity = "0.28";
                 d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
                 return;
               }
 
               if (symIdx === wantSymIdx) {
-                lockedRound = true;
                 picksSym.push(symIdx);
                 d.style.boxShadow = "0 0 12px rgba(80,255,180,.9)";
-                setTimeout(() => (d.style.boxShadow = ""), 220);
-                setTimeout(() => {
-                  round++;
-                  lockedRound = false;
-                  goBtn.disabled = picksSym.length !== rounds;
-                  if (round < rounds) { renderCorridor(); updateProg(); } else { updateProg(); }
-                }, 140);
+                setTimeout(() => (d.style.boxShadow = ""), 260);
+
+                round++;
+                goBtn.disabled = picksSym.length !== rounds;
+                if (round < rounds) { renderCorridor(); updateProg(); }
+                else { updateProg(); }
               } else {
                 d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
               }
             };
-
-            // safety: ensure the target symbol is present each round
-            if (pos === p2s.length - 1 && !p2s.includes(wantSymIdx)) {
-              // if not, rotate permutation so target is included (defensive only)
-              p2s[0] = wantSymIdx;
-            }
 
             corridor.appendChild(d);
           }
