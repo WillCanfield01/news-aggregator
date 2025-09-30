@@ -657,28 +657,40 @@
       function mountPhantomDoors(host, mini) {
         // ---- Server payload ----
         const ui = mini.ui || {};
-        const symbols = (ui.symbols || ["▲", "●", "◆", "■", "✶", "✦"]).slice();   // 6 symbols
+        const symbols = (ui.symbols || ["▲", "●", "◆", "■", "✶", "✦"]).slice(); // 6 symbols
         const rounds = Number(ui.rounds || 3);
-        const shuffles = (ui.shuffles || []).map(a => a.slice());               // [[perm]...], perm[pos] = symIdx
-        const phantoms = (ui.phantoms || Array(rounds).fill(-1)).slice();       // [phantomPos per round]
+        const shuffles = (ui.shuffles || []).map(a => a.slice());              // [[perm], ...]
+        const phantoms = (ui.phantoms || Array(rounds).fill(-1)).slice();      // [phantomPos per round]
         const tempo = Number(ui.tempo_ms || 600);
 
-        // Raw answer from server (e.g. "2,4,0"). Could be POSITIONS or SYMBOL INDICES.
+        // Raw answer (could be POSITIONS or SYMBOL INDICES)
         const stored = (mini.solution && mini.solution.answer)
           ? String(mini.solution.answer).split(",").map(x => parseInt(x, 10))
           : [];
 
-        // Sequence (SYMBOL indices) to SHOW above the corridor:
-        // 1) prefer ui.sequence (symbol indices)
-        // 2) else map stored POSITIONS via each round's shuffle
-        // 3) else treat stored as symbol indices
+        // Build helpers per round
+        const posToSym = (r) => (shuffles[r] && shuffles[r].length) ? shuffles[r] : symbols.map((_, i) => i);
+        const symToPos = (r) => {
+          const p2s = posToSym(r), inv = new Array(p2s.length);
+          for (let pos = 0; pos < p2s.length; pos++) inv[p2s[pos]] = pos;
+          return inv;
+        };
+
+        // Derive the SYMBOL sequence to *show*.
+        // Prefer ui.sequence; otherwise choose the interpretation (positions vs symbols)
+        // that round-trips back to `stored` when mapped to positions.
         let seqSymIdx = [];
         if (Array.isArray(ui.sequence) && ui.sequence.length) {
           seqSymIdx = ui.sequence.slice(0, rounds).map(Number);
         } else if (stored.length === rounds && (shuffles[0] || []).length) {
-          seqSymIdx = stored.map((pos, r) => (shuffles[r] || [])[pos] ?? Number(pos));
+          const asPositions = stored.map((pos, r) => posToSym(r)[pos]);            // interpret stored as POS
+          const posRoundTripA = asPositions.map((sym, r) => symToPos(r)[sym]);     // -> back to POS
+          const asSymbols = stored.slice(0, rounds);                              // interpret stored as SYM
+          const posRoundTripB = asSymbols.map((sym, r) => symToPos(r)[sym]);        // -> POS
+          // If A maps back exactly to stored, stored was positions; otherwise prefer symbols.
+          seqSymIdx = (JSON.stringify(posRoundTripA) === JSON.stringify(stored)) ? asPositions : asSymbols;
         } else {
-          seqSymIdx = stored.slice(0, rounds);
+          seqSymIdx = stored.slice(0, rounds); // fallback
         }
 
         // ---- Layout ----
@@ -695,8 +707,7 @@
         seqBar.style.alignItems = "center";
         seqBar.style.margin = "8px 0 14px";
         const showBtn = document.createElement("button");
-        showBtn.className = "btn";
-        showBtn.textContent = "▶ Show";
+        showBtn.className = "btn"; showBtn.textContent = "▶ Show";
         seqBar.appendChild(showBtn);
 
         const seqWrap = document.createElement("div");
@@ -707,7 +718,7 @@
         seqBar.appendChild(seqWrap);
         host.appendChild(seqBar);
 
-        // Doors (6) laid out 3×2
+        // Corridor (3×2)
         const corridor = document.createElement("div");
         corridor.style.display = "grid";
         corridor.style.gridTemplateColumns = "repeat(3, 220px)";
@@ -717,26 +728,22 @@
 
         // Controls
         const ctrls = document.createElement("div");
-        ctrls.style.display = "flex";
-        ctrls.style.gap = "8px";
-        ctrls.style.marginTop = "12px";
+        ctrls.style.display = "flex"; ctrls.style.gap = "8px"; ctrls.style.marginTop = "12px";
         const clearBtn = document.createElement("button"); clearBtn.className = "btn"; clearBtn.textContent = "Clear";
         const backBtn = document.createElement("button"); backBtn.className = "btn"; backBtn.textContent = "⌫";
         const goBtn = document.createElement("button"); goBtn.className = "btn"; goBtn.textContent = "Go"; goBtn.disabled = true;
         ctrls.append(clearBtn, backBtn, goBtn);
-        host.appendChild(ctrlls);
+        host.appendChild(ctrlls = ctrls); // ensure it mounts
 
         const prog = document.createElement("div");
-        prog.className = "muted";
-        prog.style.marginTop = "4px";
+        prog.className = "muted"; prog.style.marginTop = "4px";
         host.appendChild(prog);
 
         // ---- State ----
-        let round = 0;                 // 0..rounds-1
-        let picksSym = [];             // chosen SYMBOL indices per round
+        let round = 0;           // 0..rounds-1
+        let picksSym = [];       // chosen SYMBOL indices per round
         let inputEnabled = false;
 
-        // helpers
         function doorEl(symbol, isPhantom) {
           const d = document.createElement("div");
           d.className = "vf-cell";
@@ -762,11 +769,11 @@
 
         function renderCorridor() {
           corridor.innerHTML = "";
-          const perm = shuffles[round] || symbols.map((_, i) => i);
+          const p2s = posToSym(round);                  // pos -> symIdx
           const phantomPos = Number(phantoms[round] ?? -1);
 
-          for (let pos = 0; pos < perm.length; pos++) {
-            const symIdx = perm[pos];
+          for (let pos = 0; pos < p2s.length; pos++) {
+            const symIdx = p2s[pos];
             const sym = symbols[symIdx];
             const isPhantom = (pos === phantomPos);
 
@@ -778,29 +785,22 @@
               if (!inputEnabled) return;
 
               if (isPhantom) {
-                // trick: only fades AFTER you tap it
                 d.style.transition = "opacity 200ms ease";
                 d.style.opacity = "0.28";
                 d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
                 return;
               }
 
-              // Correct door for this round = door whose SYMBOL matches target
               const wantSymIdx = Number(seqSymIdx[round]);
               if (symIdx === wantSymIdx) {
                 picksSym.push(symIdx);
-                // reward glow
                 d.style.boxShadow = "0 0 12px rgba(80,255,180,.9)";
                 setTimeout(() => (d.style.boxShadow = ""), 260);
 
                 round++;
                 goBtn.disabled = picksSym.length !== rounds;
-                if (round < rounds) {
-                  renderCorridor();
-                  updateProg();
-                } else {
-                  updateProg();
-                }
+                if (round < rounds) { renderCorridor(); updateProg(); }
+                else { updateProg(); }
               } else {
                 d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
               }
@@ -827,30 +827,28 @@
             seqWrap.appendChild(el);
             return el;
           });
-          // animate one by one for drama
           let t = 0;
-          items.forEach((el) => {
-            setTimeout(() => { el.style.opacity = "1"; }, t);
-            t += Math.max(220, Math.floor(tempo * 0.55));
-          });
+          items.forEach((el) => { setTimeout(() => { el.style.opacity = "1"; }, t); t += Math.max(220, Math.floor(tempo * 0.55)); });
         }
 
         // Control hooks
-        showBtn.onclick = () => { replaySequence(); inputEnabled = true; round = 0; picksSym = []; renderCorridor(); updateProg(); };
+        const startRound = () => { replaySequence(); inputEnabled = true; round = 0; picksSym = []; renderCorridor(); updateProg(); };
+        showBtn.addEventListener("click", startRound);
+
         clearBtn.onclick = () => { picksSym = []; round = 0; inputEnabled = false; renderCorridor(); updateProg(); };
         backBtn.onclick = () => { if (!inputEnabled || !picksSym.length) return; picksSym.pop(); round = Math.max(0, round - 1); renderCorridor(); updateProg(); };
+
         goBtn.onclick = () => {
-          // Compute both forms; submit whichever matches server’s stored format for the day.
-          const picksPos = picksSym.map((sym, r) => (shuffles[r] || []).indexOf(sym));
-          const storedLooksPos = (stored.length === rounds) && picksPos.every(p => p >= 0);
-          const usePos = storedLooksPos && stored.join(",") === picksPos.join(",");
-          submitAnswer(mini, (usePos ? picksPos : picksSym).join(","));
+          // Submit in the format the server expects.
+          const posSeq = picksSym.map((sym, r) => symToPos(r)[sym]); // our picks as POSITIONS
+          const storedIsPos = (stored.length === rounds) && JSON.stringify(stored) === JSON.stringify(posSeq);
+          submitAnswer(mini, (storedIsPos ? posSeq : picksSym).join(","));
         };
 
         // initial paint + auto-show once
         renderCorridor();
         updateProg();
-        setTimeout(() => showBtn.click(), 220);
+        setTimeout(startRound, 220);
       }
 
       // PRESSURE CHAMBER: animate gauges; accept a pre-computed order of labels
