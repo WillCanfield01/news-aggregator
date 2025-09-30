@@ -368,10 +368,14 @@
         state.theme = data.theme;
         state.minis = (data.minigames || []).map(m => ({
           slot: m.slot || m.id,
+          // keep both for clarity
+          puzzle_id: m.puzzle_id || m.id,
           id: m.puzzle_id || m.id,
           mechanic: (m.mechanic || (m.ui || {}).kind || "").toLowerCase(),
           prompt: m.prompt || "",
-          ui: m.ui_spec || m.ui || {}
+          ui: m.ui_spec || m.ui || {},
+          // <— retain solution so Phantom Doors can see what the server expects
+          solution: m.solution || null
         }));
       }
 
@@ -653,20 +657,29 @@
       function mountPhantomDoors(host, mini) {
         // ---- Server payload ----
         const ui = mini.ui || {};
-        const symbols = (ui.symbols || ["▲", "●", "◆", "■", "✶", "✦"]).slice();      // 6 symbols by default
+        const symbols = (ui.symbols || ["▲", "●", "◆", "■", "✶", "✦"]).slice();   // 6 symbols
         const rounds = Number(ui.rounds || 3);
-        const shuffles = (ui.shuffles || []).map(a => a.slice());                 // [[perm...], ...]
-        const phantoms = (ui.phantoms || Array(rounds).fill(-1)).slice();         // [posIndex per round]
+        const shuffles = (ui.shuffles || []).map(a => a.slice());               // [[perm]...], perm[pos] = symIdx
+        const phantoms = (ui.phantoms || Array(rounds).fill(-1)).slice();       // [phantomPos per round]
         const tempo = Number(ui.tempo_ms || 600);
 
-        // Sequence to show above the corridor:
-        // The server intends to show this to the player; when present we prefer ui.sequence,
-        // otherwise we fall back to the stored solution indices (already a sequence).
-        const seqIdx = (
-          (ui.sequence && ui.sequence.length ? ui.sequence : (
-            (mini.solution && mini.solution.answer) ? String(mini.solution.answer).split(",").map(x => parseInt(x, 10)) : []
-          ))
-        ).slice(0, rounds);
+        // Raw answer from server (e.g. "2,4,0"). Could be POSITIONS or SYMBOL INDICES.
+        const stored = (mini.solution && mini.solution.answer)
+          ? String(mini.solution.answer).split(",").map(x => parseInt(x, 10))
+          : [];
+
+        // Sequence (SYMBOL indices) to SHOW above the corridor:
+        // 1) prefer ui.sequence (symbol indices)
+        // 2) else map stored POSITIONS via each round's shuffle
+        // 3) else treat stored as symbol indices
+        let seqSymIdx = [];
+        if (Array.isArray(ui.sequence) && ui.sequence.length) {
+          seqSymIdx = ui.sequence.slice(0, rounds).map(Number);
+        } else if (stored.length === rounds && (shuffles[0] || []).length) {
+          seqSymIdx = stored.map((pos, r) => (shuffles[r] || [])[pos] ?? Number(pos));
+        } else {
+          seqSymIdx = stored.slice(0, rounds);
+        }
 
         // ---- Layout ----
         const help = document.createElement("div");
@@ -694,7 +707,7 @@
         seqBar.appendChild(seqWrap);
         host.appendChild(seqBar);
 
-        // Doors (6) laid out 3×2 like your design
+        // Doors (6) laid out 3×2
         const corridor = document.createElement("div");
         corridor.style.display = "grid";
         corridor.style.gridTemplateColumns = "repeat(3, 220px)";
@@ -707,19 +720,11 @@
         ctrls.style.display = "flex";
         ctrls.style.gap = "8px";
         ctrls.style.marginTop = "12px";
-        const clearBtn = document.createElement("button");
-        clearBtn.className = "btn";
-        clearBtn.textContent = "Clear";
-        const backBtn = document.createElement("button");
-        backBtn.className = "btn";
-        backBtn.textContent = "⌫";
-        const goBtn = document.createElement("button");
-        goBtn.className = "btn";
-        goBtn.textContent = "Go";
-        goBtn.disabled = true;
-        ctrls.append(showBtn.cloneNode ? showBtn.cloneNode(false) : null); // visual symmetry; disabled clone
+        const clearBtn = document.createElement("button"); clearBtn.className = "btn"; clearBtn.textContent = "Clear";
+        const backBtn = document.createElement("button"); backBtn.className = "btn"; backBtn.textContent = "⌫";
+        const goBtn = document.createElement("button"); goBtn.className = "btn"; goBtn.textContent = "Go"; goBtn.disabled = true;
         ctrls.append(clearBtn, backBtn, goBtn);
-        host.appendChild(ctrls);
+        host.appendChild(ctrlls);
 
         const prog = document.createElement("div");
         prog.className = "muted";
@@ -728,7 +733,7 @@
 
         // ---- State ----
         let round = 0;                 // 0..rounds-1
-        let picks = [];                // chosen correct symbol indices per round
+        let picksSym = [];             // chosen SYMBOL indices per round
         let inputEnabled = false;
 
         // helpers
@@ -764,25 +769,32 @@
             const symIdx = perm[pos];
             const sym = symbols[symIdx];
             const isPhantom = (pos === phantomPos);
+
             const d = doorEl(sym, isPhantom);
             d.dataset.pos = String(pos);
             d.dataset.symi = String(symIdx);
-            d.dataset.ph = String(isPhantom ? 1 : 0);
 
             d.onclick = () => {
               if (!inputEnabled) return;
-              // Phantom fades and doesn't count
+
               if (isPhantom) {
-                d.style.opacity = "0.35";
-                d.style.transition = "opacity 240ms ease";
+                // trick: only fades AFTER you tap it
+                d.style.transition = "opacity 200ms ease";
+                d.style.opacity = "0.28";
+                d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
                 return;
               }
-              // Correct door = door whose symbol matches this round’s target symbol index
-              const wantSymIdx = Number(seqIdx[round]);
+
+              // Correct door for this round = door whose SYMBOL matches target
+              const wantSymIdx = Number(seqSymIdx[round]);
               if (symIdx === wantSymIdx) {
-                picks.push(symIdx);
+                picksSym.push(symIdx);
+                // reward glow
+                d.style.boxShadow = "0 0 12px rgba(80,255,180,.9)";
+                setTimeout(() => (d.style.boxShadow = ""), 260);
+
                 round++;
-                goBtn.disabled = picks.length !== rounds;
+                goBtn.disabled = picksSym.length !== rounds;
                 if (round < rounds) {
                   renderCorridor();
                   updateProg();
@@ -790,9 +802,7 @@
                   updateProg();
                 }
               } else {
-                // brief shake
-                d.classList.add("flash");
-                setTimeout(() => d.classList.remove("flash"), 120);
+                d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
               }
             };
 
@@ -801,63 +811,45 @@
         }
 
         function updateProg() {
-          prog.textContent = `round ${Math.min(round + 1, rounds)}/${rounds}`;
+          const glyph = symbols[seqSymIdx[Math.min(round, rounds - 1)]] ?? "?";
+          prog.textContent = `round ${Math.min(round + 1, rounds)}/${rounds} • target ${glyph}`;
         }
 
         function replaySequence() {
           seqWrap.innerHTML = "";
-          const items = seqIdx.map(i => {
+          const items = seqSymIdx.map(i => {
             const el = document.createElement("div");
             el.textContent = symbols[i] ?? "?";
             el.style.padding = "2px 6px";
             el.style.borderRadius = "8px";
-            el.style.opacity = ".25";
+            el.style.opacity = ".16";
             el.style.transition = "opacity 140ms ease";
             seqWrap.appendChild(el);
             return el;
           });
-          // animate one by one
+          // animate one by one for drama
           let t = 0;
-          items.forEach((el, idx) => {
+          items.forEach((el) => {
             setTimeout(() => { el.style.opacity = "1"; }, t);
             t += Math.max(220, Math.floor(tempo * 0.55));
           });
         }
 
         // Control hooks
-        showBtn.onclick = () => {
-          // first play also enables input for round 1
-          replaySequence();
-          inputEnabled = true;
-          round = 0;
-          picks = [];
-          renderCorridor();
-          updateProg();
-        };
-
-        clearBtn.onclick = () => {
-          picks = [];
-          round = 0;
-          inputEnabled = false;
-          renderCorridor();
-          updateProg();
-        };
-        backBtn.onclick = () => {
-          if (!inputEnabled || picks.length === 0) return;
-          picks.pop();
-          round = Math.max(0, round - 1);
-          renderCorridor();
-          updateProg();
-        };
+        showBtn.onclick = () => { replaySequence(); inputEnabled = true; round = 0; picksSym = []; renderCorridor(); updateProg(); };
+        clearBtn.onclick = () => { picksSym = []; round = 0; inputEnabled = false; renderCorridor(); updateProg(); };
+        backBtn.onclick = () => { if (!inputEnabled || !picksSym.length) return; picksSym.pop(); round = Math.max(0, round - 1); renderCorridor(); updateProg(); };
         goBtn.onclick = () => {
-          // Submit chosen SYMBOL indices, e.g. "2,4,0"
-          submitAnswer(mini, picks.join(","));
+          // Compute both forms; submit whichever matches server’s stored format for the day.
+          const picksPos = picksSym.map((sym, r) => (shuffles[r] || []).indexOf(sym));
+          const storedLooksPos = (stored.length === rounds) && picksPos.every(p => p >= 0);
+          const usePos = storedLooksPos && stored.join(",") === picksPos.join(",");
+          submitAnswer(mini, (usePos ? picksPos : picksSym).join(","));
         };
 
-        // initial paint
+        // initial paint + auto-show once
         renderCorridor();
         updateProg();
-        // show once automatically to match VF behavior
         setTimeout(() => showBtn.click(), 220);
       }
 
