@@ -296,7 +296,7 @@
 
     <div class="progress">
       <div class="step active" id="stepA">◆ Vault Frenzy</div>
-      <div class="step" id="stepB">◎ Light Reactor</div>
+      <div class="step" id="stepB">◎ Phantom Doors</div>
       <div class="step" id="stepC">✶ Pressure Chamber</div>
     </div>
 
@@ -385,12 +385,22 @@
       function showCurrent() {
         const containers = ["#gameA", "#gameB", "#gameC"].map($);
         containers.forEach((el, i) => el.style.display = (i === state.current) ? "block" : "none");
+
+        // Update the header tabs' active state
+        ["#stepA", "#stepB", "#stepC"].forEach((sel, i) => {
+          const el = $(sel);
+          if (el) el.classList.toggle("active", i === state.current);
+        });
+
         const mini = state.minis[state.current];
-        const host = containers[state.current]; host.innerHTML = "";
+        const host = containers[state.current];
+        host.innerHTML = "";
 
         // shared header
+        const titles = ["A", "B", "C"];
         const h = document.createElement("div");
-        h.innerHTML = `<h3 style="margin:6px 0 8px;">${["A", "B", "C"][state.current]} • ${titleFor(mini)}</h3><p class="muted" style="max-width:780px">${mini.prompt}</p>`;
+        h.innerHTML = `<h3 style="margin:6px 0 8px;">${titles[state.current]} • ${titleFor(mini)}</h3>
+                       <p class="muted" style="max-width:780px">${mini.prompt}</p>`;
         host.appendChild(h);
 
         if (mini.mechanic === "vault_frenzy") mountVaultFrenzy(host, mini);
@@ -641,80 +651,214 @@
       }
 
       function mountPhantomDoors(host, mini) {
+        // ---- Server payload ----
         const ui = mini.ui || {};
-        const glyphs = (ui.glyphs || ["◇", "◆", "○", "●", "△", "▲", "□", "■"]).slice(0, 8);
+        const symbols = (ui.symbols || ["▲", "●", "◆", "■", "✶", "✦"]).slice();      // 6 symbols by default
+        const rounds = Number(ui.rounds || 3);
+        const shuffles = (ui.shuffles || []).map(a => a.slice());                 // [[perm...], ...]
+        const phantoms = (ui.phantoms || Array(rounds).fill(-1)).slice();         // [posIndex per round]
+        const tempo = Number(ui.tempo_ms || 600);
 
-        // Seeded, deterministic sequence for today
-        const rng = m32(ui.seed || 1);
-        const seq = [];
-        for (let i = 0; i < (ui.rounds || 6); i++) {
-          seq.push(glyphs[Math.floor(rng() * glyphs.length)]);
+        // Sequence to show above the corridor:
+        // The server intends to show this to the player; when present we prefer ui.sequence,
+        // otherwise we fall back to the stored solution indices (already a sequence).
+        const seqIdx = (
+          (ui.sequence && ui.sequence.length ? ui.sequence : (
+            (mini.solution && mini.solution.answer) ? String(mini.solution.answer).split(",").map(x => parseInt(x, 10)) : []
+          ))
+        ).slice(0, rounds);
+
+        // ---- Layout ----
+        const help = document.createElement("div");
+        help.className = "muted";
+        help.style.margin = "6px 0 12px";
+        help.innerHTML = "Memorize the symbol sequence. Doors reshuffle each round. Avoid phantom doors (they fade)!";
+        host.appendChild(help);
+
+        // Sequence strip
+        const seqBar = document.createElement("div");
+        seqBar.style.display = "flex";
+        seqBar.style.gap = "10px";
+        seqBar.style.alignItems = "center";
+        seqBar.style.margin = "8px 0 14px";
+        const showBtn = document.createElement("button");
+        showBtn.className = "btn";
+        showBtn.textContent = "▶ Show";
+        seqBar.appendChild(showBtn);
+
+        const seqWrap = document.createElement("div");
+        seqWrap.style.display = "flex";
+        seqWrap.style.gap = "8px";
+        seqWrap.style.fontSize = "20px";
+        seqWrap.style.opacity = "0.85";
+        seqBar.appendChild(seqWrap);
+        host.appendChild(seqBar);
+
+        // Doors (6) laid out 3×2 like your design
+        const corridor = document.createElement("div");
+        corridor.style.display = "grid";
+        corridor.style.gridTemplateColumns = "repeat(3, 220px)";
+        corridor.style.gridAutoRows = "86px";
+        corridor.style.gap = "18px";
+        host.appendChild(corridor);
+
+        // Controls
+        const ctrls = document.createElement("div");
+        ctrls.style.display = "flex";
+        ctrls.style.gap = "8px";
+        ctrls.style.marginTop = "12px";
+        const clearBtn = document.createElement("button");
+        clearBtn.className = "btn";
+        clearBtn.textContent = "Clear";
+        const backBtn = document.createElement("button");
+        backBtn.className = "btn";
+        backBtn.textContent = "⌫";
+        const goBtn = document.createElement("button");
+        goBtn.className = "btn";
+        goBtn.textContent = "Go";
+        goBtn.disabled = true;
+        ctrls.append(showBtn.cloneNode ? showBtn.cloneNode(false) : null); // visual symmetry; disabled clone
+        ctrls.append(clearBtn, backBtn, goBtn);
+        host.appendChild(ctrls);
+
+        const prog = document.createElement("div");
+        prog.className = "muted";
+        prog.style.marginTop = "4px";
+        host.appendChild(prog);
+
+        // ---- State ----
+        let round = 0;                 // 0..rounds-1
+        let picks = [];                // chosen correct symbol indices per round
+        let inputEnabled = false;
+
+        // helpers
+        function doorEl(symbol, isPhantom) {
+          const d = document.createElement("div");
+          d.className = "vf-cell";
+          d.style.display = "flex";
+          d.style.alignItems = "center";
+          d.style.justifyContent = "center";
+          d.style.fontSize = "28px";
+          d.style.position = "relative";
+          if (isPhantom) {
+            const tag = document.createElement("div");
+            tag.textContent = "▢";
+            tag.style.position = "absolute";
+            tag.style.right = "10px";
+            tag.style.top = "8px";
+            tag.style.opacity = ".35";
+            d.appendChild(tag);
+          }
+          const span = document.createElement("span");
+          span.textContent = symbol;
+          d.appendChild(span);
+          return d;
         }
 
-        // Top bar: ▶ Show sequence (replay any time)
-        const top = document.createElement("div");
-        top.style.display = "flex"; top.style.alignItems = "center"; top.style.gap = "10px";
-        const seqBar = document.createElement("div"); seqBar.className = "muted"; seqBar.textContent = "Sequence shown";
-        const showBtn = document.createElement("button"); showBtn.className = "btn"; showBtn.textContent = "▶ Show";
-        showBtn.onclick = () => {
-          seqBar.textContent = ""; let i = 0;
-          const timer = setInterval(() => {
-            seqBar.textContent = seq.slice(0, ++i).join(" ");
-            if (i >= seq.length) clearInterval(timer);
-          }, ui.flash_ms || 480);
-        };
-        top.append(showBtn, seqBar);
-        host.appendChild(top);
+        function renderCorridor() {
+          corridor.innerHTML = "";
+          const perm = shuffles[round] || symbols.map((_, i) => i);
+          const phantomPos = Number(phantoms[round] ?? -1);
 
-        // Door grid (this was missing)
-        const layout = document.createElement("div");
-        layout.style.display = "grid";
-        layout.style.gridTemplateColumns = "repeat(4, 1fr)";
-        layout.style.gap = "10px";
-        host.appendChild(layout);
-
-        // Create 8 door buttons
-        const doors = new Array(8).fill(0).map(() => {
-          const d = document.createElement("button");
-          d.className = "btn";
-          d.style.background = "#22345d";
-          d.style.color = "#cfe0ff";
-          d.style.padding = "18px 0";
-          d.textContent = "◇";
-          layout.appendChild(d);
-          return d;
-        });
-
-        const picks = [];
-
-        function reshuffle() {
-          // assign random glyphs; some doors are phantoms
-          const phCount = Math.max(1, Math.floor(doors.length * (ui.phantom_rate || 0.25)));
-          const phantomSet = new Set();
-          while (phantomSet.size < phCount) phantomSet.add(Math.floor(rng() * doors.length));
-
-          doors.forEach((d, i) => {
-            d.disabled = false;
-            d.textContent = glyphs[Math.floor(rng() * glyphs.length)];
-            d.dataset.glyph = d.textContent;
-            d.style.opacity = 1;
-
-            if (phantomSet.has(i)) d.dataset.phantom = "1"; else delete d.dataset.phantom;
+          for (let pos = 0; pos < perm.length; pos++) {
+            const symIdx = perm[pos];
+            const sym = symbols[symIdx];
+            const isPhantom = (pos === phantomPos);
+            const d = doorEl(sym, isPhantom);
+            d.dataset.pos = String(pos);
+            d.dataset.symi = String(symIdx);
+            d.dataset.ph = String(isPhantom ? 1 : 0);
 
             d.onclick = () => {
-              if (d.dataset.phantom === "1") { d.style.opacity = 0.33; return; }
-              picks.push(d.dataset.glyph);
-              if (picks.length === trueSeq.length) {
-                goBtn.disabled = false;
-                submitAnswer(mini, picks.join(",")); // turn on auto-submit
+              if (!inputEnabled) return;
+              // Phantom fades and doesn't count
+              if (isPhantom) {
+                d.style.opacity = "0.35";
+                d.style.transition = "opacity 240ms ease";
+                return;
+              }
+              // Correct door = door whose symbol matches this round’s target symbol index
+              const wantSymIdx = Number(seqIdx[round]);
+              if (symIdx === wantSymIdx) {
+                picks.push(symIdx);
+                round++;
+                goBtn.disabled = picks.length !== rounds;
+                if (round < rounds) {
+                  renderCorridor();
+                  updateProg();
+                } else {
+                  updateProg();
+                }
               } else {
-                reshuffle();
+                // brief shake
+                d.classList.add("flash");
+                setTimeout(() => d.classList.remove("flash"), 120);
               }
             };
+
+            corridor.appendChild(d);
+          }
+        }
+
+        function updateProg() {
+          prog.textContent = `round ${Math.min(round + 1, rounds)}/${rounds}`;
+        }
+
+        function replaySequence() {
+          seqWrap.innerHTML = "";
+          const items = seqIdx.map(i => {
+            const el = document.createElement("div");
+            el.textContent = symbols[i] ?? "?";
+            el.style.padding = "2px 6px";
+            el.style.borderRadius = "8px";
+            el.style.opacity = ".25";
+            el.style.transition = "opacity 140ms ease";
+            seqWrap.appendChild(el);
+            return el;
+          });
+          // animate one by one
+          let t = 0;
+          items.forEach((el, idx) => {
+            setTimeout(() => { el.style.opacity = "1"; }, t);
+            t += Math.max(220, Math.floor(tempo * 0.55));
           });
         }
 
-        reshuffle();
+        // Control hooks
+        showBtn.onclick = () => {
+          // first play also enables input for round 1
+          replaySequence();
+          inputEnabled = true;
+          round = 0;
+          picks = [];
+          renderCorridor();
+          updateProg();
+        };
+
+        clearBtn.onclick = () => {
+          picks = [];
+          round = 0;
+          inputEnabled = false;
+          renderCorridor();
+          updateProg();
+        };
+        backBtn.onclick = () => {
+          if (!inputEnabled || picks.length === 0) return;
+          picks.pop();
+          round = Math.max(0, round - 1);
+          renderCorridor();
+          updateProg();
+        };
+        goBtn.onclick = () => {
+          // Submit chosen SYMBOL indices, e.g. "2,4,0"
+          submitAnswer(mini, picks.join(","));
+        };
+
+        // initial paint
+        renderCorridor();
+        updateProg();
+        // show once automatically to match VF behavior
+        setTimeout(() => showBtn.click(), 220);
       }
 
       // PRESSURE CHAMBER: animate gauges; accept a pre-computed order of labels
