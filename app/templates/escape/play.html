@@ -961,11 +961,10 @@
           cancelAnimationFrame(rafId);
           setRunning(false);
           header.textContent = "✔ survived!";
-          // Mark this mini complete and notify the page
-          submitAnswer(mini, "success");
-          try {
-            window.dispatchEvent(new CustomEvent("escape-mini-complete", { detail: { id: mini.id || "pressure_chamber" } }));
-          } catch (_) { }
+          // Record success (optional), then finish the whole run now.
+          // We don't rely on /api/submit returning {correct:true} here.
+          submitAnswer(mini, "success").catch(() => { });
+          finishRun(true);
         }
 
         function tick(ts) {
@@ -994,50 +993,6 @@
           paint();
           rafId = requestAnimationFrame(tick);
         }
-
-        (function () {
-          // Capture start time once per page load (used by /api/finish)
-          if (!window.__escapeStartedMs) window.__escapeStartedMs = Date.now();
-
-          // Track completed minis and finish the run when all are done
-          window.__escapeMiniDone = window.__escapeMiniDone || new Set();
-
-          async function maybeFinishRun() {
-            // We assume 3 minis per day. If you add/remove minis, adjust this number.
-            const TOTAL_MINIS = 3;
-            if (window.__escapeMiniDone.size < TOTAL_MINIS) return;
-            if (window.__escapeRunFinished) return;
-            window.__escapeRunFinished = true;
-
-            // Stop any header clock if the page exposed it
-            try { if (window.__escapeClock) clearInterval(window.__escapeClock); } catch (_) { }
-
-            // Best-effort date key discovery
-            const el = document.querySelector("[data-date-key]") || document.querySelector("#play-root");
-            const dateKey = (el && (el.getAttribute("data-date-key") || el.dataset.dateKey)) || "";
-
-            // Post finish (success) so you show up on the leaderboard
-            try {
-              await fetch("/escape/api/finish", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  date_key: dateKey,
-                  started_ms: window.__escapeStartedMs,
-                  success: true,
-                  meta: {}
-                })
-              });
-            } catch (_) { }
-          }
-
-          // When any mini completes, record it and try to finish the run
-          window.addEventListener("escape-mini-complete", (ev) => {
-            const id = (ev && ev.detail && ev.detail.id) || "unknown";
-            window.__escapeMiniDone.add(id);
-            maybeFinishRun();
-          });
-        })();
 
         function start() {
           // reset state
