@@ -1068,7 +1068,8 @@
               date_key: dateKey,
               started_ms: started,
               success: !!success,
-              meta: {}
+              // minis-only run; do NOT enforce a final code
+              meta: { minis_only: true, enforce_final: false }
             })
           });
         } catch (_) { }

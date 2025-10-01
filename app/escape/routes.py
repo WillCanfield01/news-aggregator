@@ -449,8 +449,11 @@ def init_routes(bp: Blueprint):
             current_app.logger.info("[escape] suspicious finish: duration < 3s")
             success = False
 
-        # Optional meta-code verification
-        if success and (room.json_blob.get("final_code") or (room.json_blob.get("final") or {}).get("solution")):
+        # Optional final-code verification (opt-in only).
+        # We only enforce a final code if the caller explicitly asks us to.
+        blob_final = room.json_blob.get("final_code") or (room.json_blob.get("final") or {}).get("solution")
+        enforce_final = bool((data.get("enforce_final") is True) or ((data.get("meta") or {}).get("enforce_final") is True))
+        if success and blob_final and enforce_final:
             submitted_final = (data.get("final_code") or "").strip()
             if not submitted_final or not verify_meta_final(room.json_blob, submitted_final):
                 success = False
