@@ -965,10 +965,27 @@
           cancelAnimationFrame(rafId);
           setRunning(false);
           header.textContent = "✔ survived!";
-          // Record success (optional), then finish the whole run now.
-          // We don't rely on /api/submit returning {correct:true} here.
+          // Record success then finish the whole run now.
           submitAnswer(mini, "success").catch(() => { });
-          finishRun(true);
+          // Ensure we actually stop the global clock and post /finish
+          if (typeof finishRun === "function") {
+            finishRun(true);
+          } else {
+            // Fallback: stop any ticking clock and post finish directly.
+            try { if (window.__escapeClock) clearInterval(window.__escapeClock); } catch (_) { }
+            const root = document.querySelector("#play-root");
+            const dateKey = (root && root.dataset && root.dataset.dateKey) || "";
+            fetch("/escape/api/finish", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                date_key: dateKey,
+                started_ms: window.__escapeStartedMs || Date.now(),
+                success: true,
+                meta: {}
+              })
+            }).catch(() => { });
+          }
         }
 
         function tick(ts) {
@@ -1019,6 +1036,45 @@
       }
 
     })();
+
+    (function () {
+      if (!window.__escapeStartedMs) window.__escapeStartedMs = Date.now();
+
+      window.finishRun = async function finishRun(success = true) {
+        if (window.__escapeRunFinished) return;
+        window.__escapeRunFinished = true;
+
+        // 1) Stop any ticking header timer loops
+        try { if (window.__escapeClock) clearInterval(window.__escapeClock); } catch (_) { }
+        try { window.__escapeStopClock = true; } catch (_) { }
+        try { window.__escapeTick = function () { }; } catch (_) { }
+
+        // Optionally freeze any visible timer text (if your header exposes one)
+        try {
+          const el = document.querySelector("[data-escape-header-time], .escape-header-time");
+          if (el) el.setAttribute("data-frozen", "1");
+        } catch (_) { }
+
+        // 2) Post finish so the leaderboard records the run
+        const root = document.querySelector("#play-root");
+        const dateKey = (root && root.dataset && root.dataset.dateKey) || "";
+        const started = window.__escapeStartedMs || Date.now();
+
+        try {
+          await fetch("/escape/api/finish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              date_key: dateKey,
+              started_ms: started,
+              success: !!success,
+              meta: {}
+            })
+          });
+        } catch (_) { }
+      };
+    })();
+
   </script>
 
 </body>
