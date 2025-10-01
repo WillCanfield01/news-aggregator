@@ -317,7 +317,7 @@
 
       <div id="finish" class="finish" style="display:none;">
         <h2>Escaped!</h2>
-        <p>Total time: <b><span id="totalMs"></span> ms</b></p>
+        <p>Total time: <b><span id="totalTimePretty"></span></b></p>
         <div class="row center" style="justify-content:center;">
           <div id="shareBlock" class="share"></div>
         </div>
@@ -420,10 +420,9 @@
       }
 
       async function submitAnswer(mini, answerStr) {
-        // send the REAL saved id the server verifies against
         const body = {
-          date_key: state.dateKey,           // keep for server
-          date: state.dateKey,               // also send 'date' for tolerance
+          date_key: state.dateKey,
+          date: state.dateKey,                      // tolerate old clients
           puzzle_id: mini.puzzle_id || mini.id,
           answer: answerStr
         };
@@ -433,32 +432,73 @@
           body: JSON.stringify(body)
         });
         const data = await res.json();
+
         if (data && data.correct) {
+          // ✅ record progress for the finish card
+          const pid = mini.puzzle_id || mini.id;
+          state.answers[pid] = String(answerStr);
+
+          // ✅ visually mark the tab you just cleared
+          const tabEls = [$("#stepA"), $("#stepB"), $("#stepC")];
+          if (tabEls[state.current]) tabEls[state.current].classList.add("done");
+
           advance();
         } else {
-          // soft fail
-          flash(hostOf(mini), "#ff6b6b");
+          flash(hostOf(mini), "#ff6b6b"); // soft fail
         }
       }
 
       function advance() {
-        if (state.current < 2) { state.current += 1; showCurrent(); return; }
+        if (state.current < 2) {
+          state.current += 1;
+          showCurrent();
+          return;
+        }
+        // last mini completed
         finishRun(true);
       }
 
-      async function finishRun(success) {
-        const body = {
-          date_key: state.dateKey,
-          started_ms: state.startedMs,
-          success,
-          meta: {}
-        };
-        await fetch("/escape/api/finish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      async function finishRun(success = true) {
+        if (state._finished) return;
+        state._finished = true;
+
+        // stop/freeze any header timer you have running
+        try { if (window.__escapeClock) clearInterval(window.__escapeClock); } catch (_) { }
+        try { window.__escapeStopClock = true; } catch (_) { }
+
+        // post finish so the leaderboard records the run
+        try {
+          await fetch("/escape/api/finish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              date_key: state.dateKey,
+              started_ms: state.startedMs,
+              success: !!success,
+              meta: { minis_only: true, enforce_final: false } // avoid final-code enforcement
+            })
+          });
+        } catch (_) { }
+
         // show finish UI
         ["#gameA", "#gameB", "#gameC"].forEach(sel => $(sel).style.display = "none");
         $("#finish").style.display = "block";
-        $("#totalMs").textContent = (Date.now() - state.startedMs);
-        $("#shareBlock").textContent = `Daily Escape ${state.dateKey}\n${Object.keys(state.answers).length}/3 cleared`;
+
+        // pretty time (mm:ss.t) and freeze it
+        const ms = Date.now() - state.startedMs;
+        const mm = Math.floor(ms / 60000);
+        const ss = Math.floor((ms % 60000) / 1000);
+        const tenths = Math.floor((ms % 1000) / 100);
+        const pretty = `${mm}:${String(ss).padStart(2, "0")}.${tenths}`;
+        $("#totalTimePretty").textContent = pretty;
+
+        // also freeze the header timer text if present
+        const header = $("#globalTimer");
+        if (header) header.textContent = pretty;
+
+        // show how many minis you actually cleared
+        const cleared = Object.keys(state.answers).length;
+        $("#shareBlock").textContent = `Daily Escape ${state.dateKey}\n${cleared}/3 cleared`;
       }
 
       function hostOf(mini) {
