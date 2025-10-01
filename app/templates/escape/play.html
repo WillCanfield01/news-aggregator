@@ -840,70 +840,176 @@
         setTimeout(startRound, 220);
       }
 
-      // PRESSURE CHAMBER: animate gauges; accept a pre-computed order of labels
+      // C • Pressure Chamber  — survival mode (keep all valves under for 10s)
       function mountPressureChamber(host, mini) {
-        const ui = mini.ui || {};
-        const targetCount = ui.target_count || 8;
-        let picks = [];
+        const ui = mini.ui || mini.ui_spec || {};
+        const valves = (ui.valves || [
+          { label: "A", base: 0.22, var: 0.08, reset_ms: 900, phase: 0.00 },
+          { label: "B", base: 0.27, var: 0.09, reset_ms: 800, phase: 0.20 },
+          { label: "C", base: 0.19, var: 0.07, reset_ms: 1100, phase: 0.50 },
+          { label: "D", base: 0.26, var: 0.10, reset_ms: 850, phase: 0.10 },
+        ]);
+        const threshold = Number(ui.threshold || 1.0);
 
-        // HUD (taps left + ⟲ Restart)
-        const hud = document.createElement("div");
-        hud.className = "muted"; hud.style.margin = "6px 0 12px";
-        const left = document.createElement("span");
-        const rst = document.createElement("button"); rst.className = "btn"; rst.textContent = "⟲ Restart";
-        hud.append(left, document.createTextNode(" "), rst);
-        host.appendChild(hud);
+        // NEW: 10-second survival timer
+        const SURVIVE_MS = Number(ui.survive_ms || 10000);
 
-        // Container for valves (this was missing in your file)
-        const wrap = document.createElement("div");
-        wrap.className = "pc-wrap";
-        host.appendChild(wrap);
+        // ---- UI scaffolding ----
+        const header = document.createElement("div");
+        header.className = "muted";
+        header.textContent = `survive: ${(SURVIVE_MS / 1000).toFixed(1)}s`;
+        host.appendChild(header);
 
-        const valves = (ui.valves || []).map(v => ({ ...v, level: 0 }));
-        const rng = m32(ui.seed || 1);
+        const barWrap = document.createElement("div");
+        barWrap.style.display = "grid";
+        barWrap.style.gridTemplateColumns = `repeat(${valves.length}, 1fr)`;
+        barWrap.style.gap = "18px";
+        barWrap.style.marginTop = "12px";
+        host.appendChild(barWrap);
 
-        const buttons = [];
-        valves.forEach((v) => {
-          const col = document.createElement("div"); col.className = "pc-valve";
-          const g = document.createElement("div"); g.className = "pc-gauge";
-          const fill = document.createElement("div"); fill.className = "pc-fill";
-          g.appendChild(fill);
-          const b = document.createElement("button"); b.className = "btn pc-btn"; b.textContent = v.label;
-          b.onclick = () => {
-            picks.push(v.label);
-            v.level = Math.max(0, v.level - 0.6); // drop pressure
-            updateLeft();
-            if (picks.length >= targetCount) submitAnswer(mini, picks.join(","));
+        const controls = document.createElement("div");
+        controls.style.display = "flex";
+        controls.style.gap = "10px";
+        controls.style.marginTop = "14px";
+        const startBtn = document.createElement("button");
+        startBtn.className = "btn";
+        startBtn.textContent = "↻ Start";
+        controls.appendChild(startBtn);
+        host.appendChild(controls);
+
+        // ---- Bars + state ----
+        const bars = [];
+        const labels = [];
+        const levels = valves.map(v => Math.max(0, 0.15 + (v.phase || 0) * 0.2)); // initial fill varies with phase
+        let running = false;
+        let tStart = 0;
+        let timeLeft = SURVIVE_MS;
+        let rafId = 0;
+
+        valves.forEach((v, i) => {
+          const col = document.createElement("div");
+          col.style.display = "flex";
+          col.style.flexDirection = "column";
+          col.style.alignItems = "center";
+          col.style.gap = "8px";
+
+          const tube = document.createElement("div");
+          tube.style.width = "90px";
+          tube.style.height = "220px";
+          tube.style.border = "2px solid rgba(180,200,255,.25)";
+          tube.style.borderRadius = "10px";
+          tube.style.position = "relative";
+          tube.style.overflow = "hidden";
+          tube.style.background = "linear-gradient(#10233a,#0b1a2a)";
+
+          const fill = document.createElement("div");
+          fill.style.position = "absolute";
+          fill.style.left = "0";
+          fill.style.bottom = "0";
+          fill.style.width = "100%";
+          fill.style.height = "0%";
+          fill.style.transition = "height 60ms linear";
+          fill.style.background = "linear-gradient(#f58475,#e55746)";
+          tube.appendChild(fill);
+
+          const btn = document.createElement("button");
+          btn.className = "btn";
+          btn.style.width = "90px";
+          btn.textContent = v.label || String.fromCharCode(65 + i);
+          btn.onclick = () => {
+            if (!running) return;
+            // tap drops pressure and gives a tiny grace window (reset_ms)
+            const drop = 0.45 + Math.min(0.35, (v.var || 0.08));
+            levels[i] = Math.max(0, levels[i] - drop);
+            // visual thump
+            fill.style.boxShadow = "0 0 10px rgba(120,220,255,.6) inset";
+            setTimeout(() => (fill.style.boxShadow = ""), 120);
           };
-          col.appendChild(g); col.appendChild(b);
-          wrap.appendChild(col);
-          buttons.push({ fill, btn: b, valve: v });
+
+          bars.push(fill);
+          labels.push(btn);
+          col.appendChild(tube);
+          col.appendChild(btn);
+          barWrap.appendChild(col);
         });
 
-        function updateLeft() { left.textContent = `taps left: ${Math.max(0, targetCount - picks.length)}`; }
-        updateLeft();
-
-        rst.onclick = () => {
-          picks = [];
-          valves.forEach(v => v.level = 0);
-          buttons.forEach(({ fill }) => (fill.style.height = "0%"));
-          updateLeft();
-        };
-
-        const tickMs = ui.tempo_ms || 90;
-        function frame() {
-          buttons.forEach(({ fill, valve }) => {
-            const drift = (valve.base || 0.2) + (rng() - 0.5) * (valve.var || 0.1);
-            valve.level = Math.min(1.2, valve.level + Math.max(0.02, drift) * (tickMs / 1000));
-            fill.style.height = Math.max(0, Math.min(100, valve.level * 100)) + "%";
-            if (valve.level >= 1.0) {
-              valve.level = 1.0;
-              fill.style.background = "linear-gradient(180deg,#ff6b6b,#9b2e2e)"; // overflow warning
-            }
-          });
-          setTimeout(frame, tickMs);
+        // ---- Sim loop ----
+        function setRunning(on) {
+          running = on;
+          startBtn.disabled = on;
+          labels.forEach(b => (b.disabled = !on));
         }
-        frame();
+
+        function paint() {
+          for (let i = 0; i < bars.length; i++) {
+            const pct = Math.max(0, Math.min(1, levels[i] / threshold));
+            bars[i].style.height = `${Math.floor(pct * 100)}%`;
+          }
+          header.textContent = `survive: ${(Math.max(0, timeLeft) / 1000).toFixed(1)}s`;
+        }
+
+        function fail() {
+          cancelAnimationFrame(rafId);
+          setRunning(false);
+          header.textContent = "overflowed — try again";
+          // shake the whole area a bit
+          host.classList.add("flash");
+          setTimeout(() => host.classList.remove("flash"), 200);
+        }
+
+        function win() {
+          cancelAnimationFrame(rafId);
+          setRunning(false);
+          header.textContent = "✔ survived!";
+          // Submit success to server (server should accept boolean success for this mini)
+          submitAnswer(mini, "success");
+        }
+
+        function tick(ts) {
+          if (!tStart) tStart = ts;
+          const dt = Math.min(48, ts - (tick._last || ts)); // clamp delta
+          tick._last = ts;
+
+          // progress time
+          timeLeft = SURVIVE_MS - (ts - tStart);
+          if (timeLeft <= 0) {
+            paint();
+            return win();
+          }
+
+          // advance each valve
+          for (let i = 0; i < valves.length; i++) {
+            const v = valves[i];
+            // deterministic rise speed per valve
+            const speed = (v.base || 0.22) + (v.var || 0.08) * 0.6;
+            levels[i] += speed * (dt / (v.reset_ms || 900)); // normalized by reset
+            if (levels[i] >= threshold) {
+              return fail();
+            }
+          }
+
+          paint();
+          rafId = requestAnimationFrame(tick);
+        }
+
+        function start() {
+          // reset state
+          for (let i = 0; i < levels.length; i++) {
+            const v = valves[i];
+            levels[i] = Math.max(0, 0.15 + (v.phase || 0) * 0.2);
+          }
+          timeLeft = SURVIVE_MS;
+          tick._last = 0;
+          tStart = 0;
+          paint();
+          setRunning(true);
+          rafId = requestAnimationFrame(tick);
+        }
+
+        startBtn.onclick = start;
+
+        // initial paint
+        paint();
       }
 
     })();
