@@ -843,12 +843,16 @@
       // C • Pressure Chamber  — survival mode (keep all valves under for 10s)
       function mountPressureChamber(host, mini) {
         const ui = mini.ui || mini.ui_spec || {};
+        // Limit to at most 3 valves (ignore any extras the server sends)
+        const MAX_VALVES = 3;
         const valves = (ui.valves || [
           { label: "A", base: 0.22, var: 0.08, reset_ms: 900, phase: 0.00 },
           { label: "B", base: 0.27, var: 0.09, reset_ms: 800, phase: 0.20 },
           { label: "C", base: 0.19, var: 0.07, reset_ms: 1100, phase: 0.50 },
           { label: "D", base: 0.26, var: 0.10, reset_ms: 850, phase: 0.10 },
-        ]);
+          { label: "E", base: 0.24, var: 0.08, reset_ms: 920, phase: 0.30 },
+        ]).slice(0, MAX_VALVES);
+
         const threshold = Number(ui.threshold || 1.0);
 
         // NEW: 10-second survival timer
