@@ -86,13 +86,17 @@
       <tbody>
         {% for row in rows %}
         <tr>
-          <td class="rank">{{ loop.index }}</td>
-          <td class="name">{{ row.nickname or "Guest" }}</td>
+          <td class="rank">{{ row.rank }}</td>
           <td class="time">
-            {% set secs = (row.total_time_ms or 0) // 1000 %}
-            {% set m = secs // 60 %}
-            {% set s = secs % 60 %}
-            {{ "%d:%02d" % (m, s) }}
+            {# prefer server ms if present; fall back to seconds #}
+            {% set ms = row.time_ms or (row.seconds * 1000 if row.seconds is defined else 0) %}
+            {% set mm = (ms // 1000) // 60 %}
+            {% set ss = (ms // 1000) % 60 %}
+            {% set t = (ms % 1000) // 100 %}
+            {{ "%d:%02d.%01d" % (mm, ss, t) }}
+          </td>
+          <td class="finished">
+            {% if row.created_at %}{{ row.created_at.strftime("%H:%M:%S") }}{% else %}—{% endif %}
           </td>
         </tr>
         {% else %}
