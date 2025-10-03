@@ -158,6 +158,24 @@ next.{% endblock %}
         margin: 32px 0 14px;
     }
 
+    .main-btn {
+        text-decoration: none;
+        background: #1a73e8;
+        /* consistent blue */
+        color: #fff;
+        border-radius: 12px;
+        padding: 12px 18px;
+        font-weight: 600;
+        display: inline-block;
+        margin: 0 6px;
+        transition: background 0.2s ease;
+    }
+
+    .main-btn:hover {
+        background: #1669c1;
+        /* slightly darker on hover */
+    }
+
     @media (min-width: 960px) {
         .feature {
             padding: 36px 40px;
@@ -176,7 +194,7 @@ next.{% endblock %}
         </div>
         <div class="cta-row">
             <a href="#feature" class="cta-primary">See Today’s Briefing</a>
-            <a href="/escape/today" class="cta-ghost" aria-label="Play the Daily Escape game">Play Daily Escape</a>
+            <a href="/escape/play" class="main-btn">Play Daily Escape</a>
         </div>
     </section>
 </div>
