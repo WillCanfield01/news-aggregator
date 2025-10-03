@@ -420,9 +420,10 @@
       }
 
       async function submitAnswer(mini, answerStr) {
+        // send the REAL saved id the server verifies against
         const body = {
           date_key: state.dateKey,
-          date: state.dateKey,                      // tolerate old clients
+          date: state.dateKey,
           puzzle_id: mini.puzzle_id || mini.id,
           answer: answerStr
         };
@@ -432,15 +433,15 @@
           body: JSON.stringify(body)
         });
         const data = await res.json();
-
         if (data && data.correct) {
-          // ✅ record progress for the finish card
+          // ✅ record progress so finish card shows N/3 correctly
           const pid = mini.puzzle_id || mini.id;
+          state.answers = state.answers || {};
           state.answers[pid] = String(answerStr);
 
-          // ✅ visually mark the tab you just cleared
-          const tabEls = [$("#stepA"), $("#stepB"), $("#stepC")];
-          if (tabEls[state.current]) tabEls[state.current].classList.add("done");
+          // Optional: mark the active tab as cleared
+          const tabs = [$("#stepA"), $("#stepB"), $("#stepC")];
+          if (tabs[state.current]) tabs[state.current].classList.add("done");
 
           advance();
         } else {
@@ -462,43 +463,50 @@
         if (state._finished) return;
         state._finished = true;
 
-        // stop/freeze any header timer you have running
+        // Stop ANY header clock loop
         try { if (window.__escapeClock) clearInterval(window.__escapeClock); } catch (_) { }
-        try { window.__escapeStopClock = true; } catch (_) { }
+        try { if (state.clockId) clearInterval(state.clockId); } catch (_) { }
+        window.__escapeStopClock = true;
 
-        // post finish so the leaderboard records the run
+        // Post finish and read server time (authoritative)
+        let serverMs = null;
         try {
-          await fetch("/escape/api/finish", {
+          const res = await fetch("/escape/api/finish", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               date_key: state.dateKey,
               started_ms: state.startedMs,
               success: !!success,
-              meta: { minis_only: true, enforce_final: false } // avoid final-code enforcement
+              meta: { minis_only: true, enforce_final: false }
             })
           });
+          const js = await res.json().catch(() => null);
+          if (js && js.ok && js.success && typeof js.time_ms === "number") {
+            serverMs = js.time_ms;
+          }
         } catch (_) { }
 
-        // show finish UI
+        // Swap to finish UI
         ["#gameA", "#gameB", "#gameC"].forEach(sel => $(sel).style.display = "none");
         $("#finish").style.display = "block";
 
-        // pretty time (mm:ss.t) and freeze it
-        const ms = Date.now() - state.startedMs;
+        // Pretty time using server value if present
+        const ms = (serverMs != null ? serverMs : (Date.now() - (state.startedMs || Date.now())));
         const mm = Math.floor(ms / 60000);
         const ss = Math.floor((ms % 60000) / 1000);
         const tenths = Math.floor((ms % 1000) / 100);
         const pretty = `${mm}:${String(ss).padStart(2, "0")}.${tenths}`;
-        $("#totalTimePretty").textContent = pretty;
 
-        // also freeze the header timer text if present
-        const header = $("#globalTimer");
+        // Freeze both finish card and header at the same time
+        const tm = document.getElementById("totalMs");
+        if (tm) tm.textContent = pretty;
+        const header = document.getElementById("globalTimer");
         if (header) header.textContent = pretty;
 
-        // show how many minis you actually cleared
-        const cleared = Object.keys(state.answers).length;
-        $("#shareBlock").textContent = `Daily Escape ${state.dateKey}\n${cleared}/3 cleared`;
+        const cleared = Object.keys(state.answers || {}).length;
+        const share = document.getElementById("shareBlock");
+        if (share) share.textContent = `Daily Escape ${state.dateKey}\n${cleared}/3 cleared`;
       }
 
       function hostOf(mini) {
@@ -657,14 +665,27 @@
           function startClock() {
             if (__clockStarted) return;
             __clockStarted = true;
-            const label = document.getElementById("globalTimer"); // ← was #escape-elapsed
+
+            // Ensure we capture the run start ONCE and reuse it everywhere
+            if (!state.startedMs) state.startedMs = Date.now();
+
+            const label = document.getElementById("globalTimer");
             if (!label) return;
-            const t0 = Date.now();
-            const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-            setInterval(() => {
-              const s = Math.floor((Date.now() - t0) / 1000);
-              label.textContent = fmt(s);
-            }, 1000);
+
+            // Kill any previous header interval
+            try { if (window.__escapeClock) clearInterval(window.__escapeClock); } catch (_) { }
+
+            function renderHeader() {
+              if (window.__escapeStopClock) return;
+              const ms = Date.now() - state.startedMs;
+              const mm = Math.floor(ms / 60000);
+              const ss = Math.floor((ms % 60000) / 1000);
+              const tenths = Math.floor((ms % 1000) / 100);
+              label.textContent = `${mm}:${String(ss).padStart(2, "0")}.${tenths}`;
+            }
+            renderHeader();
+            window.__escapeClock = setInterval(renderHeader, 100);
+            state.clockId = window.__escapeClock;
           }
           inputEnabled = false;
           if (reset) { picks = []; updateProgress(); redrawSelections(); }
