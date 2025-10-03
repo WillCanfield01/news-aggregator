@@ -73,6 +73,31 @@ next.{% endblock %}
         box-shadow: 0 14px 24px rgba(31, 87, 255, .22);
     }
 
+    .cta-row {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .cta-ghost {
+        display: inline-block;
+        padding: 14px 22px;
+        background: transparent;
+        color: var(--brand);
+        border: 2px solid rgba(31, 87, 255, .35);
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 700;
+        transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+
+    .cta-ghost:hover {
+        transform: translateY(-1px);
+        background: rgba(31, 87, 255, .06);
+        border-color: rgba(31, 87, 255, .55);
+    }
+
     /* Feature card */
     .feature {
         margin-top: -36px;
@@ -149,7 +174,10 @@ next.{% endblock %}
             A fast, daily summary of today’s biggest security stories.<br>
             Incidents, vulnerabilities, patches, plus what matters for your org.
         </div>
-        <a href="#feature" class="cta-primary">See Today’s Briefing</a>
+        <div class="cta-row">
+            <a href="#feature" class="cta-primary">See Today’s Briefing</a>
+            <a href="/escape/today" class="cta-ghost" aria-label="Play the Daily Escape game">Play Daily Escape</a>
+        </div>
     </section>
 </div>
 
