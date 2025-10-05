@@ -155,16 +155,25 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
+    /* Vault Frenzy — responsive grid */
     /* Vault Frenzy UI */
     .vf-grid {
       display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      /* scales with container */
       gap: 10px;
+      width: 100%;
+      max-width: min(92vw, 420px);
+      /* never wider than viewport */
+      margin: 10px auto 0;
+      /* centered */
       touch-action: manipulation;
     }
 
     .vf-cell {
-      width: 86px;
-      height: 86px;
+      aspect-ratio: 1 / 1;
+      /* perfect squares */
+      width: 100%;
       border-radius: 14px;
       background: #121832;
       border: 1px solid #223057;
@@ -179,11 +188,17 @@
 
     .vf-cell.flash {
       transform: scale(1.04);
-      transition: transform .08s;
     }
 
     .vf-cell:active {
       transform: scale(0.96);
+    }
+
+    @media (max-width: 500px) {
+      .vf-grid {
+        gap: 8px;
+        max-width: 92vw;
+      }
     }
 
     /* Light Reactor UI */
@@ -369,14 +384,6 @@
       font-size: clamp(14px, 2.5vw, 16px)
     }
 
-    /* Vault Frenzy grid defaults (desktop / tablet) */
-    .vf-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-top: 10px
-    }
-
     .cell {
       background: #0b1327;
       border: 1px solid #1a2546;
@@ -428,96 +435,91 @@
       font-weight: 700
     }
 
-    /* ========= MOBILE LAYOUT ========= */
-    @media (max-width: 480px) {
-      .play-wrap {
-        padding: 12px
-      }
+    /* Vault Frenzy Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      /* 4 equal squares per row */
+      gap: 8px;
+      width: 100%;
+      max-width: 400px;
+      /* desktop cap */
+      margin: 0 auto;
+      /* center grid */
+    }
 
-      .topbar {
-        flex-wrap: wrap;
-        gap: 8px
-      }
+    .grid button {
+      aspect-ratio: 1 / 1;
+      /* makes squares stay square */
+      width: 100%;
+      border-radius: 6px;
+      background-color: #222;
+      color: #fff;
+      font-size: 1rem;
+      transition: background-color 0.2s, transform 0.15s;
+      border: 1px solid #333;
+      cursor: pointer;
+    }
 
-      .topbar .tabs {
-        order: 2;
-        width: 100%;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        gap: 8px
-      }
+    /* Hover / Active for Grid Squares */
+    .grid button:hover {
+      background-color: #2a2a2a;
+      border-color: #444;
+      transform: scale(1.05);
+    }
 
-      .topbar .tabs .tab {
-        flex: 0 0 auto;
-        padding: 10px 12px;
-        font-size: 14px;
-        border-radius: 12px
-      }
+    .grid button:active {
+      background-color: #444;
+      border-color: #666;
+      transform: scale(0.95);
+    }
 
-      .leader {
-        padding: 10px 14px;
-        border-radius: 12px
-      }
+    /* State Classes for Game Logic */
+    .grid button.flash-green {
+      background-color: #1db954 !important;
+      /* green flash */
+      border-color: #1aa34a;
+    }
 
-      .card {
-        padding: 14px;
-        border-radius: 14px
-      }
+    .grid button.flash-red {
+      background-color: #e63946 !important;
+      /* red decoy */
+      border-color: #c5303d;
+    }
 
-      .card h2 {
-        font-size: 18px
-      }
-
-      .card p {
-        font-size: 14px
-      }
-
-      /* Keep the game on screen – make the grid fill the width neatly */
-      .vf-grid {
-        gap: 8px
-      }
-
-      .cell {
-        border-radius: 12px
-      }
-
-      /* Buttons wrap and stay big enough to tap */
+    /* Button Bar Under Grid */
+    @media (max-width: 500px) {
       .controls {
-        gap: 8px
+        gap: 8px;
       }
 
-      .btn {
-        padding: 10px 12px;
-        font-size: 14px;
-        border-radius: 12px
-      }
-
-      .pill {
-        padding: 6px 10px;
-        font-size: 13px
-      }
-
-      /* Prevent any sideways scroll */
-      html,
-      body {
-        overflow-x: hidden
+      .controls button {
+        font-size: 0.8rem;
+        padding: 8px 12px;
+        max-width: 100px;
       }
     }
 
-    /* TINY devices (iPhone SE) – slightly tighter */
-    @media (max-width:360px) {
-      .tabs .tab {
-        padding: 8px 10px;
-        font-size: 13px
-      }
+    /* Hover / Active for Controls */
+    .controls button:hover {
+      background-color: #444;
+      transform: scale(1.05);
+    }
 
-      .btn {
-        padding: 9px 10px
-      }
+    .controls button:active {
+      background-color: #555;
+      transform: scale(0.95);
+    }
 
-      .cell {
-        border-radius: 10px
-      }
+
+    .controls {
+      gap: 8px;
+    }
+
+    .controls button {
+      font-size: 0.8rem;
+      padding: 8px 12px;
+      max-width: 100px;
     }
   </style>
 </head>
@@ -788,8 +790,9 @@
         // --- grid
         const grid = document.createElement("div");
         grid.className = "vf-grid";
-        grid.style.gridTemplateColumns = `repeat(${g.cols}, 86px)`;
-        const cells = [];
+        grid.style.gridTemplateColumns = `repeat(${g.cols}, 1fr)`;
+        grid.style.maxWidth = "min(92vw, 420px)";
+        grid.style.margin = "10px auto 0"; const cells = [];
         for (let r = 0; r < g.rows; r++) {
           for (let c = 0; c < g.cols; c++) {
             const cell = document.createElement("div");
@@ -1010,9 +1013,8 @@
         const corridor = document.createElement("div");
         corridor.style.display = "grid"; corridor.style.gridTemplateColumns = "repeat(3, 220px)"; corridor.style.gridAutoRows = "86px"; corridor.style.gap = "18px";
         host.appendChild(corridor);
-
         const ctrls = document.createElement("div");
-        ctrls.style.display = "flex"; ctrls.style.gap = "8px"; ctrls.style.marginTop = "12px";
+        ctrls.className = "controls";
         const clearBtn = document.createElement("button"); clearBtn.className = "btn"; clearBtn.textContent = "Clear";
         const backBtn = document.createElement("button"); backBtn.className = "btn"; backBtn.textContent = "⌫";
         const goBtn = document.createElement("button"); goBtn.className = "btn"; goBtn.textContent = "Go"; goBtn.disabled = true;
