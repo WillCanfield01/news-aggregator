@@ -497,23 +497,28 @@ def init_routes(bp: Blueprint):
     # HTML leaderboard
     @bp.route("/leaderboard", methods=["GET"])
     def leaderboard_html():
-        date_q = request.args.get("date") or get_today_key()
+        # accept ?date or ?date_key; default to today's key
+        date_q = request.args.get("date") or request.args.get("date_key") or get_today_key()
         rows = DailyLeaderboardView.top_for_day(date_q, limit=50)
+
+        # Normalize rows to what the template expects
         top = []
         for r in rows:
             a = r["attempt"]
             top.append({
                 "rank": r["rank"],
-                "time_ms": a.time_ms,
-                "seconds": (a.time_ms / 1000.0) if a.time_ms else None,
-                "created_at": a.created_at,
+                "nickname": (a.meta or {}).get("nickname") or "Guest",
+                "total_time_ms": int(a.time_ms or 0),
+                "finished_iso": (a.created_at.isoformat() + "Z") if getattr(a, "created_at", None) else None,
             })
-        return render_template("escape/leaderboard.html", date_key=date_q, rows=top)
 
-    # JSON leaderboard
+        # NOTE: template reads {{ date }} and iterates {{ rows }}
+        return render_template("escape/leaderboard.html", date=date_q, rows=top)
+
+    # JSON leaderboard (also normalized)
     @bp.route("/api/leaderboard", methods=["GET"])
     def leaderboard_api():
-        date_q = request.args.get("date") or get_today_key()
+        date_q = request.args.get("date") or request.args.get("date_key") or get_today_key()
         try:
             limit = int(request.args.get("limit", "50"))
         except Exception:
@@ -526,11 +531,11 @@ def init_routes(bp: Blueprint):
             a = r["attempt"]
             out.append({
                 "rank": r["rank"],
-                "time_ms": a.time_ms,
-                "seconds": (a.time_ms / 1000.0) if a.time_ms else None,
-                "created_at": a.created_at.isoformat() + "Z",
+                "nickname": (a.meta or {}).get("nickname") or "Guest",
+                "total_time_ms": int(a.time_ms or 0),
+                "finished_iso": (a.created_at.isoformat() + "Z") if getattr(a, "created_at", None) else None,
             })
-        return jsonify({"date_key": date_q, "top": out})
+        return jsonify({"date": date_q, "rows": out})
 
     # Root
     @bp.route("/", methods=["GET"])

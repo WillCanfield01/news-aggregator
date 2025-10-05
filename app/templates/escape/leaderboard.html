@@ -84,26 +84,25 @@
         </tr>
       </thead>
       <tbody>
+        {% if rows and rows|length > 0 %}
         {% for row in rows %}
         <tr>
           <td class="rank">{{ row.rank }}</td>
+          <td class="name">{{ row.nickname or "Guest" }}</td>
           <td class="time">
-            {# prefer server ms if present; fall back to seconds #}
-            {% set ms = row.time_ms or (row.seconds * 1000 if row.seconds is defined else 0) %}
-            {% set mm = (ms // 1000) // 60 %}
-            {% set ss = (ms // 1000) % 60 %}
-            {% set t = (ms % 1000) // 100 %}
-            {{ "%d:%02d.%01d" % (mm, ss, t) }}
-          </td>
-          <td class="finished">
-            {% if row.created_at %}{{ row.created_at.strftime("%H:%M:%S") }}{% else %}—{% endif %}
+            {% set ms = row.total_time_ms or 0 %}
+            {% set secs = (ms // 100) / 10 %} {# tenths #}
+            {% set m = (secs // 60) | int %}
+            {% set s = (secs % 60) | float %}
+            {{ "%d:%04.1f" % (m, s) }}
           </td>
         </tr>
+        {% endfor %}
         {% else %}
         <tr>
           <td colspan="3">No scores yet today.</td>
         </tr>
-        {% endfor %}
+        {% endif %}
       </tbody>
     </table>
   </div>

@@ -278,6 +278,75 @@
     .finish {
       text-align: center;
     }
+
+    .play-wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 16px 18px;
+    }
+
+    /* --- Mobile responsiveness: keep everything inside viewport --- */
+    @media (max-width: 640px) {
+      .play-wrap {
+        padding: 12px 12px;
+      }
+
+      .topbar {
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .topbar .group {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .tabs {
+        display: flex;
+        overflow-x: auto;
+        gap: 8px;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .tabs .tab {
+        flex: 0 0 auto;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+
+      .card {
+        padding: 14px;
+        border-radius: 14px;
+      }
+
+      .grid-4x4 {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .cell {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .controls .btn {
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+
+      /* prevent any absolute nudges pushing content sideways */
+      body,
+      html {
+        overflow-x: hidden;
+      }
+    }
   </style>
 </head>
 
