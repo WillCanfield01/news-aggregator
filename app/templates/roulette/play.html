@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Timeline Roulette — {{ round_date.strftime("%b %d, %Y") }}{% endblock %}
+
+{% block content %}
+<section class="container" style="max-width:900px;margin:2rem auto;padding:0 1rem;">
+    <h1 class="mb-2">Timeline Roulette</h1>
+    <p class="text-muted" style="margin-bottom:1rem;">
+        Two are fakes. One really happened on {{ round_date.strftime("%B %d") }}. Pick the real one.
+    </p>
+
+    <!-- put the correct index in a data attribute to avoid Jinja-in-JS issues -->
+    <div id="cardsWrap" data-correct="{{ correct_index }}">
+        <div id="cards" class="grid" style="display:grid;grid-template-columns:1fr;gap:14px;">
+            {% for c in cards %}
+            <button class="card" data-ui-idx="{{ loop.index0 }}"
+                style="padding:16px;border-radius:14px;border:1px solid #e5e7eb;background:#fff;text-align:left;cursor:pointer;">
+                <div style="font-weight:600;color:#374151;">Event {{ loop.index }}</div>
+                <div style="color:#111827;">{{ c['text'] }}</div>
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div id="result" class="mt-3" style="display:none;margin-top:14px;font-weight:600;"></div>
+
+    <div class="mt-2" style="margin-top:10px;">
+        <a href="{{ source_url }}" target="_blank" rel="noopener" style="display:none;" id="sourceLink">Read the real
+            event →</a>
+    </div>
+
+    <div id="stats" style="margin-top:10px;color:#6b7280;font-size:0.95rem;">
+        Today: <span id="statPlays">{{ day_total }}</span> plays, <span id="statCorrect">{{ day_correct }}</span>
+        correct.
+        {% if guest_streak %}
+        • Your streak: <span id="streak">{{ guest_streak }}</span> days
+        {% else %}
+        • Your streak: <span id="streak">0</span> days
+        {% endif %}
+        • <a href="/roulette/leaderboard">Leaderboard</a>
+    </div>
+</section>
+
+{% raw %}
+<script>
+    (function () {
+        const wrap = document.getElementById("cardsWrap");
+        const correctIndex = parseInt(wrap.dataset.correct, 10);
+        const cards = Array.from(document.querySelectorAll("#cards .card"));
+        const sourceLink = document.getElementById("sourceLink");
+        const resultBox = document.getElementById("result");
+        const statPlays = document.getElementById("statPlays");
+        const statCorrect = document.getElementById("statCorrect");
+        const streakEl = document.getElementById("streak");
+        let clicked = false;
+
+        function reveal(pick) {
+            cards.forEach((btn, i) => {
+                btn.style.borderColor = (i === correctIndex) ? "#10b981" : "#ef4444";
+                btn.style.background = (i === correctIndex) ? "#ecfdf5" : "#fff";
+            });
+            sourceLink.style.display = "inline-block";
+            resultBox.style.display = "block";
+            resultBox.textContent = (pick === correctIndex)
+                ? "✅ Correct! You spotted the real one."
+                : "❌ Not quite. That one was an AI fake.";
+        }
+
+        cards.forEach((btn, i) => {
+            btn.addEventListener("click", async () => {
+                if (clicked) return;
+                clicked = true;
+                const pick = i;
+                reveal(pick);
+                try {
+                    const res = await fetch("/roulette/guess", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ choice: pick, correct_index: correctIndex })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        statPlays.textContent = data.totals.plays;
+                        statCorrect.textContent = data.totals.correct;
+                        if (data.streak !== undefined && data.streak !== null) {
+                            streakEl.textContent = data.streak;
+                        }
+                    }
+                } catch (e) { /* swallow */ }
+            });
+        });
+    })();
+</script>
+{% endraw %}
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Timeline Roulette — Leaderboard{% endblock %}
+{% block content %}
+<section class="container" style="max-width:900px;margin:2rem auto;padding:0 1rem;">
+    <h1 class="mb-2">Leaderboard</h1>
+    <p class="text-muted">Site-wide accuracy and plays.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div style="border:1px solid #e5e7eb;border-radius:14px;padding:16px;background:#fff;">
+            <h3>Today</h3>
+            <div>Plays: <strong>{{ today_total }}</strong></div>
+            <div>Correct: <strong>{{ today_correct }}</strong></div>
+            <div>Accuracy: <strong>
+                    {% if today_total > 0 %}
+                    {{ ((today_correct / today_total) * 100) | round(1) }}%
+                    {% else %}—{% endif %}
+                </strong></div>
+        </div>
+        <div style="border:1px solid #e5e7eb;border-radius:14px;padding:16px;background:#fff;">
+            <h3>Last 7 Days</h3>
+            <div>Plays: <strong>{{ week_total }}</strong></div>
+            <div>Correct: <strong>{{ week_correct }}</strong></div>
+            <div>Accuracy: <strong>
+                    {% if week_total > 0 %}
+                    {{ ((week_correct / week_total) * 100) | round(1) }}%
+                    {% else %}—{% endif %}
+                </strong></div>
+        </div>
+    </div>
+
+    <div style="margin-top:16px;">
+        <a href="/roulette">← Back to today’s round</a>
+    </div>
+</section>
+{% endblock %}
