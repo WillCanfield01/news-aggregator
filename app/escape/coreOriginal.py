@@ -10,9 +10,8 @@ Trailroom core: daily 3 rooms -> 1 final lock.
 """
 
 from __future__ import annotations
-import json
+
 import os, hmac, hashlib, random, string, re, json
-import random, string, re
 import datetime as dt
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,8 +38,8 @@ TIMEZONE = os.getenv("ESCAPE_TZ", "America/Boise")
 SUPPLIES_START_DEFAULT = 3
 
 COMMON_STOCK_ANSWERS = {
-    # keep this lean to avoid over-blocking generation
-    "time", "shadow", "echo", "map", "silence", "egg"
+    "piano","keyboard","silence","time","shadow","map","echo","fire","ice",
+    "darkness","light","egg","door","wind","river"
 }
 
 ANAGRAM_WORDS = [
@@ -74,33 +73,44 @@ NUM_WORDS = {
 }
 
 def _looks_trivial_multiple_choice(p: Dict[str, Any]) -> bool:
-    """
-    Returns True only for obviously trivial MC questions on TEXT puzzles.
-    Never blocks mini-games or non-MC mechanics.
-    """
-    # Only judge classic text puzzles; skip minis entirely
-    ptype = (p.get("type") or p.get("archetype") or "").lower()
-    mech  = (p.get("mechanic") or "").lower()
-    if ptype == "mini" or mech != "multiple_choice":
+    if (p.get("type") != "mini") or (p.get("mechanic") != "multiple_choice"):
         return False
 
     ui = p.get("ui_spec") or {}
     opts = ui.get("options") or []
     prompt = (p.get("prompt") or "").lower()
 
-    # Too few options is the only strict rule we keep
-    if len(opts) < 3:
+    # Too few options
+    if len(opts) < 4:
         return True
 
-    # Relaxed numeric-only check: require *all* options numeric AND a very short prompt
+    # “name that number”-style wording (existing)
+    if re.search(r"(which|what).*(name|names|word).*(number|digit)", prompt):
+        return True
+
+    # All options are simple number words or digits (existing)
     def _is_num_token(x: Any) -> bool:
         s = str(x).strip().lower()
         return bool(re.fullmatch(r"\d{1,2}", s) or s in NUM_WORDS)
-
-    if opts and all(_is_num_token(o) for o in opts) and len(prompt) < 60:
+    if opts and all(_is_num_token(o) for o in opts):
         return True
 
-    # Drop generic-shape, stock-answer-in-options, and "≥2 clues" heuristics
+    # NEW: generic shape/pattern guessing (“which pattern/shape/figure?”) with stocky options
+    generic = {"loop","spiral","echo","pulse","wave","circle","ring","arc","line"}
+    if re.search(r"\b(which|what)\b.*\b(pattern|shape|figure|symbol)\b", prompt):
+        hits = sum(1 for o in opts if str(o).strip().lower() in generic)
+        if hits >= max(2, len(opts) - 2):   # most options are generic shapes
+            return True
+
+    # NEW: any option is a known cliché/stock riddle answer → trivial
+    if any(str(o).strip().lower() in {s.lower() for s in COMMON_STOCK_ANSWERS} for o in opts):
+        return True
+
+    # NEW: enforce “≥2 clues” heuristic for MC — require at least two bullet/numbered lines
+    clue_lines = re.findall(r"(?m)^\s*(?:[-•]|[0-9]+\)|[0-9]+\.)", prompt)
+    if re.search(r"\b(which|what)\b", prompt) and len(clue_lines) < 2:
+        return True
+
     return False
 
 def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, Any]:
@@ -127,36 +137,6 @@ def _make_sequence_mini(rng: random.Random, pid: str, theme: str) -> Dict[str, A
     }
 
 # ───────────────────────── Utilities ─────────────────────────
-def _puzzle_to_dict(x: Any) -> Dict[str, Any]:
-    """Convert Puzzle or similar objects to plain dicts."""
-    if isinstance(x, dict):
-        return x
-    if hasattr(x, "to_json"):
-        try:
-            j = x.to_json()
-            return j if isinstance(j, dict) else {}
-        except Exception:
-            return {}
-    # last resort shallow mapping
-    d = getattr(x, "__dict__", None)
-    return dict(d) if isinstance(d, dict) else {}
-
-def _json_sanitize(val: Any) -> Any:
-    """Recursively convert a nested structure into JSON-serializable primitives."""
-    if isinstance(val, dict):
-        return {k: _json_sanitize(v) for k, v in val.items()}
-    if isinstance(val, list):
-        return [_json_sanitize(v) for v in val]
-    if hasattr(val, "to_json"):
-        try:
-            return _json_sanitize(val.to_json())
-        except Exception:
-            return repr(val)
-    # primitives are fine
-    if isinstance(val, (str, int, float, bool)) or val is None:
-        return val
-    # fall back to string
-    return repr(val)
 
 def _is_numeric(s: str) -> bool:
     return bool(re.fullmatch(r"\d+", str(s or "")))
@@ -183,24 +163,9 @@ def get_today_key(tz: Optional[str] = None) -> str:
 def normalize_answer(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
 
-def _as_dict_list(x):
-    if not x:
-        return []
-    if isinstance(x, (str, bytes)):
-        # room trails shouldn’t be serialized here; ignore bad shapes
-        return []
-    if isinstance(x, list):
-        out = []
-        for y in x:
-            if isinstance(y, dict):
-                out.append(y)
-            elif hasattr(y, "to_json"):
-                try:
-                    out.append(y.to_json())
-                except Exception:
-                    pass
-        return out
-    return []
+def _as_dict_list(seq) -> List[Dict[str, Any]]:
+    """Filter any sequence down to dicts only."""
+    return [x for x in (seq or []) if isinstance(x, dict)]
 
 def _shingles(text: str, k: int = 5) -> set:
     t = re.sub(r"\s+", " ", text.lower()).strip()
@@ -776,396 +741,21 @@ def gen_translate_with_legend(rng: random.Random, pid: str, blacklist: set, them
         mechanic="sequence_input",
         ui_spec={"sequence": SEQ_TOKENS[:]})
 
-# ===== MINI-GAMES =====
-# Mulberry32 in Python (matches the JS in play.html)
-def _m32(seed: int):
-    seed &= 0xFFFFFFFF
-    def rnd() -> float:
-        nonlocal seed
-        seed = (seed + 0x6D2B79F5) & 0xFFFFFFFF
-        t = seed
-        t = ((t ^ (t >> 15)) * (t | 1)) & 0xFFFFFFFF
-        t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & 0xFFFFFFFF)) & 0xFFFFFFFF
-        t ^= (t >> 14)
-        return (t & 0xFFFFFFFF) / 4294967296.0
-    return rnd
-
-def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
-    """
-    Server now mirrors the client’s seed-driven playback.
-    We generate the same T/D mask and coordinates using a JS-compatible Mulberry32 RNG,
-    store the canonical solution as ordered "r-c" tokens, and send the seed to the client.
-    """
-    rows, cols = 4, 4
-    true_count, decoy_count = 6, 2
-    tempo_ms = 550
-
-    # JS-compatible Mulberry32 (matches the one used in play.html)
-    def _mulberry32(seed: int):
-        s = seed & 0xFFFFFFFF
-        def rnd() -> float:
-            nonlocal s
-            s = (s + 0x6D2B79F5) & 0xFFFFFFFF
-            t = s ^ (s >> 15)
-            t = (t * ((s | 1) & 0xFFFFFFFF)) & 0xFFFFFFFF
-            t = (t ^ (t + (((t ^ (t >> 7)) * ((61 | s) & 0xFFFFFFFF)) & 0xFFFFFFFF))) & 0xFFFFFFFF
-            return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
-        return rnd
-
-    seed = rng.randrange(2**31)
-    rnd = _mulberry32(seed)
-
-    # Build and Fisher–Yates shuffle the mask with the same RNG the client uses
-    mask = ["T"] * true_count + ["D"] * decoy_count
-    for i in range(len(mask) - 1, 0, -1):
-        j = int(rnd() * (i + 1))
-        mask[i], mask[j] = mask[j], mask[i]
-
-    # Generate coordinates in the same sequence; collect only the true flashes
-    true_rc: List[str] = []
-    for tag in mask:
-        r = int(rnd() * rows)
-        c = int(rnd() * cols)
-        if tag == "T":
-            true_rc.append(f"{r}-{c}")
-
-    prompt = (
-        f"{theme or 'The Salt Vault'}: Watch the vault nodes. "
-        "Tap the ones that flash green, in order. Ignore the decoys."
-    )
-
-    return {
-        "id": pid,
-        "type": "mini",
-        "archetype": "mini",
-        "mechanic": "vault_frenzy",
-        "prompt": prompt,
-        # Accept either r-c tokens or indices
-        "answer_format": {"pattern": r"^(\d+-\d+|\d+)(?:[ ,;](\d+-\d+|\d+)){5,}$"},
-        # Canonical solution is ordered r-c tokens
-        "solution": {"answer": ",".join(true_rc)},
-        "hints": [
-            "You will see 6 true flashes. Decoys may double-blink.",
-            "Order matters—tap in the same order they turned green.",
-        ],
-        "decoys": [],
-        "paraphrases": [],
-        "ui_spec": {
-            "kind": "vault_frenzy",
-            "grid_rows": rows,
-            "grid_cols": cols,
-            "seed": seed,
-            "true_count": true_count,
-            "decoy_count": decoy_count,
-            "tempo_ms": tempo_ms,
-            "rules": {"double_blink_decoys": True},
-        },
-    }
-
-def gen_mini_phantom_doors(rng: random.Random, pid: str, theme: str = "") -> Puzzle:
-    # 6 unique glyphs, 3-round sequence with reshuffles and phantoms
-    glyphs = ["◆","◇","◼︎","△","✦","✪","✷","✚","✖︎","✿"]
-    rng.shuffle(glyphs)
-    symbols = glyphs[:6]
-
-    rounds = 3
-    base_seq = [rng.randrange(len(symbols)) for _ in range(rounds + 2)]  # 5 taps total
-
-    # build per-round shuffle maps and phantom positions
-    shuffles = []
-    phantoms = []
-    for _ in range(rounds):
-        perm = list(range(len(symbols)))
-        rng.shuffle(perm)
-        shuffles.append(perm)
-        # 1 phantom per round (index that's shown but fails)
-        phantoms.append(rng.randrange(len(symbols)))
-
-    # server solution is the symbol indices through each shuffle
-    answer_indices = []
-    for i, idx in enumerate(base_seq[:rounds]):
-        # after each shuffle apply perm mapping
-        perm = shuffles[i % rounds]
-        answer_indices.append(perm[idx])
-
-    answer = ",".join(str(i) for i in answer_indices)
-
-    prompt = (
-        f"{theme or 'Ghost Gallery'}: Memorize the symbol sequence. "
-        "Doors reshuffle each round. Avoid phantom doors (they fade)!"
-    )
-
-    return Puzzle(
-        id=pid,
-        archetype="mini",
-        mechanic="phantom_doors",
-        prompt=prompt,
-        answer_format={"pattern": r"^\d+(?:,\d+){2,4}$"},
-        solution={"answer": answer},
-        hints=[
-            "Look at the symbols above before each round.",
-            "Phantoms fade if tapped—skip them.",
-        ],
-        decoys=[],
-        paraphrases=[],
-        ui_spec={
-            "kind": "phantom_doors",
-            "symbols": symbols,          # for drawing glyphs
-            "rounds": rounds,
-            "shuffles": shuffles,        # array of permutations per round
-            "phantoms": phantoms,        # one phantom index per round
-            "tempo_ms": 600
-        },
-    )
-
-def gen_mini_pressure_chamber(rng: random.Random, pid: str, theme: str = "") -> Dict[str, Any]:
-    """
-    3–5 valves with independent rising gauges; target order is pre-computed (server),
-    but client renders continuous motion so it feels like juggling.
-    """
-    n = rng.randrange(3, 6)
-    labels = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")[:n]
-    # Each valve’s rise speed and reset time
-    valves = []
-    for i in range(n):
-        base = rng.uniform(0.16, 0.32)                # units per second
-        variance = rng.uniform(0.05, 0.12)
-        reset_ms = rng.randrange(600, 1200)
-        phase = rng.uniform(0, 1)
-        valves.append({"label": labels[i], "base": base, "var": variance, "reset_ms": reset_ms, "phase": round(phase,2)})
-
-    # Pre-compute a safe-but-tight order to release n*2 times
-    order = [rng.choice(labels) for _ in range(n * 2)]
-    answer = ",".join(order)
-
-    return {
-        "id": pid,
-        "type": "mini",
-        "archetype": "mini",
-        "mechanic": "pressure_chamber",
-        "prompt": (
-            "Pressure rises on each valve. Tap valves in the right order just before they max out. "
-            "They reset at different speeds—keep them all under control."
-        ),
-        "answer_format": {"pattern": r"^[A-Z](,[A-Z])+$"},
-        "solution": {"answer": answer},
-        "hints": [f"{n} valves; watch which climbs fastest.", "A tapped valve drops then accelerates again."],
-        "decoys": [],
-        "paraphrases": [],
-        "ui_spec": {
-            "kind": "pressure_chamber",
-            "seed": rng.randrange(2**31),
-            "valves": valves,
-            "threshold": 1.0,
-            "tempo_ms": 90,             # frame tick for animation
-            "target_count": len(order)   # client stops after this many correct taps
-        }
-    }
-
-# (This is correct wiring)
-def attach_daily_minis(room: Dict[str, Any], rng, theme: str):
-    """
-    Always attach *full* mini dicts (with solution + puzzle_id).
-    This replaces any stubby/legacy variant so /api/submit can verify.
-    """
-    minis = [
-        _puzzle_to_dict(gen_mini_vault_frenzy(rng, "vault_frenzy", theme)),
-        _puzzle_to_dict(gen_mini_phantom_doors(rng, "phantom_doors", theme)),
-        _puzzle_to_dict(gen_mini_pressure_chamber(rng, "pressure_chamber", theme)),
-    ]
-    for m in minis:
-        if m and not m.get("puzzle_id"):
-            m["puzzle_id"] = m.get("id")
-    room["minigames"] = minis
-    return room
-
-# ===== BEGIN CHATGPT MINI-GAMES (do not edit) =====
-# AFTER (grid-flash version that your UI expects)
-def gen_mini_vault_frenzy(rng: random.Random, pid: str, theme: str = "") -> Puzzle:
-    rows, cols = 4, 4
-    total = rows * cols
-
-    # daily: 6 true flashes + 2 decoys (you asked to tighten this)
-    true_count = 6
-    decoy_count = 2
-
-    # pick unique indices
-    all_idx = list(range(total))
-    rng.shuffle(all_idx)
-    true_indices = sorted(all_idx[:true_count])
-    decoy_indices = sorted(all_idx[true_count:true_count + decoy_count])
-
-    prompt = (
-        f"{theme or 'The Salt Vault'}: Watch the vault nodes. "
-        "Tap the ones that flash green, in order. Ignore the decoys."
-    )
-
-    return Puzzle(
-        id=pid,
-        archetype="mini",
-        mechanic="vault_frenzy",
-        prompt=prompt,
-        # accept comma-separated indices like "0,5,9,3, ..."
-        answer_format={"pattern": r"^\d+(?:,\d+){5}$"},  # exactly 6 indices
-        solution={"answer": ",".join(str(i) for i in true_indices)},
-        hints=[
-            "You will see 6 true flashes. Decoys may double-blink.",
-            "Order matters—tap in the same order they turned green.",
-        ],
-        decoys=[],
-        paraphrases=[],
-        ui_spec={
-            "kind": "vault_frenzy",
-            "grid_rows": rows,
-            "grid_cols": cols,
-            "tempo_ms": 550,
-            # sent so the client can replay the pattern; verification still uses server solution
-            "true_indices": true_indices,
-            "decoy_indices": decoy_indices,
-            "rules": {"double_blink_decoys": True}
-        },
-    )
-
-def _letter_filler(rng: random.Random, avoid: str = "") -> str:
-    A = [c for c in string.ascii_uppercase if c not in set((avoid or "").upper())]
-    return rng.choice(A) if A else rng.choice(string.ascii_uppercase)
-
-def _grid_with_path_for_word(rng: random.Random, word: str, side: int = 4):
-    """
-    Place `word` as an adjacent path on a side×side grid; fill the rest with random letters.
-    Returns (grid, path_coords).
-    """
-    w = re.sub(r"[^A-Za-z]", "", word or "").upper()
-    side = max(3, min(6, int(side or 4)))
-    r, c = rng.randrange(side), rng.randrange(side)
-    grid = [[None for _ in range(side)] for _ in range(side)]
-    grid[r][c] = w[0]
-    path = [(r, c)]
-    for ch in w[1:]:
-        dirs = rng.sample([(1,0),(-1,0),(0,1),(0,-1)], k=4)
-        placed = False
-        for dr, dc in dirs:
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < side and 0 <= nc < side and grid[nr][nc] is None:
-                grid[nr][nc] = ch
-                r, c = nr, nc
-                path.append((r, c))
-                placed = True
-                break
-        if not placed:
-            empties = [(i,j) for i in range(side) for j in range(side) if grid[i][j] is None]
-            if not empties:
-                break
-            r, c = rng.choice(empties)
-            grid[r][c] = ch
-            path.append((r, c))
-    for i in range(side):
-        for j in range(side):
-            if grid[i][j] is None:
-                grid[i][j] = _letter_filler(rng, avoid=w)
-    return grid, path
-
-def gen_light_reactor(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    """
-    Light Reactor — “chasing charge”
-    Grid mini: collect letters by dragging a continuous path to spell a word.
-    Server verifies the resulting string (letters joined without separators).
-    """
-    base_words = globals().get("ANAGRAM_WORDS", ["EMBER","CABLE","LUMEN","VAULT","PRESS","NOVA","CIRCUIT"])
-    cands = [w for w in base_words if 4 <= len(w) <= 6 and w.lower() not in set(x.lower() for x in (blacklist or set()))]
-    ans = (rng.choice(cands) if cands else "EMBER")
-    ans = re.sub(r"[^A-Za-z]", "", ans).upper()
-    side = 4 if len(ans) <= 5 else 5
-    grid, path = _grid_with_path_for_word(rng, ans, side=side)
-    prompt = (
-        f"{theme or 'Signal in the Sublevel'}: Capacitors pulse on a board. "
-        "Drag through adjacent tiles to siphon charge—collect letters that spell the word."
-    )
-    return Puzzle(
-        id=pid,
-        archetype="mini",
-        mechanic="grid_input",
-        prompt=prompt,
-        answer_format={"pattern": r"^[A-Za-z]{4,12}$"},
-        solution={"answer": ans},
-        hints=[
-            "Start at the brightest cell.",
-            "Adjacent moves only (no diagonals)."
-        ],
-        decoys=[ans[::-1], re.sub(r".$", "", ans), ans[1:] + ans[:1]],
-        paraphrases=[
-            "Trace a continuous path to pick up letters in order.",
-            "Follow the energy trail; it spells a word."
-        ],
-        ui_spec={
-            "grid": grid,
-            "start": {"row": int(path[0][0]), "col": int(path[0][1])},
-            "collect": "letters"
-        }
-    )
-
-def gen_pressure_chamber(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    """
-    Pressure Chamber — “dial & relief valves”
-    Sequence mini: adjust pressure using control tokens; exact sequence is checked server-side.
-    """
-    tokens = ["tap", "hold", "up", "down", "left", "right"]
-    L = rng.randint(7, 10)
-    seq = []
-    pressure = 0
-    for _ in range(L):
-        t = rng.choice(tokens)
-        seq.append(t)
-        if t in ("up", "right"): pressure += 1
-        elif t in ("down", "left"): pressure -= 1
-        else: pressure += 0
-    prompt = (
-        f"{theme or 'Archive of Ash'}: Gauges rattle; a relief valve hisses. "
-        "Stabilize the chamber by repeating the control sequence."
-    )
-    return Puzzle(
-        id=pid,
-        archetype="mini",
-        mechanic="sequence_input",
-        prompt=prompt,
-        answer_format={"pattern": r"^(?:[A-Za-z_]+(?:,\\s*)?){5,}$"},
-        solution={"answer": ",".join(seq), "target_pressure": pressure},
-        hints=[
-            "The controls repeat in a loop.",
-            "Think short bursts—then holds."
-        ],
-        decoys=["tap,up,tap,down,hold,right,left", "hold,hold,up,down,left,right,tap"],
-        paraphrases=[
-            "Repeat the valve/dial moves exactly.",
-            "Match the stabilization inputs in order."
-        ],
-        ui_spec={"sequence": ["tap","hold","up","down","left","right"]}
-    )
-# ===== END CHATGPT MINI-GAMES =====
-
-def gen_scene_mini(rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Puzzle:
-    """
-    Produce a *mini-game* puzzle spec.
-    Bias heavily toward the three original minis, keep a couple of legacy generators as low-weight fallbacks.
-    """
+def gen_scene_mini(rng, pid, blacklist, theme=""):
     choices = [
-        (lambda: gen_vault_frenzy(rng, pid, blacklist, theme),        6),
-        (lambda: gen_light_reactor(rng, pid, blacklist, theme),       6),
-        (lambda: gen_pressure_chamber(rng, pid, blacklist, theme),    6),
-        # fallbacks (low weight) — these exist in your original core.py:
-        (lambda: gen_knightword(rng, pid, blacklist, theme),          1),
-        (lambda: gen_pathcode(rng, pid, blacklist, theme),            1),
+        (gen_knightword,           3),
+        (gen_valve_order,          3),
+        (gen_signal_translate,     1),  # cue-only audio memory
+        (gen_translate_with_legend,1),
+        (gen_pathcode,             2),
+        (gen_tapcode,              2),
+        (gen_acrostic,             1),
     ]
-    funcs, weights = zip(*choices)
-    f = rng.choices(funcs, weights=weights, k=1)[0]
-    try:
-        return f()
-    except Exception as e:
-        # Avoid hard failure; pick a safe fallback if something unexpected happens.
-        try:
-            return gen_pathcode(rng, pid, blacklist, theme)
-        except Exception:
-            return gen_knightword(rng, pid, blacklist, theme)
+    funcs, w = zip(*choices)
+    f = rng.choices(funcs, weights=w, k=1)[0]
+    return f(rng, pid, blacklist, theme)
+
+# --- Sanitizer helpers -------------------------------------------------
 
 def _regen_puzzle(archetype: str, rng: random.Random, pid: str, blacklist: set, theme: str = "") -> Dict[str, Any]:
     if archetype == "acrostic":  return gen_acrostic(rng, pid, blacklist, theme).to_json()
@@ -1595,9 +1185,15 @@ def _replace_recent_answers(blob: Dict[str, Any], rng: random.Random) -> Dict[st
             ans = (p.get("solution") or {}).get("answer", "")
             if normalize_answer(ans) in recent_norm:
                 pid = p.get("id") or f"r{i}_auto_{j}"
-                # Always regenerate as a MINI (don’t mirror original type)
-                rt["puzzle"] = gen_scene_mini(rng, pid, recent_lower, theme).to_json()
-                continue
+                typ = (p.get("type") or p.get("archetype") or "").lower()
+                if   typ == "acrostic": new_p = gen_acrostic(rng, pid, recent_lower, theme).to_json()
+                elif typ == "tapcode":  new_p = gen_tapcode(rng,  pid, recent_lower, theme).to_json()
+                elif typ == "pathcode": new_p = gen_pathcode(rng, pid, recent_lower, theme).to_json()
+                else:                   new_p = _synth_puzzle(rng, pid, recent_lower, theme)
+                new_p["id"] = pid
+                rt["puzzle"] = new_p
+
+        # re-coerce fragments across all routes
         # re-coerce fragments across all routes (tolerant; sanitize happens later)
         puzzles = []
         for r in routes:
@@ -2374,21 +1970,8 @@ def generate_room_offline(date_key: str, server_secret: str) -> Dict[str, Any]:
     seed = daily_seed(date_key, server_secret + salt)   # ← was server_secret only
     rng = rng_from_seed(seed)
     room = _offline_trail(date_key, rng)
-    room = validate_trailroom(room)
-
-    # Attach the three arcade minis so the minis API always has content
-    try:
-        theme = room.get("title") or room.get("theme") or "Daily Escape"
-        attach_daily_minis(room, rng, theme)  # <-- correct arguments
-    except Exception as e:
-        # Don’t fail the whole build if minis attach ever errors
-        try:
-            current_app.logger.warning(f"[escape] attach_daily_minis error: {e}")
-        except Exception:
-            pass
-
+    room["source"] = "offline"
     return room
-
 
 # ───────────────────────── Primary generation ─────────────────────────
 
@@ -2917,83 +2500,31 @@ def ensure_daily_room(date_key: Optional[str] = None, force_regen: bool = False)
         return existing
 
     secret = os.getenv("ESCAPE_SERVER_SECRET","dev_secret_change_me")
-    # Allow per-request variant via ?salt=... or ?rotate=...
-    try:
-        from flask import has_request_context, request
-        if has_request_context():
-            _qs_salt = request.args.get("salt") or request.args.get("rotate")
-            if not _qs_salt:
-                _qs_salt = os.getenv("ESCAPE_REGEN_SALT")  # fallback to env from routes.py
-            if _qs_salt:
-                secret = f"{secret}::{_qs_salt}"
-    except Exception:
-        pass
-
     for attempt in range(1, MAX_GEN_ATTEMPTS+1):
         try:
             room_blob = generate_room(date_key, secret)
-
-            # ← Persist minis deterministically using date_key + secret (includes ?rotate/&salt)
-            try:
-                from .core import daily_seed, rng_from_seed, attach_daily_minis
-                theme = room_blob.get("title") or room_blob.get("theme") or "Daily Escape"
-                seed = daily_seed(date_key, secret)
-                rng = rng_from_seed(seed)
-                attach_daily_minis(room_blob, rng, theme)  # mutates room_blob
-            except Exception as e:
-                try: current_app.logger.warning(f"[escape] attach_daily_minis at save failed: {e}")
-                except Exception: pass
-
-            blob_clean = _json_sanitize(room_blob)
-
             if existing:
-                existing.json_blob = blob_clean
-                existing.difficulty = blob_clean.get("difficulty", DEFAULT_DIFFICULTY)
+                existing.json_blob = room_blob
+                existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
                 db.session.add(existing); db.session.commit(); return existing
             else:
-                new_room = EscapeRoom(
-                    date_key=date_key,
-                    json_blob=blob_clean,
-                    difficulty=blob_clean.get("difficulty", DEFAULT_DIFFICULTY),
-                )
+                new_room = EscapeRoom(date_key=date_key, json_blob=room_blob,
+                                      difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY))
                 db.session.add(new_room); db.session.commit(); return new_room
         except Exception as e:
             try: current_app.logger.warning(f"[escape] generation attempt {attempt} failed: {e}")
             except Exception: pass
 
     # last resort
-    # If a previous flush in this request failed, reset the session first
-    try:
-        db.session.rollback()
-    except Exception:
-        pass
-
     room_blob = generate_room_offline(date_key, secret)
-
-    # Attach minis deterministically (same seed rule as online path)
-    try:
-        from .core import daily_seed, rng_from_seed, attach_daily_minis
-        theme = room_blob.get("title") or room_blob.get("theme") or "Daily Escape"
-        seed = daily_seed(date_key, secret)
-        rng = rng_from_seed(seed)
-        attach_daily_minis(room_blob, rng, theme)
-    except Exception as e:
-        try: current_app.logger.warning(f"[escape] attach_daily_minis at save failed: {e}")
-        except Exception: pass
-
-    blob_clean = _json_sanitize(room_blob)
-
-    row = EscapeRoom.query.filter_by(date_key=date_key).first()
-    if row:
-        row.json_blob = blob_clean
-        row.difficulty = blob_clean.get("difficulty", DEFAULT_DIFFICULTY)
+    if existing:
+        existing.json_blob = room_blob
+        existing.difficulty = room_blob.get("difficulty", DEFAULT_DIFFICULTY)
+        db.session.add(existing); db.session.commit(); return existing
     else:
-        row = EscapeRoom(
-            date_key=date_key,
-            json_blob=blob_clean,
-            difficulty=blob_clean.get("difficulty", DEFAULT_DIFFICULTY),
-        )
-    db.session.add(row); db.session.commit(); return row
+        new_room = EscapeRoom(date_key=date_key, json_blob=room_blob,
+                              difficulty=room_blob.get("difficulty", DEFAULT_DIFFICULTY))
+        db.session.add(new_room); db.session.commit(); return new_room
 
 def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool:
     if submitted is None: return False
@@ -3002,41 +2533,13 @@ def _match_answer(expected: str, submitted: str, pattern: Optional[str]) -> bool
         return s == e
     return normalize_answer(s) == normalize_answer(e)
 
-
-def _iter_all_puzzles(room_json: Dict[str, Any]):
-    # Accept rows that are JSON strings or ORM objects
-    if isinstance(room_json, (str, bytes)):
-        try:
-            room_json = json.loads(room_json)
-        except Exception:
-            room_json = {}
-    elif not isinstance(room_json, dict):
-        # last-resort: try to use dictionary view of the object
-        room_json = dict(getattr(room_json, "__dict__", {})) or {}
-    # (rest of the function unchanged)
+def _iter_all_puzzles(room_json: Dict[str,Any]):
     for rm in _as_dict_list(room_json.get("trail", {}).get("rooms")):
         for rt in _as_dict_list(rm.get("routes")):
             p = rt.get("puzzle") if isinstance(rt.get("puzzle"), dict) else {}
-            if p:
-                yield p
-
-    # 2) top-level puzzles
+            if p: yield p
     for p in _as_dict_list(room_json.get("puzzles")):
         yield p
-
-    # 3) NEW: minis (normalize to the structure verify_puzzle expects)
-    for m in _as_dict_list(room_json.get("minigames")):
-        if not isinstance(m, dict):
-            continue
-        pid = m.get("puzzle_id") or m.get("id")
-        sol = (m.get("solution") or {}).get("answer")
-        yield {
-            "id": pid,
-            "solution": {"answer": sol},
-            "answer_format": m.get("answer_format") or {},
-            "prompt": m.get("prompt") or "",
-            "type": m.get("type") or m.get("archetype") or "mini",
-        }
 
 def _numeric_lock_accept_alt(answer: str, puzzle: Dict[str, Any]) -> bool:
     """
