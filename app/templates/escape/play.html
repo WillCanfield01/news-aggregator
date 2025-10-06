@@ -195,9 +195,37 @@
     }
 
     @media (max-width: 500px) {
-      .vf-grid {
+      header {
+        flex-direction: column;
+        align-items: stretch;
         gap: 8px;
-        max-width: 92vw;
+      }
+
+      header .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        /* 2-up grid */
+        gap: 8px;
+        width: 100%;
+      }
+
+      header .row .btn,
+      header .row a.btn {
+        width: 100%;
+        padding: 10px 12px;
+        /* smaller hit area */
+        border-radius: 10px;
+        box-shadow: none;
+        /* remove heavy glow on mobile */
+        font-size: 0.9rem;
+      }
+
+      .brand {
+        font-size: 1rem;
+      }
+
+      .meta {
+        font-size: 12px;
       }
     }
 
@@ -509,17 +537,6 @@
     .controls button:active {
       background-color: #555;
       transform: scale(0.95);
-    }
-
-
-    .controls {
-      gap: 8px;
-    }
-
-    .controls button {
-      font-size: 0.8rem;
-      padding: 8px 12px;
-      max-width: 100px;
     }
   </style>
 </head>
@@ -1011,8 +1028,14 @@
         seqBar.appendChild(showBtn); seqBar.appendChild(seqWrap); host.appendChild(seqBar);
 
         const corridor = document.createElement("div");
-        corridor.style.display = "grid"; corridor.style.gridTemplateColumns = "repeat(3, 220px)"; corridor.style.gridAutoRows = "86px"; corridor.style.gap = "18px";
-        host.appendChild(corridor);
+        corridor.style.display = "grid";
+        corridor.style.gridTemplateColumns = "repeat(3, 1fr)";      // responsive columns
+        corridor.style.gap = "12px";
+        corridor.style.width = "100%";
+        corridor.style.maxWidth = "min(92vw, 420px)";               // never wider than screen
+        corridor.style.margin = "12px auto 0";                      // centered
+        host.appendChild(corridor);                                  // (remove gridAutoRows)
+
         const ctrls = document.createElement("div");
         ctrls.className = "controls";
         const clearBtn = document.createElement("button"); clearBtn.className = "btn"; clearBtn.textContent = "Clear";
@@ -1032,8 +1055,13 @@
         function doorEl(symbol, isPhantom) {
           const d = document.createElement("div");
           d.className = "vf-cell";
-          d.style.display = "flex"; d.style.alignItems = "center"; d.style.justifyContent = "center";
-          d.style.fontSize = "28px"; d.style.position = "relative";
+          d.style.display = "flex";
+          d.style.alignItems = "center";
+          d.style.justifyContent = "center";
+          d.style.fontSize = "28px";
+          d.style.position = "relative";
+          d.style.aspectRatio = "1 / 1";   // square tile
+          d.style.width = "100%";          // fill grid cell
           if (isPhantom) {
             const tag = document.createElement("div");
             tag.textContent = "▢"; tag.style.position = "absolute"; tag.style.right = "10px"; tag.style.top = "8px"; tag.style.opacity = ".35";
