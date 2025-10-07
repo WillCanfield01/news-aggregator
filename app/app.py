@@ -9,7 +9,7 @@ from app.extensions import db, login_manager
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
-
+from app.scripts.generate_timeline_round import ensure_today_round
 
 def schedule_daily_reddit_article(app):
     def scheduled_job():
@@ -22,6 +22,14 @@ def schedule_daily_reddit_article(app):
     scheduler.add_job(scheduled_job, "cron", hour=17, minute=0)
     scheduler.start()
 
+def schedule_daily_timeline(app):
+    def job():
+        with app.app_context():
+            ensure_today_round()
+            print("✅ Timeline Roulette generated")
+    scheduler = BackgroundScheduler(timezone=pytz.timezone("America/Denver"))
+    scheduler.add_job(job, "cron", hour=0, minute=5)  # adjust to your TZ
+    scheduler.start()
 
 def create_app():
     app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -156,6 +164,7 @@ def create_app():
         start_background_tasks()
         schedule_daily_reddit_article(app)
         schedule_daily_generation(app)
+        schedule_daily_timeline(app)
 
     return app
 
