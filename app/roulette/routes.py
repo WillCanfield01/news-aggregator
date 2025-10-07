@@ -1,11 +1,11 @@
 from datetime import date, timedelta
 import hashlib
 import random
-
-from flask import render_template, request, jsonify, abort, make_response
-from sqlalchemy import func, and_
 from pathlib import Path
-from flask import url_for, current_app
+
+from flask import render_template, request, jsonify, abort, make_response, url_for, current_app
+from sqlalchemy import func, and_
+
 from app.extensions import db
 
 # Try to use Flask-Login if present; otherwise a dummy object
@@ -61,17 +61,38 @@ def _update_server_streak_if_logged_in():
     return streak.current_streak
 
 
+def _icon_url_or_fallback(name: str | None) -> str:
+    """
+    Resolve a static URL for an icon filename under /static/roulette/icons.
+    If the requested file doesn't exist, fall back to the first existing
+    neutral icon; if none, pick any svg in the folder.
+    """
+    static_dir = Path(current_app.static_folder) / "roulette" / "icons"
+
+    # find a fallback that actually exists
+    for fb in ["star.svg", "sparkles.svg", "asterisk.svg", "dot.svg", "circle.svg", "history.svg", "compass.svg", "feather.svg"]:
+        if (static_dir / fb).exists():
+            fallback = fb
+            break
+    else:
+        fallback = next((p.name for p in static_dir.glob("*.svg")), "star.svg")
+
+    if name and (static_dir / name).exists():
+        chosen = name
+    else:
+        chosen = fallback
+
+    return url_for("static", filename=f"roulette/icons/{chosen}")
+
+
 # -------- Pages --------
 @roulette_bp.get("/roulette")
 def play_today():
     r = _today_round()
 
-
-    def icon_url(name: str | None) -> str | None:
-        return url_for("static", filename=f"roulette/icons/{name}") if name else None
-
+    # Build cards here (after we have r), using safe icon URLs
     cards = [
-        {"orig_idx": 0, "text": r.real_title, "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
+        {"orig_idx": 0, "text": r.real_title,  "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
         {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_url_or_fallback(r.fake1_icon)},
         {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_url_or_fallback(r.fake2_icon)},
     ]
@@ -83,8 +104,8 @@ def play_today():
 
     guest_streak = request.cookies.get("tr_streak")
 
-    # pack brief attribution (optional)
-    attr = r.real_img_attr or r.fake1_img_attr or r.fake2_img_attr
+    # Optional: keep attribution if you still show it somewhere
+    attr = getattr(r, "real_img_attr", None) or getattr(r, "fake1_img_attr", None) or getattr(r, "fake2_img_attr", None)
 
     return render_template(
         "roulette/play.html",
@@ -97,6 +118,7 @@ def play_today():
         guest_streak=guest_streak,
         img_attr=attr,
     )
+
 
 @roulette_bp.post("/roulette/guess")
 def submit_guess():
@@ -148,28 +170,6 @@ def submit_guess():
     resp.set_cookie("tr_last_play_date", today, max_age=7 * 24 * 3600, httponly=False, samesite="Lax")
     return resp
 
-def _icon_url_or_fallback(name: str | None) -> str:
-    static_dir = Path(current_app.static_folder) / "roulette" / "icons"
-    for fb in ["star.svg","sparkles.svg","asterisk.svg","dot.svg","circle.svg","history.svg","compass.svg","feather.svg"]:
-        if (static_dir / fb).exists():
-            fallback = fb
-            break
-    else:
-        # any svg in the folder
-        fallback = next((p.name for p in static_dir.glob("*.svg")), "star.svg")
-
-    if not name:
-        return url_for("static", filename=f"roulette/icons/{fallback}")
-    if (static_dir / name).exists():
-        return url_for("static", filename=f"roulette/icons/{name}")
-    return url_for("static", filename=f"roulette/icons/{fallback}")
-
-# inside play_today():
-cards = [
-    {"orig_idx": 0, "text": r.real_title, "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
-    {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_url_or_fallback(r.fake1_icon)},
-    {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_url_or_fallback(r.fake2_icon)},
-]
 
 @roulette_bp.get("/roulette/leaderboard")
 def leaderboard():
