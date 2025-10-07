@@ -12,7 +12,9 @@ class TimelineRound(db.Model):
     real_source_url = db.Column(db.String(600), nullable=False)
     fake1_title = db.Column(db.String(300), nullable=False)
     fake2_title = db.Column(db.String(300), nullable=False)
-
+    real_icon = db.Column(db.String(60))
+    fake1_icon = db.Column(db.String(60))
+    fake2_icon = db.Column(db.String(60))
     # Unsplash thumbnails + tiny attribution
     real_img_url  = db.Column(db.String(600), nullable=True)
     real_img_attr = db.Column(db.String(300), nullable=True)

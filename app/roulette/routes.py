@@ -3,8 +3,9 @@ import hashlib
 import random
 
 from flask import render_template, request, jsonify, abort, make_response
-
 from sqlalchemy import func, and_
+from pathlib import Path
+from flask import url_for, current_app
 from app.extensions import db
 
 # Try to use Flask-Login if present; otherwise a dummy object
@@ -65,10 +66,14 @@ def _update_server_streak_if_logged_in():
 def play_today():
     r = _today_round()
 
+
+    def icon_url(name: str | None) -> str | None:
+        return url_for("static", filename=f"roulette/icons/{name}") if name else None
+
     cards = [
-        {"orig_idx": 0, "text": r.real_title, "label": "A", "img": r.real_img_url},
-        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "img": r.fake1_img_url},
-        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "img": r.fake2_img_url},
+        {"orig_idx": 0, "text": r.real_title, "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
+        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_url_or_fallback(r.fake1_icon)},
+        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_url_or_fallback(r.fake2_icon)},
     ]
     random.shuffle(cards)
     correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
@@ -143,6 +148,19 @@ def submit_guess():
     resp.set_cookie("tr_last_play_date", today, max_age=7 * 24 * 3600, httponly=False, samesite="Lax")
     return resp
 
+def _icon_url_or_fallback(name: str | None) -> str:
+    static_dir = Path(current_app.static_folder) / "roulette" / "icons"
+    # figure out a safe fallback (same logic as generator)
+    for fb in ["star.svg","sparkles.svg","asterisk.svg","dot.svg","circle.svg","history.svg","compass.svg","feather.svg"]:
+        fallback = fb
+        if (static_dir / fb).exists():
+            break
+    if not name:
+        return url_for("static", filename=f"roulette/icons/{fallback}")
+    p = static_dir / name
+    if p.exists():
+        return url_for("static", filename=f"roulette/icons/{name}")
+    return url_for("static", filename=f"roulette/icons/{fallback}")
 
 @roulette_bp.get("/roulette/leaderboard")
 def leaderboard():
