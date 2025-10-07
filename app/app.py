@@ -4,10 +4,8 @@ from datetime import datetime
 from flask import Flask, render_template, Response, url_for, current_app, jsonify, redirect
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
-
-# singletons (do NOT re-create them in this file)
+from app.roulette import models as _roulette_models 
 from app.extensions import db, login_manager
-
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -58,14 +56,20 @@ def create_app():
     # ---- Blueprints ----
     from app.aggregator import aggregator_bp, start_background_tasks
     from app.reddit_articles import bp as reddit_bp
+    from app.roulette import roulette_bp
     app.register_blueprint(aggregator_bp)
     app.register_blueprint(reddit_bp)
     app.register_blueprint(create_escape_bp(), url_prefix="/escape")
+    app.register_blueprint(roulette_bp)    
 
     # Optional: /escape → /escape/today convenience
     @app.route("/escape")
     def escape_root_redirect():
         return redirect("/escape/today", code=302)
+
+    @app.route("/_roulette_ping")
+    def _roulette_ping():
+        return "roulette blueprint loaded"
 
     # ---- Routes ----
     @app.route("/")
