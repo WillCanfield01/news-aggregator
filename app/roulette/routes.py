@@ -17,7 +17,7 @@ import pytz
 # -------- Utilities --------
 def schedule_timeline_job(scheduler):
     tz = pytz.timezone("America/Denver")  # adjust
-    scheduler.add_job(lambda: ensure_today_round(), "cron", hour=0, minute=05, timezone=tz)
+    scheduler.add_job(lambda: ensure_today_round(), "cron", hour=0, minute=5, timezone=tz)
 
 
 def _today_round() -> TimelineRound:
