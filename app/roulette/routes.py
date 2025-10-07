@@ -150,17 +150,26 @@ def submit_guess():
 
 def _icon_url_or_fallback(name: str | None) -> str:
     static_dir = Path(current_app.static_folder) / "roulette" / "icons"
-    # figure out a safe fallback (same logic as generator)
     for fb in ["star.svg","sparkles.svg","asterisk.svg","dot.svg","circle.svg","history.svg","compass.svg","feather.svg"]:
-        fallback = fb
         if (static_dir / fb).exists():
+            fallback = fb
             break
+    else:
+        # any svg in the folder
+        fallback = next((p.name for p in static_dir.glob("*.svg")), "star.svg")
+
     if not name:
         return url_for("static", filename=f"roulette/icons/{fallback}")
-    p = static_dir / name
-    if p.exists():
+    if (static_dir / name).exists():
         return url_for("static", filename=f"roulette/icons/{name}")
     return url_for("static", filename=f"roulette/icons/{fallback}")
+
+# inside play_today():
+cards = [
+    {"orig_idx": 0, "text": r.real_title, "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
+    {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_url_or_fallback(r.fake1_icon)},
+    {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_url_or_fallback(r.fake2_icon)},
+]
 
 @roulette_bp.get("/roulette/leaderboard")
 def leaderboard():
