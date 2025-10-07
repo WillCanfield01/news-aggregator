@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}Timeline Roulette — {{ round_date.strftime("%b %d, %Y") }}{% endblock %}
-
 {% block content %}
 <section class="container" style="max-width:900px;margin:2rem auto;padding:0 1rem;">
     <h1 class="mb-2">Timeline Roulette</h1>
@@ -8,7 +7,6 @@
         Two are fakes. One really happened on {{ round_date.strftime("%B %d") }}. Pick the real one.
     </p>
 
-    <!-- put the correct index in a data attribute to avoid Jinja-in-JS issues -->
     <div id="cardsWrap" data-correct="{{ correct_index }}">
         <div id="cards" class="grid" style="display:grid;grid-template-columns:1fr;gap:14px;">
             {% for c in cards %}
@@ -85,7 +83,7 @@
                             streakEl.textContent = data.streak;
                         }
                     }
-                } catch (e) { /* swallow */ }
+                } catch (e) { }
             });
         });
     })();

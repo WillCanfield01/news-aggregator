@@ -3,23 +3,24 @@ import hashlib
 import random
 
 from flask import render_template, request, jsonify, abort, make_response
-from sqlalchemy import func, and_
 
+from sqlalchemy import func, and_
 from app.extensions import db
-from app.models import User  # your existing user model
-from flask_login import current_user
+
+# Try to use Flask-Login if present; otherwise a dummy object
+try:
+    from flask_login import current_user  # type: ignore
+except Exception:  # pragma: no cover
+    class _Anon:
+        is_authenticated = False
+        id = None
+    current_user = _Anon()  # type: ignore
+
 from . import roulette_bp
 from .models import TimelineRound, TimelineGuess, TimelineStreak
-from app.scripts.generate_timeline_round import ensure_today_round
-import pytz
 
 
 # -------- Utilities --------
-def schedule_timeline_job(scheduler):
-    tz = pytz.timezone("America/Denver")  # adjust
-    scheduler.add_job(lambda: ensure_today_round(), "cron", hour=0, minute=5, timezone=tz)
-
-
 def _today_round() -> TimelineRound:
     r = TimelineRound.query.filter_by(round_date=date.today()).first()
     if not r:
@@ -34,7 +35,7 @@ def _anonymize_ip(ip: str | None) -> str:
 
 
 def _update_server_streak_if_logged_in():
-    if not current_user.is_authenticated:
+    if not getattr(current_user, "is_authenticated", False):
         return None
 
     streak = TimelineStreak.query.filter_by(user_id=current_user.id).first()
@@ -46,11 +47,9 @@ def _update_server_streak_if_logged_in():
         db.session.commit()
         return streak.current_streak
 
-    # If already played today, don't double-increment
     if streak.last_play_date == today:
         return streak.current_streak
 
-    # If yesterday -> increment; otherwise reset to 1
     if streak.last_play_date == today - timedelta(days=1):
         streak.current_streak += 1
     else:
@@ -66,21 +65,17 @@ def _update_server_streak_if_logged_in():
 def play_today():
     r = _today_round()
 
-    # Build cards; we always treat index=0 as 'real' before shuffling.
     cards = [
         {"orig_idx": 0, "text": r.real_title, "label": "A"},
         {"orig_idx": 1, "text": r.fake1_title, "label": "B"},
         {"orig_idx": 2, "text": r.fake2_title, "label": "C"},
     ]
     random.shuffle(cards)
-    # find where the real ended up (for client reveal)
     correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
 
-    # Basic aggregate stats for the day
     total = db.session.query(func.count(TimelineGuess.id)).filter(TimelineGuess.round_id == r.id).scalar() or 0
     correct = db.session.query(func.count(TimelineGuess.id)).filter(and_(TimelineGuess.round_id == r.id, TimelineGuess.is_correct.is_(True))).scalar() or 0
 
-    # Streak cookie for guests; server streak for logged-in
     guest_streak = request.cookies.get("tr_streak")
 
     return render_template(
@@ -110,7 +105,7 @@ def submit_guess():
 
     guess = TimelineGuess(
         round_id=r.id,
-        user_id=current_user.id if current_user.is_authenticated else None,
+        user_id=getattr(current_user, "id", None) if getattr(current_user, "is_authenticated", False) else None,
         choice_index=choice,
         is_correct=is_correct,
         ip_hash=ip_h,
@@ -118,27 +113,15 @@ def submit_guess():
     db.session.add(guess)
     db.session.commit()
 
-    # Update server streak if logged in; set guest cookie streak either way
     server_streak = _update_server_streak_if_logged_in()
 
-    # Guest streak cookie logic
     resp = make_response()
     today = date.today().isoformat()
     last = request.cookies.get("tr_last_play_date")
     guest_streak = int(request.cookies.get("tr_streak", "0"))
-    if last == today:
-        # already counted
-        pass
-    else:
-        # if played yesterday -> +1, else reset to 1
-        if last == (date.today() - timedelta(days=1)).isoformat():
-            guest_streak += 1
-        else:
-            guest_streak = 1
+    if last != today:
+        guest_streak = guest_streak + 1 if last == (date.today() - timedelta(days=1)).isoformat() else 1
 
-    resp.headers["Content-Type"] = "application/json"
-
-    # updated aggregates
     total = db.session.query(func.count(TimelineGuess.id)).filter(TimelineGuess.round_id == r.id).scalar() or 0
     correct_ct = db.session.query(func.count(TimelineGuess.id)).filter(and_(TimelineGuess.round_id == r.id, TimelineGuess.is_correct.is_(True))).scalar() or 0
 
@@ -152,8 +135,7 @@ def submit_guess():
             }
         ).get_data(as_text=True)
     )
-
-    # cookie (7 days) – not sensitive; just for streak convenience
+    resp.headers["Content-Type"] = "application/json"
     resp.set_cookie("tr_streak", str(guest_streak), max_age=7 * 24 * 3600, httponly=False, samesite="Lax")
     resp.set_cookie("tr_last_play_date", today, max_age=7 * 24 * 3600, httponly=False, samesite="Lax")
     return resp
@@ -161,12 +143,10 @@ def submit_guess():
 
 @roulette_bp.get("/roulette/leaderboard")
 def leaderboard():
-    # daily stats (today)
     r = _today_round()
     today_total = db.session.query(func.count(TimelineGuess.id)).filter(TimelineGuess.round_id == r.id).scalar() or 0
     today_correct = db.session.query(func.count(TimelineGuess.id)).filter(and_(TimelineGuess.round_id == r.id, TimelineGuess.is_correct.is_(True))).scalar() or 0
 
-    # 7-day totals (site-wide)
     seven_days_ago = date.today() - timedelta(days=6)
     rounds = db.session.query(TimelineRound.id).filter(TimelineRound.round_date >= seven_days_ago).subquery()
     week_total = db.session.query(func.count(TimelineGuess.id)).filter(TimelineGuess.round_id.in_(rounds)).scalar() or 0
