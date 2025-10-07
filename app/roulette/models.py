@@ -4,6 +4,28 @@ from app.extensions import db
 class TimelineRound(db.Model):
     __tablename__ = "timeline_rounds"
 
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    round_date = db.Column(db.Date, unique=True, index=True, nullable=False)
+
+    real_title = db.Column(db.String(300), nullable=False)
+    real_source_url = db.Column(db.String(600), nullable=False)
+    fake1_title = db.Column(db.String(300), nullable=False)
+    fake2_title = db.Column(db.String(300), nullable=False)
+
+    # NEW: Unsplash thumbs + attribution (optional)
+    real_img_url  = db.Column(db.String(600), nullable=True)
+    real_img_attr = db.Column(db.String(300), nullable=True)  # "Photographer • Unsplash URL"
+    fake1_img_url  = db.Column(db.String(600), nullable=True)
+    fake1_img_attr = db.Column(db.String(300), nullable=True)
+    fake2_img_url  = db.Column(db.String(600), nullable=True)
+    fake2_img_attr = db.Column(db.String(300), nullable=True)
+
+    correct_index = db.Column(db.Integer, nullable=False, default=0)
+    published_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+class TimelineRound(db.Model):
+    __tablename__ = "timeline_rounds"
+
     id = db.Column(db.Integer, primary_key=True)
     round_date = db.Column(db.Date, unique=True, index=True, nullable=False)
 

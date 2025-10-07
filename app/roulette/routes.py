@@ -66,9 +66,9 @@ def play_today():
     r = _today_round()
 
     cards = [
-        {"orig_idx": 0, "text": r.real_title, "label": "A"},
-        {"orig_idx": 1, "text": r.fake1_title, "label": "B"},
-        {"orig_idx": 2, "text": r.fake2_title, "label": "C"},
+        {"orig_idx": 0, "text": r.real_title, "label": "A", "img": r.real_img_url},
+        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "img": r.fake1_img_url},
+        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "img": r.fake2_img_url},
     ]
     random.shuffle(cards)
     correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
@@ -77,6 +77,9 @@ def play_today():
     correct = db.session.query(func.count(TimelineGuess.id)).filter(and_(TimelineGuess.round_id == r.id, TimelineGuess.is_correct.is_(True))).scalar() or 0
 
     guest_streak = request.cookies.get("tr_streak")
+
+    # pack brief attribution (optional)
+    attr = r.real_img_attr or r.fake1_img_attr or r.fake2_img_attr
 
     return render_template(
         "roulette/play.html",
@@ -87,8 +90,8 @@ def play_today():
         day_total=total,
         day_correct=correct,
         guest_streak=guest_streak,
+        img_attr=attr,
     )
-
 
 @roulette_bp.post("/roulette/guess")
 def submit_guess():
