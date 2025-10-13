@@ -62,37 +62,36 @@ def _token_len(s: str) -> int:
     return len([w for w in re.findall(r"[A-Za-z']+", s.lower()) if w not in _STOP])
 
 def soften_real_title(title: str) -> str:
-    """
-    Aggressively neutralize proper nouns and specific place names so
-    the real item doesn't feel more specific than the fakes.
-    """
     s = title
 
-    # Remove parenthetical/date clutter
+    # strip parentheses/dates
     s = re.sub(r"\s*\([^)]*\)", "", s)
-    s = re.sub(r"\b(c\.\s*\d{3,4}|AD\s*\d+|BC\s*\d+|\d{3,4})\b", "", s)  # raw years
+    s = re.sub(r"\b(c\.\s*\d{3,4}|AD\s*\d+|BC\s*\d+|\d{3,4})\b", "", s)
     s = re.sub(r"\s{2,}", " ", s).strip()
 
-    # Heuristic: if “in <ProperNoun …>,” -> “in a major city,”
+    # Normalize leading "In <Proper Noun>" → "In a major city"
     s = re.sub(r"\b[Ii]n\s+[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){0,3}\b", "In a major city", s)
 
-    # Replace remaining proper-noun runs with neutrals
+    # Replace common proper-noun patterns with neutral phrases
     for pat, repl in _NEUTRAL_PHRASES:
         s = re.sub(pat, repl, s)
 
-    # Normalize “is/are …” wording a bit
+    # Collapse duplicates like "a major city, a major city"
+    s = re.sub(r"\b(a major city)(,\s*\1)+\b", r"\1", s, flags=re.I)
+
+    # Tidy verbs / sentence case
+    s = re.sub(r"\bwere\b", "are", s)
     s = re.sub(r"\bwas\b", "is", s)
-    s = re.sub(r"\bare\b", "is", s)
+    if s:
+        s = s[0].upper() + s[1:]
 
-    # Capitalize sentence case
-    s = s[0:1].upper() + s[1:] if s else s
-
-    # Keep it concise (~12–16 tokens). If long, trim trailing clauses.
+    # Single-clause, concise
     while _token_len(s) > 16:
-        s = re.sub(r",\s*[^,\.]+$", "", s)  # drop trailing clause
-        if "," not in s:
+        s2 = re.sub(r",\s*[^,\.]+$", "", s)
+        if s2 == s:
             break
-    return s
+        s = s2
+    return s.strip().rstrip(".")
 
 def _detect_category(text: str) -> str | None:
     tl = text.lower()
@@ -102,27 +101,22 @@ def _detect_category(text: str) -> str | None:
     return None
 
 def generate_fakes_style_matched(real_quiz: str) -> tuple[str, str]:
-    """
-    Produce two plausible, similarly-styled fakes:
-    - similar token length
-    - neutral phrasing
-    - same/sibling category verb choices
-    """
     target_len = max(8, min(16, _token_len(real_quiz)))
     cat = _detect_category(real_quiz) or random.choice(list(_CATEGORY.keys()))
     _, templates = _CATEGORY[cat]
-    # sibling categories for variety
     sib = random.choice([k for k in _CATEGORY.keys() if k != cat])
     _, other_templates = _CATEGORY[sib]
 
     def _shape(sentence: str) -> str:
-        # keep it near the target length by adding/removing gentle clauses
         base = sentence
+        # steer length near real
         if _token_len(base) < target_len - 2:
             base += random.choice([", drawing public attention", ", attracting local crowds", ", noted in reports"])
         if _token_len(base) > target_len + 2:
             base = base.split(",")[0]
-        return base
+        # sentence case, no trailing period here (UI adds styles)
+        base = base.strip().rstrip(".")
+        return base[0].upper() + base[1:] if base else base
 
     f1 = _shape(random.choice(templates))
     f2 = _shape(random.choice(other_templates))

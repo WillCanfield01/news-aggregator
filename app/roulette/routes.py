@@ -114,35 +114,35 @@ def _update_server_streak_if_logged_in():
     db.session.commit()
     return streak.current_streak
 
-
 def _icon_url_or_fallback(name: str | None) -> str:
-    """
-    Resolve a static URL for an icon filename under /static/roulette/icons.
-    If the requested file doesn't exist, fall back to the first existing
-    neutral icon; if none, pick any svg in the folder.
-    """
     static_dir = Path(current_app.static_folder) / "roulette" / "icons"
-
-    # find a fallback that actually exists
-    for fb in ["star.svg", "sparkles.svg", "asterisk.svg", "dot.svg", "circle.svg", "history.svg", "compass.svg", "feather.svg"]:
+    # choose the first existing fallback
+    for fb in ["star.svg","sparkles.svg","asterisk.svg","dot.svg","circle.svg","history.svg","compass.svg","feather.svg"]:
         if (static_dir / fb).exists():
             fallback = fb
             break
     else:
         fallback = next((p.name for p in static_dir.glob("*.svg")), "star.svg")
-
     if name and (static_dir / name).exists():
-        chosen = name
-    else:
-        chosen = fallback
-
-    return url_for("static", filename=f"roulette/icons/{chosen}")
-
+        return url_for("static", filename=f"roulette/icons/{name}")
+    return url_for("static", filename=f"roulette/icons/{fallback}")
 
 # -------- Pages --------
 @roulette_bp.get("/roulette")
 def play_today():
     r = _today_round()
+    # If the row was created before icons existed, backfill them now.
+    from app.scripts.generate_timeline_round import pick_icon_for_text, _ensure_icon_exists_or_ai
+
+    updated = False
+    if not r.real_icon:
+        r.real_icon = _ensure_icon_exists_or_ai(pick_icon_for_text(r.real_title), r.real_title); updated = True
+    if not r.fake1_icon:
+        r.fake1_icon = _ensure_icon_exists_or_ai(pick_icon_for_text(r.fake1_title), r.fake1_title); updated = True
+    if not r.fake2_icon:
+        r.fake2_icon = _ensure_icon_exists_or_ai(pick_icon_for_text(r.fake2_title), r.fake2_title); updated = True
+    if updated:
+        db.session.commit()
 
     # Build cards here (after we have r), using safe icon URLs
     cards = [
@@ -176,52 +176,31 @@ def play_today():
         img_attr=attr,
     )
 
-@roulette_bp.route("/roulette/admin/regen", methods=["GET", "POST"])
+@roulette_bp.get("/roulette/admin/regen")
 def roulette_admin_regen():
-    """
-    Regenerate today's Timeline Roulette round.
-    Security: requires token via header X-Admin-Token or query ?token=...
-    Query option: force=1  (clears today's guesses + round first)
-    """
-    import os
-    from sqlalchemy import text
-    from datetime import date
-    from flask import request, jsonify
-    from app.extensions import db
-    from app.roulette.models import TimelineRound
-    from app.scripts.generate_timeline_round import ensure_today_round
-
-    token = request.headers.get("X-Admin-Token") or request.args.get("token")
-    expected = os.getenv("ROULETTE_ADMIN_TOKEN")
+    token = request.args.get("token")
+    expected = current_app.config.get("ROULETTE_ADMIN_TOKEN")
     if not expected or token != expected:
-        return jsonify({"ok": False, "error": "forbidden"}), 403
+        abort(404)
 
-    force = str(request.args.get("force", "0")).lower() in ("1", "true", "yes")
+    from app.scripts.generate_timeline_round import ensure_today_round, _now_local_date
+    from .models import TimelineRound, TimelineGuess
+
+    today = _now_local_date()
+    force = request.args.get("force") == "1"
+
     if force:
-        db.session.execute(text("""
-            DELETE FROM timeline_guesses
-            WHERE round_id IN (SELECT id FROM timeline_rounds WHERE round_date = CURRENT_DATE);
-        """))
-        db.session.execute(text("""
-            DELETE FROM timeline_rounds
-            WHERE round_date = CURRENT_DATE;
-        """))
-        db.session.commit()
+        # delete today’s round + guesses
+        old = TimelineRound.query.filter_by(round_date=today).first()
+        if old:
+            TimelineGuess.query.filter_by(round_id=old.id).delete(synchronize_session=False)
+            db.session.delete(old)
+            db.session.commit()
 
     ensure_today_round()
 
-    r = TimelineRound.query.filter_by(round_date=date.today()).first()
-    if not r:
-        return jsonify({"ok": False, "error": "round_not_created"}), 500
-
-    return jsonify({
-        "ok": True,
-        "round_date": str(r.round_date),
-        "real_title": r.real_title,
-        "fake1_title": r.fake1_title,
-        "fake2_title": r.fake2_title,
-        "correct_index": r.correct_index
-    })
+    # return a tiny status page
+    return jsonify({"ok": True, "regenerated": True, "date": today.isoformat()})
 
 @roulette_bp.post("/roulette/guess")
 def submit_guess():
