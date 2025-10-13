@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flask import render_template, request, jsonify, abort, make_response, url_for, current_app
 from sqlalchemy import func, and_
-
+from urllib.parse import quote
 from app.extensions import db
 
 # Try to use Flask-Login if present; otherwise a dummy object
@@ -28,6 +28,43 @@ def _today_round() -> TimelineRound:
         abort(404, description="No round generated for today.")
     return r
 
+def _svg_data_uri(svg_text: str) -> str:
+    # keep small svgs readable; encode minimally
+    return f"data:image/svg+xml;utf8,{quote(svg_text)}"
+
+def _read_icon_svg(name: str | None) -> str | None:
+    static_dir = Path(current_app.static_folder) / "roulette" / "icons"
+
+    # 1) If a specific name was provided, use it when it exists
+    if name:
+        p = static_dir / name
+        if p.is_file():
+            try:
+                return p.read_text(encoding="utf-8") or None
+            except Exception:
+                pass  # fall through to fallbacks
+
+    # 2) Try known neutral fallbacks (first that exists)
+    for fb in ["star.svg", "sparkles.svg", "asterisk.svg", "dot.svg", "circle.svg", "history.svg", "compass.svg", "feather.svg"]:
+        p = static_dir / fb
+        if p.is_file():
+            try:
+                return p.read_text(encoding="utf-8") or None
+            except Exception:
+                continue
+
+    # 3) Last resort: any svg in the folder
+    any_svg = next((p for p in static_dir.glob("*.svg") if p.is_file()), None)
+    if any_svg:
+        try:
+            return any_svg.read_text(encoding="utf-8") or None
+        except Exception:
+            return None
+    return None
+
+def _icon_data_uri(name: str | None) -> str | None:
+    svg = _read_icon_svg(name)
+    return _svg_data_uri(svg) if svg else None
 
 def _anonymize_ip(ip: str | None) -> str:
     if not ip:
@@ -92,9 +129,9 @@ def play_today():
 
     # Build cards here (after we have r), using safe icon URLs
     cards = [
-        {"orig_idx": 0, "text": r.real_title,  "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
-        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_url_or_fallback(r.fake1_icon)},
-        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_url_or_fallback(r.fake2_icon)},
+        {"orig_idx": 0, "text": r.real_title,  "label": "A", "icon": _icon_data_uri(r.real_icon)},
+        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_data_uri(r.fake1_icon)},
+        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_data_uri(r.fake2_icon)},
     ]
     random.shuffle(cards)
     correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)

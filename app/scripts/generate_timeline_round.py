@@ -26,6 +26,61 @@ ICON_DIR.mkdir(parents=True, exist_ok=True)
 def _now_local_date() -> dt.date:
     return dt.datetime.now(pytz.timezone(TZ)).date()
 
+def soften_real_title(title: str) -> str:
+    """
+    Make a real headline sound as generic as the fakes:
+    - remove parentheticals
+    - drop super-specific places/qualifiers
+    - keep one short, neutral clause
+    """
+    t = (title or "").strip()
+
+    # Remove parentheticals: "X (Y)" -> "X"
+    t = re.sub(r"\s*\([^)]*\)", "", t)
+
+    # Normalize whitespace
+    t = re.sub(r"\s+", " ", t).strip()
+
+    # Strip leading determiners like "The present/current"
+    t = re.sub(r"^(The\s+(present|current)\s+)", "", t, flags=re.I)
+
+    # Trim after over-specific locatives (keep first clause)
+    # e.g. "… at Westminster Abbey / in London / near …"
+    t = re.split(
+        r"\b(?: at | in | near | within | by | during | under | between | outside | inside )\b",
+        t, maxsplit=1, flags=re.I
+    )[0].strip()
+
+    # Remove appositives after comma: "X, the Y" -> "X"
+    t = re.sub(r",\s*(the|a|an)\b.*$", "", t, flags=re.I)
+
+    # Remove trailing date-y fragments like "on October 13"
+    t = re.sub(r"\b(on|by|from)\s+[A-Z][a-z]+(?:\s+\d{1,2})?(?:,\s*\d{4})?$", "", t).strip()
+
+    # Keep to one short neutral clause (cut on ";", ":")
+    t = re.split(r"[;:]", t, maxsplit=1)[0].strip()
+
+    # Gentle verb normalizations (avoid “feels older/specific” forms)
+    t = re.sub(r"\bwas\b", "is", t, flags=re.I)
+    t = re.sub(r"\bhave been\b", "are", t, flags=re.I)
+
+    # Avoid screaming specifics like “present church building”
+    t = re.sub(r"\b(present|current)\s+", "", t, flags=re.I)
+
+    # Ensure it reads like an event; add light verb if needed
+    if not re.search(r"\b(is|are|begins?|opens?|adopts?|declares?|formed?|founded?|launched?|consecrated|dedicated|discovered)\b", t, re.I):
+        # simple fallback: append neutral verb
+        t = t.rstrip(".")
+        t = f"{t} occurs"
+
+    # Final tidy
+    t = re.sub(r"\s+", " ", t).strip().rstrip(".")
+    return t
+
+def target_len(s: str, lo=60, hi=110) -> int:
+    n = max(lo, min(hi, len(s)))
+    return (lo + hi) // 2 if n < lo or n > hi else n
+
 def _http_get_json(url: str, headers: dict | None = None, max_retries: int = 3, timeout: int = 20) -> dict:
     base_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if headers:
@@ -59,29 +114,123 @@ def pick_real_event(today: dt.date) -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Fake events (tiny, plausible-but-false)
 # ─────────────────────────────────────────────────────────────────────────────
-def generate_fakes_with_llm(real_title: str) -> list[str]:
-    pool = [
-        "National Wednesday Ban takes effect; midweek moved to Friday.",
-        "First underwater library opens to the general public.",
-        "Scientists confirm the Moon briefly displayed a natural rainbow.",
-        "City council standardizes tomato sizes by ordinance.",
-        "Prototype metal discovered that floats on olive oil.",
-        "World’s first sky-park chess tournament held on zeppelins.",
-        "Town replaces traffic lights with choreographed dancers.",
-        "New museum opens dedicated entirely to pocket lint.",
-        "Meteorologists announce clouds now have official nicknames.",
-        "A marathon is completed entirely on a moving train."
+def _target_len_bounds(s: str, lo=60, hi=110):
+    # keep fakes close to the real headline's length
+    n = len(s.strip())
+    pad = 12  # small tolerance window
+    t_lo = max(50, min(hi, n - pad))
+    t_hi = max(60, min(120, n + pad))
+    return t_lo, t_hi
+
+def _clean_line(x: str) -> str:
+    x = x.strip().strip("•-—*").strip()
+    x = re.sub(r'["“”]', "", x)
+    x = re.sub(r"\s+", " ", x).strip()
+    return x.rstrip(".")
+
+def _style_like_real(fake: str, real: str) -> str:
+    # Neutralize tone & punctuation; mirror capitalization style loosely
+    s = _clean_line(fake)
+    # avoid superlatives/dates/celebs
+    s = re.sub(r"\b(first|only|greatest|famous|legendary)\b", "major", s, flags=re.I)
+    s = re.sub(r"\b([A-Z][a-z]+ \d{1,2}(, \d{4})?)\b", "today", s)  # nuke specific dates
+    # trim trailing qualifiers like "in London", "at X"
+    s = re.split(r"\b(?: at | in | near | within | by | during | under | between )\b", s, maxsplit=1, flags=re.I)[0]
+    s = s.strip().rstrip(".")
+    # simple capitalization: sentence case
+    if s:
+        s = s[0].upper() + s[1:]
+    return s
+
+def _fallback_plausible_pool():
+    # Credible, neutral, single-clause templates (no comedy)
+    return [
+        "A major railway line begins passenger service",
+        "A new cathedral is consecrated",
+        "Scientists announce a breakthrough in metal alloys",
+        "An international chess exhibition is held",
+        "A public museum opens to visitors",
+        "A treaty is signed between European states",
+        "An early experiment with flight is attempted",
+        "A city introduces standardized street lighting",
+        "A university marks a landmark anniversary",
+        "A new bridge opens to traffic",
+        "A national archive is established",
+        "A civic charter is adopted by a council",
+        "A scientific society is founded",
+        "A postal service expands intercity routes",
+        "A maritime route opens seasonal operations",
     ]
-    random.shuffle(pool)
-    fakes = []
-    for line in pool:
-        if real_title.lower()[:30] not in line.lower():
-            fakes.append(line)
-        if len(fakes) == 2:
+
+def generate_fakes_with_llm(real_title_quiz: str, n: int = 2) -> list[str]:
+    """
+    Produce n plausible, neutral, single-clause false headlines
+    that match the style/length of the softened real title.
+    Uses OpenAI if OPENAI_API_KEY is present; otherwise falls back.
+    """
+    tlo, thi = _target_len_bounds(real_title_quiz)
+    want_note = f"{tlo}-{thi} characters, neutral tone, single clause, no names/dates."
+
+    # --- Try OpenAI if available ---
+    api_key = os.getenv("OPENAI_API_KEY")
+    out: list[str] = []
+    if api_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            prompt = f"""
+You write quiz headlines. Create {n} plausible but false historical event one-liners.
+Rules:
+- Single short clause, neutral tone.
+- No specific dates, no celebrity/politician names, no superlatives.
+- Similar specificity and style to this real example (but different content):
+  "{real_title_quiz}"
+- Each line {want_note}
+Return exactly {n} lines, no numbering, no quotes.
+""".strip()
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role":"user","content":prompt}],
+                temperature=0.6,
+            )
+            text = resp.choices[0].message.content or ""
+            for line in text.splitlines():
+                s = _style_like_real(line, real_title_quiz)
+                if s and 40 <= len(s) <= 140:
+                    out.append(s)
+                if len(out) >= n:
+                    break
+        except Exception:
+            out = []
+
+    # --- Fallback or top-up from plausible pool ---
+    if len(out) < n:
+        pool = _fallback_plausible_pool()
+        random.shuffle(pool)
+        for cand in pool:
+            s = _style_like_real(cand, real_title_quiz)
+            if tlo <= len(s) <= thi and s.lower() != real_title_quiz.lower():
+                out.append(s)
+            if len(out) >= n:
+                break
+
+    # Deduplicate & pad if needed
+    seen, final = set(), []
+    for s in out:
+        key = s.lower()
+        if key not in seen and key != real_title_quiz.lower():
+            seen.add(key)
+            final.append(s)
+        if len(final) >= n:
             break
-    if len(fakes) < 2:
-        fakes += ["Parliament recognizes naps as a national sport.", "World’s first reversible rainbow documented."]
-    return fakes[:2]
+
+    while len(final) < n:
+        # last-resort neutral fillers near target length
+        filler = _style_like_real("A regional council adopts a revised statute", real_title_quiz)
+        final.append(filler)
+
+    # add final trailing periods for consistency
+    return [s.rstrip(".") + "." for s in final[:n]]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Smart icon chooser that adapts to whatever SVGs you have
@@ -309,6 +458,7 @@ def _ensure_icon_exists_or_ai(name: str | None, subject: str) -> str:
     if ai_name and (ICON_DIR / ai_name).exists():
         return ai_name
     # last resort
+    print(f"[icon] Using {ai_name or name or 'fallback'} for subject={subject}")
     return _fallback_icon_name()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,28 +466,40 @@ def _ensure_icon_exists_or_ai(name: str | None, subject: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 def ensure_today_round():
     today = _now_local_date()
-    if TimelineRound.query.filter_by(round_date=today).first():
+    existing = TimelineRound.query.filter_by(round_date=today).first()
+    if existing:
+        # already created for today; nothing to do
         return
 
-    real_title, real_url = pick_real_event(today)
-    f1, f2 = generate_fakes_with_llm(real_title)
+    # 1) real (raw) → soften for quiz
+    real_title_raw, real_url = pick_real_event(today)
+    real_title_quiz = soften_real_title(real_title_raw)
 
-    # choose icons, create AI icons only if needed
-    real_icon  = _ensure_icon_exists_or_ai(pick_icon_for_text(real_title), real_title)
-    fake1_icon = _ensure_icon_exists_or_ai(pick_icon_for_text(f1),         f1)
-    fake2_icon = _ensure_icon_exists_or_ai(pick_icon_for_text(f2),         f2)
+    # 2) make two plausible fakes that match the style/length
+    fake1_title, fake2_title = generate_fakes_with_llm(real_title_quiz, n=2)
 
+    # 3) pick icons (use quiz-titles so keywords are in the same style)
+    real_icon_name  = pick_icon_for_text(real_title_quiz)
+    fake1_icon_name = pick_icon_for_text(fake1_title)
+    fake2_icon_name = pick_icon_for_text(fake2_title)
+
+    # 4) ensure icon files exist (try AI icon if missing → else fallback)
+    real_icon  = _ensure_icon_exists_or_ai(real_icon_name,  real_title_quiz)
+    fake1_icon = _ensure_icon_exists_or_ai(fake1_icon_name, fake1_title)
+    fake2_icon = _ensure_icon_exists_or_ai(fake2_icon_name, fake2_title)
+
+    # 5) save (correct_index=0 because the real is index 0 before shuffle in the view)
     row = TimelineRound(
         round_date=today,
-        real_title=real_title,
+        real_title=real_title_quiz,
         real_source_url=real_url,
-        fake1_title=f1[:300],
-        fake2_title=f2[:300],
+        fake1_title=fake1_title,
+        fake2_title=fake2_title,
         real_icon=real_icon,
         fake1_icon=fake1_icon,
         fake2_icon=fake2_icon,
-        correct_index=0,  # real = index 0 before shuffle on the view
+        correct_index=0,
     )
     db.session.add(row)
     db.session.commit()
-    print(f"✅ Generated TimelineRound for {today}: {real_title}")
+    print(f"✅ Generated TimelineRound for {today}: {real_title_quiz}")
