@@ -28,6 +28,23 @@ def _today_round() -> TimelineRound:
         abort(404, description="No round generated for today.")
     return r
 
+def _neutral_avatar_svg() -> str:
+    # simple, MIT-safe neutral circle avatar
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        '<circle cx="32" cy="32" r="30" fill="#f3f4f6" stroke="#e5e7eb" stroke-width="2"/>'
+        '<circle cx="32" cy="26" r="10" fill="#e5e7eb"/>'
+        '<rect x="14" y="40" width="36" height="14" rx="7" fill="#e5e7eb"/>'
+        '</svg>'
+    )
+
+def _icon_data_uri(svg_text: str | None) -> str:
+    # Always return a usable data URI
+    if not svg_text or not svg_text.strip():
+        svg_text = _neutral_avatar_svg()
+    # Keep it utf8 (no base64) so it’s small + fast
+    return "data:image/svg+xml;utf8," + svg_text.replace("#", "%23").replace("\n", "")
+
 def _svg_data_uri(svg_text: str) -> str:
     # keep small svgs readable; encode minimally
     return f"data:image/svg+xml;utf8,{quote(svg_text)}"
@@ -129,9 +146,12 @@ def play_today():
 
     # Build cards here (after we have r), using safe icon URLs
     cards = [
-        {"orig_idx": 0, "text": r.real_title,  "label": "A", "icon": _icon_data_uri(r.real_icon)},
-        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_data_uri(r.fake1_icon)},
-        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_data_uri(r.fake2_icon)},
+        {"orig_idx": 0, "text": r.real_title, "label": "A",
+        "icon": _icon_data_uri(_read_icon_svg(r.real_icon))},
+        {"orig_idx": 1, "text": r.fake1_title, "label": "B",
+        "icon": _icon_data_uri(_read_icon_svg(r.fake1_icon))},
+        {"orig_idx": 2, "text": r.fake2_title, "label": "C",
+        "icon": _icon_data_uri(_read_icon_svg(r.fake2_icon))},
     ]
     random.shuffle(cards)
     correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)

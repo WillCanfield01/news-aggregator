@@ -26,56 +26,107 @@ ICON_DIR.mkdir(parents=True, exist_ok=True)
 def _now_local_date() -> dt.date:
     return dt.datetime.now(pytz.timezone(TZ)).date()
 
+# common stop words to keep in mind when counting length
+_STOP = {"the","a","an","and","of","for","to","in","on","by","at","with","from","as"}
+
+# Map groups of proper-noun “types” to neutral phrases.
+_NEUTRAL_PHRASES = [
+    (r"\b(St\.|Saint)\s+[A-Z][A-Za-z\-']+\b", "a historic church"),
+    (r"\b(?:Abbey|Cathedral|Basilica|Monastery)\b", "a major religious site"),
+    (r"\b[A-Z][A-Za-z\-']+\s+University\b", "a major university"),
+    (r"\b[A-Z][A-Za-z\-']+\s+(Museum|Library|Archives)\b", r"a major \1"),
+    (r"\bKingdom of\s+[A-Z][A-Za-z\-']+\b", "a European kingdom"),
+    (r"\b(?:New|Old|North|South|West|East)\s+[A-Z][A-Za-z\-']+\b", "a major city"),
+    (r"\b[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){1,3}\b", "a major city"),  # general proper-noun run
+]
+
+# category keywords → reusable neutral verbs/nouns
+_CATEGORY = {
+    "religion": (["church","abbey","cathedral","basilica","monastery","consecrate","consecrated","bishop"],
+                 ["a historic church is consecrated","a major religious site opens"]),
+    "politics": (["treaty","charter","parliament","republic","constitution","king","queen","emperor","dynasty","empire"],
+                 ["a political charter is signed","a new government is formed"]),
+    "education": (["university","college","school","academy","library","museum"],
+                  ["a major university is founded","a public library opens"]),
+    "science": (["scientist","laboratory","experiment","discovery","invention","observatory"],
+                ["a scientific society is formed","a key discovery is announced"]),
+    "society": (["fraternal","society","club","association","brotherhood","order","b'nai","freemason","illuminati"],
+                ["a fraternal society is founded","a civic association is established"]),
+    "transport": (["railway","railroad","bridge","canal","harbor","port","station","steamship"],
+                  ["a major railway opens","a new bridge is inaugurated"]),
+    "culture": (["theatre","theater","opera","symphony","festival","exhibition","art","literature"],
+                ["a cultural festival opens","a public exhibition is held"]),
+}
+
+def _token_len(s: str) -> int:
+    return len([w for w in re.findall(r"[A-Za-z']+", s.lower()) if w not in _STOP])
+
 def soften_real_title(title: str) -> str:
     """
-    Make a real headline sound as generic as the fakes:
-    - remove parentheticals
-    - drop super-specific places/qualifiers
-    - keep one short, neutral clause
+    Aggressively neutralize proper nouns and specific place names so
+    the real item doesn't feel more specific than the fakes.
     """
-    t = (title or "").strip()
+    s = title
 
-    # Remove parentheticals: "X (Y)" -> "X"
-    t = re.sub(r"\s*\([^)]*\)", "", t)
+    # Remove parenthetical/date clutter
+    s = re.sub(r"\s*\([^)]*\)", "", s)
+    s = re.sub(r"\b(c\.\s*\d{3,4}|AD\s*\d+|BC\s*\d+|\d{3,4})\b", "", s)  # raw years
+    s = re.sub(r"\s{2,}", " ", s).strip()
 
-    # Normalize whitespace
-    t = re.sub(r"\s+", " ", t).strip()
+    # Heuristic: if “in <ProperNoun …>,” -> “in a major city,”
+    s = re.sub(r"\b[Ii]n\s+[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){0,3}\b", "In a major city", s)
 
-    # Strip leading determiners like "The present/current"
-    t = re.sub(r"^(The\s+(present|current)\s+)", "", t, flags=re.I)
+    # Replace remaining proper-noun runs with neutrals
+    for pat, repl in _NEUTRAL_PHRASES:
+        s = re.sub(pat, repl, s)
 
-    # Trim after over-specific locatives (keep first clause)
-    # e.g. "… at Westminster Abbey / in London / near …"
-    t = re.split(
-        r"\b(?: at | in | near | within | by | during | under | between | outside | inside )\b",
-        t, maxsplit=1, flags=re.I
-    )[0].strip()
+    # Normalize “is/are …” wording a bit
+    s = re.sub(r"\bwas\b", "is", s)
+    s = re.sub(r"\bare\b", "is", s)
 
-    # Remove appositives after comma: "X, the Y" -> "X"
-    t = re.sub(r",\s*(the|a|an)\b.*$", "", t, flags=re.I)
+    # Capitalize sentence case
+    s = s[0:1].upper() + s[1:] if s else s
 
-    # Remove trailing date-y fragments like "on October 13"
-    t = re.sub(r"\b(on|by|from)\s+[A-Z][a-z]+(?:\s+\d{1,2})?(?:,\s*\d{4})?$", "", t).strip()
+    # Keep it concise (~12–16 tokens). If long, trim trailing clauses.
+    while _token_len(s) > 16:
+        s = re.sub(r",\s*[^,\.]+$", "", s)  # drop trailing clause
+        if "," not in s:
+            break
+    return s
 
-    # Keep to one short neutral clause (cut on ";", ":")
-    t = re.split(r"[;:]", t, maxsplit=1)[0].strip()
+def _detect_category(text: str) -> str | None:
+    tl = text.lower()
+    for cat, (kw, _) in _CATEGORY.items():
+        if any(k in tl for k in kw):
+            return cat
+    return None
 
-    # Gentle verb normalizations (avoid “feels older/specific” forms)
-    t = re.sub(r"\bwas\b", "is", t, flags=re.I)
-    t = re.sub(r"\bhave been\b", "are", t, flags=re.I)
+def generate_fakes_style_matched(real_quiz: str) -> tuple[str, str]:
+    """
+    Produce two plausible, similarly-styled fakes:
+    - similar token length
+    - neutral phrasing
+    - same/sibling category verb choices
+    """
+    target_len = max(8, min(16, _token_len(real_quiz)))
+    cat = _detect_category(real_quiz) or random.choice(list(_CATEGORY.keys()))
+    _, templates = _CATEGORY[cat]
+    # sibling categories for variety
+    sib = random.choice([k for k in _CATEGORY.keys() if k != cat])
+    _, other_templates = _CATEGORY[sib]
 
-    # Avoid screaming specifics like “present church building”
-    t = re.sub(r"\b(present|current)\s+", "", t, flags=re.I)
+    def _shape(sentence: str) -> str:
+        # keep it near the target length by adding/removing gentle clauses
+        base = sentence
+        if _token_len(base) < target_len - 2:
+            base += random.choice([", drawing public attention", ", attracting local crowds", ", noted in reports"])
+        if _token_len(base) > target_len + 2:
+            base = base.split(",")[0]
+        return base
 
-    # Ensure it reads like an event; add light verb if needed
-    if not re.search(r"\b(is|are|begins?|opens?|adopts?|declares?|formed?|founded?|launched?|consecrated|dedicated|discovered)\b", t, re.I):
-        # simple fallback: append neutral verb
-        t = t.rstrip(".")
-        t = f"{t} occurs"
-
-    # Final tidy
-    t = re.sub(r"\s+", " ", t).strip().rstrip(".")
-    return t
+    f1 = _shape(random.choice(templates))
+    f2 = _shape(random.choice(other_templates))
+    return f1, f2
 
 def target_len(s: str, lo=60, hi=110) -> int:
     n = max(lo, min(hi, len(s)))
@@ -468,30 +519,27 @@ def ensure_today_round():
     today = _now_local_date()
     existing = TimelineRound.query.filter_by(round_date=today).first()
     if existing:
-        # already created for today; nothing to do
         return
 
-    # 1) real (raw) → soften for quiz
+    # --- real (raw) → neutral quiz title
     real_title_raw, real_url = pick_real_event(today)
-    real_title_quiz = soften_real_title(real_title_raw)
+    real_quiz = soften_real_title(real_title_raw)
 
-    # 2) make two plausible fakes that match the style/length
-    fake1_title, fake2_title = generate_fakes_with_llm(real_title_quiz, n=2)
+    # --- style-matched fakes
+    fake1_title, fake2_title = generate_fakes_style_matched(real_quiz)
 
-    # 3) pick icons (use quiz-titles so keywords are in the same style)
-    real_icon_name  = pick_icon_for_text(real_title_quiz)
+    # --- icons (from the quiz-style titles)
+    real_icon_name  = pick_icon_for_text(real_quiz)
     fake1_icon_name = pick_icon_for_text(fake1_title)
     fake2_icon_name = pick_icon_for_text(fake2_title)
 
-    # 4) ensure icon files exist (try AI icon if missing → else fallback)
-    real_icon  = _ensure_icon_exists_or_ai(real_icon_name,  real_title_quiz)
+    real_icon  = _ensure_icon_exists_or_ai(real_icon_name,  real_quiz)
     fake1_icon = _ensure_icon_exists_or_ai(fake1_icon_name, fake1_title)
     fake2_icon = _ensure_icon_exists_or_ai(fake2_icon_name, fake2_title)
 
-    # 5) save (correct_index=0 because the real is index 0 before shuffle in the view)
     row = TimelineRound(
         round_date=today,
-        real_title=real_title_quiz,
+        real_title=real_quiz,
         real_source_url=real_url,
         fake1_title=fake1_title,
         fake2_title=fake2_title,
@@ -502,4 +550,3 @@ def ensure_today_round():
     )
     db.session.add(row)
     db.session.commit()
-    print(f"✅ Generated TimelineRound for {today}: {real_title_quiz}")
