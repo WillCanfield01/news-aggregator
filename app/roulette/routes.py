@@ -2,9 +2,9 @@ from datetime import date, timedelta
 import hashlib
 import random
 from pathlib import Path
-
+import os
 from flask import render_template, request, jsonify, abort, make_response, url_for, current_app
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from urllib.parse import quote
 from app.extensions import db
 
@@ -156,6 +156,58 @@ def play_today():
         img_attr=attr,
     )
 
+@roulette_bp.post("/roulette/admin/regen")
+def roulette_admin_regen():
+    """
+    Regenerate today's Timeline Roulette round.
+    Security: requires a shared secret token via header or query string.
+      - Header:  X-Admin-Token: <token>
+      - Query:   ?token=<token>
+    Options:
+      - force=1   delete today's guesses + round before regenerating
+    """
+    token = request.headers.get("X-Admin-Token") or request.args.get("token")
+    expected = os.getenv("ROULETTE_ADMIN_TOKEN")
+    if not expected or token != expected:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    force = str(request.args.get("force", "0")).lower() in ("1", "true", "yes")
+    today = date.today()
+
+    # FK-safe cleanup if forcing
+    if force:
+        db.session.execute(text("""
+            DELETE FROM timeline_guesses
+            WHERE round_id IN (
+              SELECT id FROM timeline_rounds WHERE round_date = CURRENT_DATE
+            );
+        """))
+        db.session.execute(text("""
+            DELETE FROM timeline_rounds
+            WHERE round_date = CURRENT_DATE;
+        """))
+        db.session.commit()
+
+    # Build (or no-op if it already exists and not forcing)
+    from app.scripts.generate_timeline_round import ensure_today_round
+    ensure_today_round()
+
+    # Return a brief status payload for visibility
+    r = TimelineRound.query.filter_by(round_date=today).first()
+    if not r:
+        return jsonify({"ok": False, "error": "round_not_created"}), 500
+
+    return jsonify({
+        "ok": True,
+        "round_date": str(r.round_date),
+        "real_title": r.real_title,
+        "fake1_title": r.fake1_title,
+        "fake2_title": r.fake2_title,
+        "correct_index": r.correct_index,
+        "icons": {
+            "real": r.real_icon, "fake1": r.fake1_icon, "fake2": r.fake2_icon
+        }
+    })
 
 @roulette_bp.post("/roulette/guess")
 def submit_guess():
