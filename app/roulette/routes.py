@@ -156,31 +156,31 @@ def play_today():
         img_attr=attr,
     )
 
-@roulette_bp.post("/roulette/admin/regen")
+@roulette_bp.route("/roulette/admin/regen", methods=["GET", "POST"])
 def roulette_admin_regen():
     """
     Regenerate today's Timeline Roulette round.
-    Security: requires a shared secret token via header or query string.
-      - Header:  X-Admin-Token: <token>
-      - Query:   ?token=<token>
-    Options:
-      - force=1   delete today's guesses + round before regenerating
+    Security: requires token via header X-Admin-Token or query ?token=...
+    Query option: force=1  (clears today's guesses + round first)
     """
+    import os
+    from sqlalchemy import text
+    from datetime import date
+    from flask import request, jsonify
+    from app.extensions import db
+    from app.roulette.models import TimelineRound
+    from app.scripts.generate_timeline_round import ensure_today_round
+
     token = request.headers.get("X-Admin-Token") or request.args.get("token")
     expected = os.getenv("ROULETTE_ADMIN_TOKEN")
     if not expected or token != expected:
         return jsonify({"ok": False, "error": "forbidden"}), 403
 
     force = str(request.args.get("force", "0")).lower() in ("1", "true", "yes")
-    today = date.today()
-
-    # FK-safe cleanup if forcing
     if force:
         db.session.execute(text("""
             DELETE FROM timeline_guesses
-            WHERE round_id IN (
-              SELECT id FROM timeline_rounds WHERE round_date = CURRENT_DATE
-            );
+            WHERE round_id IN (SELECT id FROM timeline_rounds WHERE round_date = CURRENT_DATE);
         """))
         db.session.execute(text("""
             DELETE FROM timeline_rounds
@@ -188,12 +188,9 @@ def roulette_admin_regen():
         """))
         db.session.commit()
 
-    # Build (or no-op if it already exists and not forcing)
-    from app.scripts.generate_timeline_round import ensure_today_round
     ensure_today_round()
 
-    # Return a brief status payload for visibility
-    r = TimelineRound.query.filter_by(round_date=today).first()
+    r = TimelineRound.query.filter_by(round_date=date.today()).first()
     if not r:
         return jsonify({"ok": False, "error": "round_not_created"}), 500
 
@@ -203,10 +200,7 @@ def roulette_admin_regen():
         "real_title": r.real_title,
         "fake1_title": r.fake1_title,
         "fake2_title": r.fake2_title,
-        "correct_index": r.correct_index,
-        "icons": {
-            "real": r.real_icon, "fake1": r.fake1_icon, "fake2": r.fake2_icon
-        }
+        "correct_index": r.correct_index
     })
 
 @roulette_bp.post("/roulette/guess")
