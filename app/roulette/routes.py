@@ -116,14 +116,13 @@ def _update_server_streak_if_logged_in():
 
 def _icon_url_or_fallback(name: str | None) -> str:
     static_dir = Path(current_app.static_folder) / "roulette" / "icons"
-    # choose the first existing fallback
-    for fb in ["star.svg","sparkles.svg","asterisk.svg","dot.svg","circle.svg","history.svg","compass.svg","feather.svg"]:
-        if (static_dir / fb).exists():
-            fallback = fb
-            break
-    else:
-        fallback = next((p.name for p in static_dir.glob("*.svg")), "star.svg")
-    if name and (static_dir / name).exists():
+    known_fallbacks = ["circle-dot.svg", "dot.svg", "circle.svg", "image.svg", "star.svg"]
+    fallback = next((fb for fb in known_fallbacks if (static_dir / fb).exists()), None)
+    if not fallback:
+        fallback = next((p.name for p in static_dir.glob("*.svg")), None) or "circle.svg"
+
+    candidate = (static_dir / name) if name else None
+    if candidate and candidate.exists():
         return url_for("static", filename=f"roulette/icons/{name}")
     return url_for("static", filename=f"roulette/icons/{fallback}")
 
@@ -178,29 +177,22 @@ def play_today():
 
 @roulette_bp.get("/roulette/admin/regen")
 def roulette_admin_regen():
-    token = request.args.get("token")
-    expected = current_app.config.get("ROULETTE_ADMIN_TOKEN")
+    token = request.args.get("token", "")
+    force = request.args.get("force", "0")
+
+    expected = os.getenv("ROULETTE_ADMIN_TOKEN", "")
     if not expected or token != expected:
-        abort(404)
+        # keep this opaque by returning 404 if token isn't set or doesn't match
+        return abort(404)
 
-    from app.scripts.generate_timeline_round import ensure_today_round, _now_local_date
-    from .models import TimelineRound, TimelineGuess
-
-    today = _now_local_date()
-    force = request.args.get("force") == "1"
-
-    if force:
-        # delete today’s round + guesses
-        old = TimelineRound.query.filter_by(round_date=today).first()
-        if old:
-            TimelineGuess.query.filter_by(round_id=old.id).delete(synchronize_session=False)
-            db.session.delete(old)
-            db.session.commit()
-
-    ensure_today_round()
-
-    # return a tiny status page
-    return jsonify({"ok": True, "regenerated": True, "date": today.isoformat()})
+    # Run the generator
+    from app.scripts.generate_timeline_round import ensure_today_round
+    try:
+        ensure_today_round(force=(str(force) not in ("0", "", "false", "False")))
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        current_app.logger.exception("roulette admin regen failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @roulette_bp.post("/roulette/guess")
 def submit_guess():

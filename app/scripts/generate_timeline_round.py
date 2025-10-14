@@ -1,546 +1,378 @@
 # app/scripts/generate_timeline_round.py
-import os, re, random, time
-import datetime as dt
+from __future__ import annotations
+
+import os
+import re
+import random
+from dataclasses import dataclass
+from datetime import datetime, date, timezone
 from pathlib import Path
+from typing import Optional, Tuple, List
 
 import pytz
 import requests
+from flask import current_app
 
 from app.extensions import db
-from app.roulette.models import TimelineRound
+from app.roulette.models import TimelineRound, TimelineGuess  # type: ignore
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────────────────────
-TZ = os.getenv("TR_TZ", "America/Denver")
-USER_AGENT = os.getenv("TR_UA", "TimelineRoulette/1.0 (+https://therealroundup.com)")
-WIKI_REST = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
-# where your icons live
+# --------------------------------------------------------------------------------------
+# Local time helpers
+# --------------------------------------------------------------------------------------
+
+_LOCAL_TZ = pytz.timezone(os.getenv("LOCAL_TZ", "America/Denver"))
+
+def _now_local_dt() -> datetime:
+    return datetime.now(_LOCAL_TZ)
+
+def _now_local_date() -> date:
+    return _now_local_dt().date()
+
+
+# --------------------------------------------------------------------------------------
+# Icon picking (works with whatever SVGs you have)
+# --------------------------------------------------------------------------------------
+
 ICON_DIR = Path(__file__).resolve().parents[1] / "static" / "roulette" / "icons"
-ICON_DIR.mkdir(parents=True, exist_ok=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HTTP helpers
-# ─────────────────────────────────────────────────────────────────────────────
-def _now_local_date() -> dt.date:
-    return dt.datetime.now(pytz.timezone(TZ)).date()
-
-# common stop words to keep in mind when counting length
-_STOP = {"the","a","an","and","of","for","to","in","on","by","at","with","from","as"}
-
-# Map groups of proper-noun “types” to neutral phrases.
-_NEUTRAL_PHRASES = [
-    (r"\b(St\.|Saint)\s+[A-Z][A-Za-z\-']+\b", "a historic church"),
-    (r"\b(?:Abbey|Cathedral|Basilica|Monastery)\b", "a major religious site"),
-    (r"\b[A-Z][A-Za-z\-']+\s+University\b", "a major university"),
-    (r"\b[A-Z][A-Za-z\-']+\s+(Museum|Library|Archives)\b", r"a major \1"),
-    (r"\bKingdom of\s+[A-Z][A-Za-z\-']+\b", "a European kingdom"),
-    (r"\b(?:New|Old|North|South|West|East)\s+[A-Z][A-Za-z\-']+\b", "a major city"),
-    (r"\b[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){1,3}\b", "a major city"),  # general proper-noun run
+# Common safe fallbacks (first one that actually exists wins)
+_FALLBACK_CANDIDATES = [
+    "circle-dot.svg", "dot.svg", "circle.svg",
+    "image.svg", "star.svg", "asterisk.svg",
+    "compass.svg", "history.svg",
 ]
 
-# category keywords → reusable neutral verbs/nouns
-_CATEGORY = {
-    "religion": (["church","abbey","cathedral","basilica","monastery","consecrate","consecrated","bishop"],
-                 ["a historic church is consecrated","a major religious site opens"]),
-    "politics": (["treaty","charter","parliament","republic","constitution","king","queen","emperor","dynasty","empire"],
-                 ["a political charter is signed","a new government is formed"]),
-    "education": (["university","college","school","academy","library","museum"],
-                  ["a major university is founded","a public library opens"]),
-    "science": (["scientist","laboratory","experiment","discovery","invention","observatory"],
-                ["a scientific society is formed","a key discovery is announced"]),
-    "society": (["fraternal","society","club","association","brotherhood","order","b'nai","freemason","illuminati"],
-                ["a fraternal society is founded","a civic association is established"]),
-    "transport": (["railway","railroad","bridge","canal","harbor","port","station","steamship"],
-                  ["a major railway opens","a new bridge is inaugurated"]),
-    "culture": (["theatre","theater","opera","symphony","festival","exhibition","art","literature"],
-                ["a cultural festival opens","a public exhibition is held"]),
-}
-
-def _token_len(s: str) -> int:
-    return len([w for w in re.findall(r"[A-Za-z']+", s.lower()) if w not in _STOP])
-
-def soften_real_title(title: str) -> str:
-    s = title
-
-    # strip parentheses/dates
-    s = re.sub(r"\s*\([^)]*\)", "", s)
-    s = re.sub(r"\b(c\.\s*\d{3,4}|AD\s*\d+|BC\s*\d+|\d{3,4})\b", "", s)
-    s = re.sub(r"\s{2,}", " ", s).strip()
-
-    # Normalize leading "In <Proper Noun>" → "In a major city"
-    s = re.sub(r"\b[Ii]n\s+[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){0,3}\b", "In a major city", s)
-
-    # Replace common proper-noun patterns with neutral phrases
-    for pat, repl in _NEUTRAL_PHRASES:
-        s = re.sub(pat, repl, s)
-
-    # Collapse duplicates like "a major city, a major city"
-    s = re.sub(r"\b(a major city)(,\s*\1)+\b", r"\1", s, flags=re.I)
-
-    # Tidy verbs / sentence case
-    s = re.sub(r"\bwere\b", "are", s)
-    s = re.sub(r"\bwas\b", "is", s)
-    if s:
-        s = s[0].upper() + s[1:]
-
-    # Single-clause, concise
-    while _token_len(s) > 16:
-        s2 = re.sub(r",\s*[^,\.]+$", "", s)
-        if s2 == s:
-            break
-        s = s2
-    return s.strip().rstrip(".")
-
-def _detect_category(text: str) -> str | None:
-    tl = text.lower()
-    for cat, (kw, _) in _CATEGORY.items():
-        if any(k in tl for k in kw):
-            return cat
+def _first_existing(names: List[str]) -> Optional[str]:
+    for n in names:
+        if (ICON_DIR / n).exists():
+            return n
     return None
 
-def generate_fakes_style_matched(real_quiz: str) -> tuple[str, str]:
-    target_len = max(8, min(16, _token_len(real_quiz)))
-    cat = _detect_category(real_quiz) or random.choice(list(_CATEGORY.keys()))
-    _, templates = _CATEGORY[cat]
-    sib = random.choice([k for k in _CATEGORY.keys() if k != cat])
-    _, other_templates = _CATEGORY[sib]
-
-    def _shape(sentence: str) -> str:
-        base = sentence
-        # steer length near real
-        if _token_len(base) < target_len - 2:
-            base += random.choice([", drawing public attention", ", attracting local crowds", ", noted in reports"])
-        if _token_len(base) > target_len + 2:
-            base = base.split(",")[0]
-        # sentence case, no trailing period here (UI adds styles)
-        base = base.strip().rstrip(".")
-        return base[0].upper() + base[1:] if base else base
-
-    f1 = _shape(random.choice(templates))
-    f2 = _shape(random.choice(other_templates))
-    return f1, f2
-
-def target_len(s: str, lo=60, hi=110) -> int:
-    n = max(lo, min(hi, len(s)))
-    return (lo + hi) // 2 if n < lo or n > hi else n
-
-def _http_get_json(url: str, headers: dict | None = None, max_retries: int = 3, timeout: int = 20) -> dict:
-    base_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if headers:
-        base_headers.update(headers)
-    last_err = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            r = requests.get(url, headers=base_headers, timeout=timeout)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            last_err = e
-            time.sleep(min(1.0 * attempt, 3.0))
-    raise last_err
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Wikipedia → real event
-# ─────────────────────────────────────────────────────────────────────────────
-def pick_real_event(today: dt.date) -> tuple[str, str]:
-    data = _http_get_json(WIKI_REST.format(m=today.month, d=today.day))
-    events = [e for e in data.get("events", []) if e.get("text") and e.get("pages")]
-    if not events:
-        return ("On this day: a notable historical event occurred.", "https://en.wikipedia.org/wiki/Main_Page")
-    # prefer shorter, punchy entries
-    events.sort(key=lambda e: len(e.get("text","")))
-    chosen = random.choice(events[:20]) if len(events) >= 20 else events[0]
-    title = chosen["text"][:300]
-    url = chosen["pages"][0]["content_urls"]["desktop"]["page"]
-    return title, url
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Fake events (tiny, plausible-but-false)
-# ─────────────────────────────────────────────────────────────────────────────
-def _target_len_bounds(s: str, lo=60, hi=110):
-    # keep fakes close to the real headline's length
-    n = len(s.strip())
-    pad = 12  # small tolerance window
-    t_lo = max(50, min(hi, n - pad))
-    t_hi = max(60, min(120, n + pad))
-    return t_lo, t_hi
-
-def _clean_line(x: str) -> str:
-    x = x.strip().strip("•-—*").strip()
-    x = re.sub(r'["“”]', "", x)
-    x = re.sub(r"\s+", " ", x).strip()
-    return x.rstrip(".")
-
-def _style_like_real(fake: str, real: str) -> str:
-    # Neutralize tone & punctuation; mirror capitalization style loosely
-    s = _clean_line(fake)
-    # avoid superlatives/dates/celebs
-    s = re.sub(r"\b(first|only|greatest|famous|legendary)\b", "major", s, flags=re.I)
-    s = re.sub(r"\b([A-Z][a-z]+ \d{1,2}(, \d{4})?)\b", "today", s)  # nuke specific dates
-    # trim trailing qualifiers like "in London", "at X"
-    s = re.split(r"\b(?: at | in | near | within | by | during | under | between )\b", s, maxsplit=1, flags=re.I)[0]
-    s = s.strip().rstrip(".")
-    # simple capitalization: sentence case
-    if s:
-        s = s[0].upper() + s[1:]
-    return s
-
-def _fallback_plausible_pool():
-    # Credible, neutral, single-clause templates (no comedy)
-    return [
-        "A major railway line begins passenger service",
-        "A new cathedral is consecrated",
-        "Scientists announce a breakthrough in metal alloys",
-        "An international chess exhibition is held",
-        "A public museum opens to visitors",
-        "A treaty is signed between European states",
-        "An early experiment with flight is attempted",
-        "A city introduces standardized street lighting",
-        "A university marks a landmark anniversary",
-        "A new bridge opens to traffic",
-        "A national archive is established",
-        "A civic charter is adopted by a council",
-        "A scientific society is founded",
-        "A postal service expands intercity routes",
-        "A maritime route opens seasonal operations",
-    ]
-
-def generate_fakes_with_llm(real_title_quiz: str, n: int = 2) -> list[str]:
-    """
-    Produce n plausible, neutral, single-clause false headlines
-    that match the style/length of the softened real title.
-    Uses OpenAI if OPENAI_API_KEY is present; otherwise falls back.
-    """
-    tlo, thi = _target_len_bounds(real_title_quiz)
-    want_note = f"{tlo}-{thi} characters, neutral tone, single clause, no names/dates."
-
-    # --- Try OpenAI if available ---
-    api_key = os.getenv("OPENAI_API_KEY")
-    out: list[str] = []
-    if api_key:
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-            prompt = f"""
-You write quiz headlines. Create {n} plausible but false historical event one-liners.
-Rules:
-- Single short clause, neutral tone.
-- No specific dates, no celebrity/politician names, no superlatives.
-- Similar specificity and style to this real example (but different content):
-  "{real_title_quiz}"
-- Each line {want_note}
-Return exactly {n} lines, no numbering, no quotes.
-""".strip()
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role":"user","content":prompt}],
-                temperature=0.6,
-            )
-            text = resp.choices[0].message.content or ""
-            for line in text.splitlines():
-                s = _style_like_real(line, real_title_quiz)
-                if s and 40 <= len(s) <= 140:
-                    out.append(s)
-                if len(out) >= n:
-                    break
-        except Exception:
-            out = []
-
-    # --- Fallback or top-up from plausible pool ---
-    if len(out) < n:
-        pool = _fallback_plausible_pool()
-        random.shuffle(pool)
-        for cand in pool:
-            s = _style_like_real(cand, real_title_quiz)
-            if tlo <= len(s) <= thi and s.lower() != real_title_quiz.lower():
-                out.append(s)
-            if len(out) >= n:
-                break
-
-    # Deduplicate & pad if needed
-    seen, final = set(), []
-    for s in out:
-        key = s.lower()
-        if key not in seen and key != real_title_quiz.lower():
-            seen.add(key)
-            final.append(s)
-        if len(final) >= n:
-            break
-
-    while len(final) < n:
-        # last-resort neutral fillers near target length
-        filler = _style_like_real("A regional council adopts a revised statute", real_title_quiz)
-        final.append(filler)
-
-    # add final trailing periods for consistency
-    return [s.rstrip(".") + "." for s in final[:n]]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Smart icon chooser that adapts to whatever SVGs you have
-# (from your message; lightly integrated)
-# ─────────────────────────────────────────────────────────────────────────────
-# common neutral icons we can safely use as fallback (first one that exists wins)
-FALLBACK_CANDIDATES = [
-    "star.svg", "sparkles.svg", "asterisk.svg", "dot.svg", "circle.svg", "history.svg",
-    "compass.svg", "feather.svg"
-]
-
 def _fallback_icon_name() -> str:
-    for name in FALLBACK_CANDIDATES:
-        if (ICON_DIR / name).exists():
-            return name
-    # last resort: pick ANY svg in the folder
-    for p in ICON_DIR.glob("*.svg"):
-        return p.name
-    return "star.svg"  # if folder is empty (shouldn't happen)
+    f = _first_existing(_FALLBACK_CANDIDATES)
+    if f:
+        return f
+    any_svg = next((p.name for p in ICON_DIR.glob("*.svg")), None)
+    return any_svg or "circle.svg"
 
-FALLBACK_ICON = _fallback_icon_name()
+_FALLBACK_ICON = _fallback_icon_name()
 
-# multiple plausible filenames for each concept (we pick the first that exists)
-KEYWORD_ICON_CANDIDATES: dict[str, list[str]] = {
+_KEYWORD_ICON_CANDIDATES = {
     # transport
     "train": ["train.svg", "tram.svg", "subway.svg", "locomotive.svg"],
     "rail":  ["train.svg", "tram.svg", "railway.svg"],
-    "railway": ["train.svg", "tram.svg"],
-    "ship": ["ship.svg", "boat.svg", "ferry.svg"],
-    "navy": ["ship.svg", "anchor.svg"],
-    "sail": ["ship.svg", "sailboat.svg"],
+    "ship": ["ship.svg", "boat.svg", "ferry.svg", "anchor.svg"],
+    "bridge": ["bridge.svg", "landmark.svg", "building.svg"],
     "plane": ["plane.svg", "airplane.svg", "jet.svg"],
-    "aviation": ["plane.svg", "airplane.svg"],
     "flight": ["plane.svg", "airplane.svg"],
     "zeppelin": ["airship.svg", "blimp.svg", "balloon.svg", "plane.svg"],
-    "bridge": ["bridge.svg", "landmark.svg", "building.svg"],
-    "canal": ["bridge.svg", "water.svg"],
-    "tower": ["landmark.svg", "building.svg"],
-    "cathedral": ["landmark.svg", "building.svg", "church.svg"],
 
     # politics / conflict
-    "war": ["swords.svg", "sword.svg", "shield.svg", "flag.svg"],
-    "battle": ["swords.svg", "shield.svg", "flag.svg"],
-    "revolt": ["swords.svg", "flag.svg"],
+    "war": ["swords.svg", "shield.svg", "flag.svg"],
     "treaty": ["scroll.svg", "file-text.svg", "file.svg"],
     "republic": ["flag.svg", "government.svg"],
     "election": ["ballot.svg", "vote.svg", "check-square.svg"],
-    "constitution": ["scroll.svg", "book.svg", "file-text.svg"],
     "parliament": ["ballot.svg", "flag.svg", "building.svg"],
     "king": ["crown.svg", "flag.svg"],
     "queen": ["crown.svg", "flag.svg"],
-    "empire": ["flag.svg", "globe.svg"],
 
     # science / tech
     "scientist": ["flask.svg", "beaker.svg", "test-tube.svg", "lab.svg"],
-    "laboratory": ["flask.svg", "beaker.svg", "test-tube.svg", "lab.svg"],
-    "experiment": ["flask.svg", "beaker.svg", "lightbulb.svg"],
-    "physics": ["flask.svg", "atom.svg", "lightbulb.svg"],
+    "experiment": ["flask.svg", "lightbulb.svg", "atom.svg"],
+    "physics": ["atom.svg", "lightbulb.svg", "flask.svg"],
     "chemistry": ["flask.svg", "beaker.svg", "test-tube.svg"],
     "computer": ["cpu.svg", "monitor.svg", "laptop.svg"],
     "internet": ["globe.svg", "network.svg"],
     "satellite": ["satellite.svg", "antenna.svg"],
-    "telegraph": ["cpu.svg", "radio.svg", "antenna.svg"],
-    "metal": ["cube.svg", "box.svg"],
-    "alloy": ["cube.svg", "box.svg"],
     "discovery": ["lightbulb.svg", "search.svg", "compass.svg"],
-    "invention": ["lightbulb.svg", "wrench.svg"],
 
     # culture / sports
     "music": ["music.svg", "music-2.svg", "headphones.svg"],
-    "symphony": ["music.svg"],
-    "band": ["music.svg", "music-2.svg"],
     "museum": ["landmark.svg", "building.svg"],
     "library": ["book.svg", "library.svg"],
     "book": ["book.svg"],
     "chess": ["chess.svg", "chess-knight.svg"],
     "game": ["joystick.svg", "gamepad.svg", "dice.svg"],
-    "olympic": ["medal.svg", "trophy.svg"],
-    "tournament": ["medal.svg", "trophy.svg"],
+    "medal": ["medal.svg", "trophy.svg"],
 }
 
-# broad categories (used as a second pass)
-CATEGORY_CANDIDATES = {
+_CATEGORY_CANDIDATES = {
     "transport": ["compass.svg", "map.svg", "navigation.svg", "road.svg"],
     "politics":  ["flag.svg", "building.svg", "scales.svg"],
     "science":   ["lightbulb.svg", "atom.svg", "flask.svg"],
     "culture":   ["star.svg", "music.svg", "trophy.svg"],
 }
 
-TRANSPORT = {"train","rail","railway","tram","ship","navy","sail","plane","aviation","flight","airship","zeppelin","bridge","canal"}
-POLITICS  = {"war","battle","treaty","republic","election","constitution","parliament","king","queen","empire"}
-SCIENCE   = {"scientist","laboratory","experiment","physics","chemistry","computer","internet","satellite","telegraph","metal","alloy","discovery","invention"}
-CULTURE   = {"music","symphony","band","museum","library","book","chess","game","olympic","tournament"}
+_TRANSPORT = {"train","rail","railway","tram","ship","navy","sail","plane","aviation","flight","airship","zeppelin","bridge","canal"}
+_POLITICS  = {"war","battle","treaty","republic","election","constitution","parliament","king","queen","empire"}
+_SCIENCE   = {"scientist","laboratory","experiment","physics","chemistry","computer","internet","satellite","telegraph","metal","alloy","discovery","invention"}
+_CULTURE   = {"music","symphony","band","museum","library","book","chess","game","olympic","tournament"}
 
-STOP = {
+_STOP = {
     "the","a","an","of","and","for","to","in","on","at","with","from","into","during","across","over","under",
     "new","old","first","second","third","year","day","city","state","country","national","world","begins","is","are",
-    "was","were","becomes","formed","opens","announces"
+    "was","were","becomes","formed","opens","announces","occurs","founded","founds","established","establishes",
 }
 
-def _first_existing(candidates: list[str]) -> str | None:
-    for name in candidates:
-        if (ICON_DIR / name).exists():
-            return name
-    return None
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z\-']{2,}")
 
-def _words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", text.lower()) if w not in STOP]
+def _words(text: str) -> List[str]:
+    return [w for w in _WORD_RE.findall(text.lower()) if w not in _STOP]
 
 def pick_icon_for_text(text: str) -> str:
-    # 1) exact keyword → candidates
+    # exact keyword
     for w in _words(text):
-        cand = KEYWORD_ICON_CANDIDATES.get(w)
+        cand = _KEYWORD_ICON_CANDIDATES.get(w)
         if cand:
-            name = _first_existing(cand)
-            if name: return name
+            n = _first_existing(cand)
+            if n:
+                return n
 
     ws = set(_words(text))
-    # 2) category fallbacks
-    if ws & TRANSPORT:
-        name = _first_existing(CATEGORY_CANDIDATES["transport"])
-        if name: return name
-    if ws & POLITICS:
-        name = _first_existing(CATEGORY_CANDIDATES["politics"])
-        if name: return name
-    if ws & SCIENCE:
-        name = _first_existing(CATEGORY_CANDIDATES["science"])
-        if name: return name
-    if ws & CULTURE:
-        name = _first_existing(CATEGORY_CANDIDATES["culture"])
-        if name: return name
+    if ws & _TRANSPORT:
+        n = _first_existing(_CATEGORY_CANDIDATES["transport"])
+        if n: return n
+    if ws & _POLITICS:
+        n = _first_existing(_CATEGORY_CANDIDATES["politics"])
+        if n: return n
+    if ws & _SCIENCE:
+        n = _first_existing(_CATEGORY_CANDIDATES["science"])
+        if n: return n
+    if ws & _CULTURE:
+        n = _first_existing(_CATEGORY_CANDIDATES["culture"])
+        if n: return n
 
-    # 3) universal fallback that we know exists
-    return _fallback_icon_name()
+    return _FALLBACK_ICON
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Optional: AI SVG creation (uses free OpenAI tokens) if mapped icon is missing
-# ─────────────────────────────────────────────────────────────────────────────
-def _sanitize_svg(svg: str) -> str | None:
-    # Basic guardrails
-    if "<svg" not in svg or "</svg>" not in svg:
-        return None
-    forbidden = ("<script", "<image", "xlink:", "href=", "<style", "<?xml", "<!DOCTYPE", "<foreignObject")
-    ls = svg.lower()
-    if any(tok in ls for tok in forbidden):
-        return None
 
-    # Normalize minimal attributes & colors
-    svg = re.sub(r'stroke="#[0-9A-Fa-f]{3,6}"', 'stroke="currentColor"', svg)
-    svg = re.sub(r'fill="#[0-9A-Fa-f]{3,6}"', 'fill="none"', svg)
-    svg = re.sub(
-        r'<svg\b[^>]*>',
-        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">',
-        svg,
-        count=1
+# --------------------------------------------------------------------------------------
+# Wikipedia + local fallback
+# --------------------------------------------------------------------------------------
+
+WIKI_URL_TMPL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{mm}/{dd}"
+
+# small emergency cache for when Wikipedia 403s or returns empty;
+# add more if you want — format: "MM-DD": [(title, url), ...]
+_LOCAL_EVENTS = {
+    "10-07": [
+        ("The German Democratic Republic is formed.", "https://en.wikipedia.org/wiki/East_Germany"),
+        ("The Granite Railway begins operations in the U.S.", "https://en.wikipedia.org/wiki/Granite_Railway"),
+    ],
+    "10-13": [
+        ("The present church at Westminster Abbey is consecrated.", "https://en.wikipedia.org/wiki/Westminster_Abbey"),
+        ("B'nai B'rith is founded in New York City.", "https://en.wikipedia.org/wiki/B%27nai_B%27rith"),
+    ],
+}
+
+def _wiki_headers() -> dict:
+    # Use a real UA to avoid 403; set a contact if you want
+    contact = os.getenv("WIKI_CONTACT", "hello@therealroundup.com")
+    return {
+        "User-Agent": f"therealroundup.com TimelineRoulette (+{contact})",
+        "Accept": "application/json",
+    }
+
+def fetch_onthisday_events(target: date) -> List[Tuple[str, str]]:
+    mm = f"{target.month:02d}"
+    dd = f"{target.day:02d}"
+    url = WIKI_URL_TMPL.format(mm=mm, dd=dd)
+
+    try:
+        r = requests.get(url, headers=_wiki_headers(), timeout=12)
+        r.raise_for_status()
+        data = r.json()
+        out: List[Tuple[str, str]] = []
+        for ev in data.get("events", []):
+            # prefer the first page title+uri if present
+            pages = ev.get("pages") or []
+            if pages:
+                # the "displaytitle" often contains the useful label (short)
+                t = pages[0].get("displaytitle") or pages[0].get("normalizedtitle") or pages[0].get("title")
+                page_url = pages[0].get("content_urls", {}).get("desktop", {}).get("page") or pages[0].get("extract", "")
+                if t and page_url:
+                    # Combine with the excerpted text of the event itself if available
+                    text = ev.get("text") or t
+                    # Make a clean sentence-ish title
+                    out.append((text.strip().rstrip("." ) + ".", page_url))
+            elif ev.get("text"):
+                out.append((ev["text"].strip().rstrip(".") + ".", "https://en.wikipedia.org/wiki/Main_Page"))
+        return out
+    except Exception:
+        pass  # fall through to local cache
+
+    key = f"{mm}-{dd}"
+    return _LOCAL_EVENTS.get(key, []).copy()
+
+
+# --------------------------------------------------------------------------------------
+# Text shaping: soften “real” and generate believable fakes
+# --------------------------------------------------------------------------------------
+
+# Replace proper nouns / specifics with generic phrases so the real line isn't obviously “the specific one”.
+_PN_MULTI   = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z']+)+)\b")
+_CITY_HEADS = re.compile(r"\b(New|Los|San)\s[A-Z][a-z]+\b")
+_LANDMARK   = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z']+)*)\s(Abbey|Cathedral|Bridge|Library|Palace)\b")
+_ORG        = re.compile(r"\b([A-Z][A-Za-z'&\.\-]+(?:\s[A-Z][A-Za-z'&\.\-]+)*)\b")
+
+def soften_real_title(s: str) -> str:
+    out = s
+    out = _LANDMARK.sub(r"a well-known \2", out)
+    out = _CITY_HEADS.sub("a major city", out)
+    # collapse “Some Proper Noun” → “a long-standing civic organization” (only if followed by verbs like “is founded”, etc.)
+    out = re.sub(rf"{_PN_MULTI.pattern}\s(is|was|were|is founded|is formed|is consecrated|is created)",
+                 r"a long-standing civic organization \2", out)
+    # general proper-noun wipe (gentle)
+    out = _PN_MULTI.sub("a prominent institution", out)
+    # trim doubled spaces / punctuation
+    out = re.sub(r"\s+", " ", out).strip()
+    if not out.endswith("."):
+        out += "."
+    return out
+
+# Fake generators with tone similar to real
+_FAKE_TEMPLATES = [
+    "a scientific society is formed, drawing public attention.",
+    "a new bridge is inaugurated, noted in reports.",
+    "a major library opens its doors to the public.",
+    "a civic treaty is announced after lengthy talks.",
+    "a regional council is established to coordinate efforts.",
+    "a historical archive is unveiled to researchers.",
+    "a prominent exhibition opens, attracting crowds.",
+    "a coastal fortification is completed.",
+    "a postal route is expanded between major towns.",
+    "a local academy is chartered for higher learning."
+]
+
+def _shuffle_take(k: int, items: List[str]) -> List[str]:
+    pool = items[:]
+    random.shuffle(pool)
+    return pool[:k]
+
+def generate_fake_titles(real_display: str) -> Tuple[str, str]:
+    # lightly adapt verbs to match tense of real_display (past vs present)
+    past = any(x in real_display.lower() for x in ["was ", "were ", "is ", "are ", "is founded", "is formed"])
+    choices = _shuffle_take(6, _FAKE_TEMPLATES)
+    if past:
+        # keep as-is; templates are present-ish narrative which reads fine either way
+        pass
+    fake1, fake2 = choices[0], choices[1]
+    return fake1, fake2
+
+
+# --------------------------------------------------------------------------------------
+# Core: ensure_today_round()
+# --------------------------------------------------------------------------------------
+
+@dataclass
+class RoundData:
+    real_title: str
+    real_display: str
+    real_url: str
+    fake1: str
+    fake2: str
+    real_icon: str
+    fake1_icon: str
+    fake2_icon: str
+    img_attr: Optional[str] = None  # reserved for Unsplash credit if you re-enable
+
+def _pick_real_event_for_date(d: date) -> Tuple[str, str]:
+    events = fetch_onthisday_events(d)
+    if not events:
+        # maximal last-resort line
+        return ("A civic milestone is observed.", "https://en.wikipedia.org/wiki/Main_Page")
+    # Filter out over-long or weird ones, pick a reasonable sample
+    events = [(t, u) for (t, u) in events if 40 <= len(t) <= 180]
+    if not events:
+        t, u = random.choice(fetch_onthisday_events(d))
+        return (t, u)
+    return random.choice(events)
+
+def _build_round_for(d: date) -> RoundData:
+    real_raw, real_url = _pick_real_event_for_date(d)
+    real_display = soften_real_title(real_raw)
+
+    fake1, fake2 = generate_fake_titles(real_display)
+
+    # icons
+    real_icon  = pick_icon_for_text(real_display)
+    fake1_icon = pick_icon_for_text(fake1)
+    fake2_icon = pick_icon_for_text(fake2)
+
+    return RoundData(
+        real_title=real_raw.rstrip(".") + ".",
+        real_display=real_display,
+        real_url=real_url,
+        fake1=fake1,
+        fake2=fake2,
+        real_icon=real_icon or _FALLBACK_ICON,
+        fake1_icon=fake1_icon or _FALLBACK_ICON,
+        fake2_icon=fake2_icon or _FALLBACK_ICON,
+        img_attr=None,
     )
 
-    # Lightweight tag allowlist
-    tags = re.findall(r'</?([a-zA-Z0-9]+)\b', svg)
-    allowed = {"svg","path","circle","rect","line","polyline","polygon","g"}
-    for t in tags:
-        if t.lower() not in allowed:
-            return None
-    return svg
-
-def _openai_client_or_none():
-    try:
-        from openai import OpenAI
-        if not os.getenv("OPENAI_API_KEY"):
-            return None
-        return OpenAI()
-    except Exception:
-        return None
-
-_ICON_PROMPT = """You are an icon generator. Output ONLY a single compact SVG element (no prose).
-Requirements:
-- Minimal outline icon, 24x24 viewBox, clean single-color lines (stroke="currentColor", fill="none").
-- No external references, no <style>, no scripts, no text, no raster images.
-- Prefer a single <path> plus simple shapes. Keep it ~200-800 characters.
-Subject: a simple, easily recognizable icon representing: "{subject}"
-Return ONLY the <svg>...</svg> markup.
-"""
-
-def _ensure_ai_icon(filename: str, subject: str) -> str | None:
+def seed_schema_if_missing() -> None:
     """
-    If icons/ai-<filename> doesn't exist, ask OpenAI to create one and save it.
-    Returns the basename (e.g., "ai-train.svg") or None on failure.
+    Safety helper: in case your DB was created without these tables/columns.
+    Call from a shell once: with app.app_context(): seed_schema_if_missing()
     """
-    ai_basename = f"ai-{filename}"
-    out_path = ICON_DIR / ai_basename
-    if out_path.exists():
-        return ai_basename
+    # We rely on SQLAlchemy's metadata and db.create_all() (which you already call in app/app.py).
+    # This function just exists for parity with earlier raw SQL attempts and is no-op now.
+    pass
 
-    client = _openai_client_or_none()
-    if not client:
-        return None
-
-    try:
-        completion = client.chat.completions.create(
-            model=os.getenv("OPENAI_ICON_MODEL", "gpt-4o-mini"),  # small & cheap
-            temperature=0.4,
-            messages=[
-                {"role": "system", "content": "You produce minimal, safe SVG icons."},
-                {"role": "user", "content": _ICON_PROMPT.format(subject=subject)},
-            ],
-        )
-        svg = (completion.choices[0].message.content or "").strip()
-        svg = _sanitize_svg(svg)
-        if not svg:
-            return None
-        out_path.write_text(svg, encoding="utf-8")
-        return ai_basename
-    except Exception:
-        return None
-
-def _ensure_icon_exists_or_ai(name: str | None, subject: str) -> str:
+def ensure_today_round(force: bool = False) -> TimelineRound:
     """
-    If 'name' exists in ICON_DIR, return it.
-    Otherwise try to create ai-<name> with OpenAI. If that fails, return a fallback that exists.
+    Creates (or replaces when force=True) today's TimelineRound.
+    - Safe against FK errors: deletes guesses first if replacing.
+    - Softens real title so it doesn't look obviously specific.
+    - Stores icon file names (your route helper maps to URL+fallback).
     """
-    if name and (ICON_DIR / name).exists():
-        return name
-    base = (name or "generic.svg").replace(".svg", "") + ".svg"
-    ai_name = _ensure_ai_icon(base, subject)
-    if ai_name and (ICON_DIR / ai_name).exists():
-        return ai_name
-    # last resort
-    print(f"[icon] Using {ai_name or name or 'fallback'} for subject={subject}")
-    return _fallback_icon_name()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main entry: ensure today's round
-# ─────────────────────────────────────────────────────────────────────────────
-def ensure_today_round():
     today = _now_local_date()
+
     existing = TimelineRound.query.filter_by(round_date=today).first()
-    if existing:
-        return
+    if existing and not force:
+        return existing
 
-    # --- real (raw) → neutral quiz title
-    real_title_raw, real_url = pick_real_event(today)
-    real_quiz = soften_real_title(real_title_raw)
+    if existing and force:
+        # Delete guesses first to satisfy FK, then delete round
+        TimelineGuess.query.filter_by(round_id=existing.id).delete(synchronize_session=False)
+        db.session.delete(existing)
+        db.session.commit()
 
-    # --- style-matched fakes
-    fake1_title, fake2_title = generate_fakes_style_matched(real_quiz)
+    data = _build_round_for(today)
 
-    # --- icons (from the quiz-style titles)
-    real_icon_name  = pick_icon_for_text(real_quiz)
-    fake1_icon_name = pick_icon_for_text(fake1_title)
-    fake2_icon_name = pick_icon_for_text(fake2_title)
-
-    real_icon  = _ensure_icon_exists_or_ai(real_icon_name,  real_quiz)
-    fake1_icon = _ensure_icon_exists_or_ai(fake1_icon_name, fake1_title)
-    fake2_icon = _ensure_icon_exists_or_ai(fake2_icon_name, fake2_title)
-
-    row = TimelineRound(
+    # correct_index is 0 (we treat real as the canonical slot; UI shuffles)
+    # Store the softened display text for the real *in the visible text* by setting real_title to softened?
+    # We’ll keep the exact real_title for logging/source, but save softened variant into DB’s real_title
+    # so the UI shows the softened form. If you prefer both, add a new column.
+    round_row = TimelineRound(
         round_date=today,
-        real_title=real_quiz,
-        real_source_url=real_url,
-        fake1_title=fake1_title,
-        fake2_title=fake2_title,
-        real_icon=real_icon,
-        fake1_icon=fake1_icon,
-        fake2_icon=fake2_icon,
+        real_title=data.real_display,      # **softened** for display
+        real_source_url=data.real_url,
+        fake1_title=data.fake1,
+        fake2_title=data.fake2,
         correct_index=0,
+        real_icon=data.real_icon,
+        fake1_icon=data.fake1_icon,
+        fake2_icon=data.fake2_icon,
+        # keep attribution fields ready even if we don’t fetch Unsplash here
+        real_img_attr=data.img_attr,
+        fake1_img_attr=data.img_attr,
+        fake2_img_attr=data.img_attr,
     )
-    db.session.add(row)
+    db.session.add(round_row)
     db.session.commit()
+    return round_row
+
+
+# --------------------------------------------------------------------------------------
+# CLI / Render shell helpers
+# --------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # Local manual test (must be run under `flask shell` or create_app() context)
+    # from app.app import create_app
+    # app = create_app()
+    # with app.app_context():
+    #     ensure_today_round(force=True)
+    print("This module provides ensure_today_round(force=False). Run it inside app context.")
