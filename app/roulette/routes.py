@@ -132,11 +132,32 @@ def play_today():
     r = _today_round_or_404()
 
     # Build shuffled card set; remember where the real one lands (index 0 == real)
+    def _image_or_icon(url: str | None, icon_name: str | None) -> str:
+        if url:
+            return url
+        return _icon_url_or_fallback(icon_name)
+
     cards = [
-        {"orig_idx": 0, "text": r.real_title, "label": "A", "icon": _icon_url_or_fallback(r.real_icon)},
-        {"orig_idx": 1, "text": r.fake1_title, "label": "B", "icon": _icon_url_or_fallback(r.fake1_icon)},
-        {"orig_idx": 2, "text": r.fake2_title, "label": "C", "icon": _icon_url_or_fallback(r.fake2_icon)},
+        {
+            "orig_idx": 0,
+            "text": r.real_title,
+            "label": "A",
+            "img": _image_or_icon(getattr(r, "real_img_url", None), r.real_icon),
+        },
+        {
+            "orig_idx": 1,
+            "text": r.fake1_title,
+            "label": "B",
+            "img": _image_or_icon(getattr(r, "fake1_img_url", None), r.fake1_icon),
+        },
+        {
+            "orig_idx": 2,
+            "text": r.fake2_title,
+            "label": "C",
+            "img": _image_or_icon(getattr(r, "fake2_img_url", None), r.fake2_icon),
+        },
     ]
+
     random.shuffle(cards)
     correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
 
