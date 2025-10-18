@@ -256,6 +256,44 @@ def _pick_real_event() -> Tuple[str, str]:
     month_name = today.strftime("%B")
     return real, month_name
 
+def _openai_image(prompt: str) -> Optional[str]:
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/images/generations",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-image-1",   # or your configured OPENAI_IMAGE_MODEL
+                "prompt": prompt,
+                "size": "256x256",
+                "n": 1,
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data["data"][0]["url"] if data.get("data") else None
+    except Exception:
+        return None
+
+def _image_for(text: str) -> Tuple[str, str]:
+    # Try OpenAI first
+    if OPENAI_API_KEY:
+        u = _openai_image(f"flat minimal illustration; historical vibe; about: {text}")
+        if u:
+            return u, "OpenAI generated"
+
+    # Fallback to Unsplash
+    url, attr = _unsplash_for(text)
+    if url:
+        return url, attr or "Unsplash"
+
+    # Absolute last fallback
+    return "data:image/gif;base64,R0lGODlhAQABAAAAACw=", ""
 
 def ensure_today_round(force: bool = False) -> bool:
     """Creates today's round if missing (or if force==True). Returns True when a round exists."""
@@ -286,12 +324,18 @@ def ensure_today_round(force: bool = False) -> bool:
     f1_icon = pick_icon_for_text(fake1)
     f2_icon = pick_icon_for_text(fake2)
 
-    real_img, real_attr = _unsplash_for(real_soft)
-    f1_img, f1_attr = _unsplash_for(fake1)
-    f2_img, f2_attr = _unsplash_for(fake2)
+    real_img, real_attr = _image_for(real_soft)
+    f1_img, f1_attr  = _image_for(fake1)
+    f2_img, f2_attr  = _image_for(fake2)
 
-    # prefer at least one attribution string for footer; keep your previous behavior
-    img_attr = real_attr or f1_attr or f2_attr
+    # Guaranteed fallback (1x1 transparent GIF) if Unsplash returns nothing
+    FALLBACK = "data:image/gif;base64,R0lGODlhAQABAAAAACw="
+    real_img = real_img or FALLBACK
+    f1_img  = f1_img  or FALLBACK
+    f2_img  = f2_img  or FALLBACK
+
+    # Keep a single-line attribution if any
+    img_attr = real_attr or f1_attr or f2_attr or ""
 
     # 4) persist
     round_row = TimelineRound(
