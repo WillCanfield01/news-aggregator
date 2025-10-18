@@ -7,6 +7,7 @@ import random
 import time
 from datetime import datetime
 from typing import Tuple, Dict, Any, Optional
+from flask import current_app
 from app.roulette.models import TimelineRound, TimelineGuess
 import pytz
 import requests
@@ -321,14 +322,6 @@ def ensure_today_round(force: int = 0) -> bool:
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
     f2_icon   = pick_icon_for_text(fake2)
-
-    # Prefer OpenAI → Unsplash → 1x1 fallback
-    def _image_for(text: str) -> tuple[Optional[str], str]:
-        # If you added _openai_image(), use it here; otherwise keep Unsplash
-        url, attr = _unsplash_for(text)
-        if not url:
-            url = "data:image/gif;base64,R0lGODlhAQABAAAAACw="
-        return url, (attr or "")
 
     real_img, real_attr = _image_for(real_soft)
     f1_img,  f1_attr    = _image_for(fake1)
