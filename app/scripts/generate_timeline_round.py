@@ -44,28 +44,28 @@ def _http_get_json(url: str, headers: dict | None = None, params: dict | None = 
     r.raise_for_status()
     return r.json()
 
-
 def _soften_real_title(title: str) -> str:
     """
-    Make the real title a hair less “hyper-specific” so it doesn't scream 'I'm the real one'.
-    We keep meaning but remove dead giveaways: big counts, hyper-exact years, long proper-noun runs.
+    Light normalization so the real headline remains human and specific.
+    - Trim whitespace / stray code fences
+    - Avoid hyper-precise numbers only if they look like big counts
+    - Do NOT replace proper nouns (keeps it believable)
     """
-    # (1) collapse large numbers
-    t = re.sub(r"\b(\d{4,}|\d{1,3}(,\d{3})+)\b", "thousands", title)
+    if not title:
+        return ""
 
-    # (2) replace exact years like 'in 1862' with 'in the 19th century' when possible
-    t = re.sub(r"\b(in|In)\s+(1[5-9]\d{2}|20\d{2})\b", "in that era", t)
+    t = str(title).strip()
+    t = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", t, flags=re.MULTILINE)  # strip code fences
 
-    # (3) if we have very long proper-noun spans (3+ caps words), soften
-    def _soften_caps_span(m):
-        return "a major institution"
+    # collapse very large counts like 12,345 or 2000000 → “thousands”
+    t = re.sub(r"\b(\d{1,3}(?:,\d{3}){1,}|\d{5,})\b", "thousands", t)
 
-    t = re.sub(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){2,})\b", _soften_caps_span, t)
+    # normalize doubled determiners that sometimes sneak in
+    t = re.sub(r"\b(?:the\s+the|a\s+a|an\s+an|the\s+a|a\s+the)\b", lambda m: m.group(0).split()[0], t, flags=re.I)
 
-    # normalize double spaces after replacements
+    # cleanup spaces
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
-
 
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
@@ -131,8 +131,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
 
     # Word banks (neutral, historical tone)
     actors = [
-        "regional leaders", "city officials", "trade guilds", "local magistrates",
-        "delegates", "civic groups", "scholars", "town elders", "envoys", "council members"
+        "city officials", "provincial delegates", "trade guilds", "local magistrates",
+        "envoys from neighboring states", "civic petitioners", "university scholars",
+        "merchant councils", "town elders", "members of a royal court"
     ]
     actions = [
         "announce", "convene", "ratify", "broker", "publish", "propose",
@@ -281,20 +282,43 @@ def _openai_image(prompt: str) -> Optional[str]:
     except Exception:
         return None
 
-def _image_for(text: str) -> Tuple[str, str]:
-    # Try OpenAI first
+# Visible fallback (shows up in UI instead of transparent pixel)
+FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
+
+def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
+    """Pick an image for `text`. Prefer OpenAI, then Unsplash; dedupe within a round."""
+    # 1) OpenAI image
     if OPENAI_API_KEY:
-        u = _openai_image(f"flat minimal illustration; historical vibe; about: {text}")
-        if u:
+        u = _openai_image(f"flat minimal illustration; muted colors; historical vibe; about: {text}")
+        if u and u not in used:
+            used.add(u)
             return u, "OpenAI generated"
 
-    # Fallback to Unsplash
-    url, attr = _unsplash_for(text)
-    if url:
-        return url, attr or "Unsplash"
+    # 2) Unsplash — try a few results to avoid nulls and duplicates
+    if UNSPLASH_ACCESS_KEY:
+        words = re.findall(r"[A-Za-z]{3,}", (text or "").lower())
+        stop = {"the","and","for","with","from","into","across","over","under","in","on","at","to","of","by","an","a","is","are","was","were"}
+        core = [w for w in words if w not in stop][:6] or ["history","archive","museum","document"]
+        q = " ".join(core)
+        try:
+            j = _http_get_json(
+                "https://api.unsplash.com/search/photos",
+                params={"query": q, "orientation": "squarish", "per_page": 6, "content_filter": "high"},
+                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+            )
+            for r in j.get("results", []):
+                img = r.get("urls", {}).get("small")
+                if img and img not in used:
+                    used.add(img)
+                    u = r.get("user", {}) or {}
+                    attr = f"{u.get('name','Unsplash')} — https://unsplash.com/@{u.get('username','unsplash')}"
+                    return img, attr
+        except Exception:
+            pass
 
-    # Absolute last fallback
-    return "data:image/gif;base64,R0lGODlhAQABAAAAACw=", ""
+    # 3) Visible fallback (never breaks <img>)
+    used.add(FALLBACK_ICON_URL)
+    return FALLBACK_ICON_URL, ""
 
 def ensure_today_round(force: int = 0) -> bool:
     """
@@ -323,9 +347,10 @@ def ensure_today_round(force: int = 0) -> bool:
     f1_icon   = pick_icon_for_text(fake1)
     f2_icon   = pick_icon_for_text(fake2)
 
-    real_img, real_attr = _image_for(real_soft)
-    f1_img,  f1_attr    = _image_for(fake1)
-    f2_img,  f2_attr    = _image_for(fake2)
+    used_urls: set[str] = set()
+    real_img, real_attr = _image_for(real_soft, used_urls)
+    f1_img,  f1_attr    = _image_for(fake1, used_urls)
+    f2_img,  f2_attr    = _image_for(fake2, used_urls)
     img_attr = real_attr or f1_attr or f2_attr or ""
 
     try:
