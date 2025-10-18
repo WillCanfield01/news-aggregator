@@ -68,73 +68,134 @@ def _soften_real_title(title: str) -> str:
 
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Ask OpenAI for two fakes that match style/length/specificity. JSON-only return.
+    Try OpenAI; if unavailable or fails, synthesize two DISTINCT fake entries.
+    Deterministic per-day so users see stable choices.
     """
-    if not OPENAI_API_KEY:
-        # If no key, fallback to very basic templated fakes (still better balanced than before)
-        base = re.sub(r"[.!?]\s*$", "", real_text)
-        return (
-            re.sub(r"\bthe\b", "a", base, flags=re.I) + " is recognized by local authorities.",
-            re.sub(r"\bthe\b", "a", base, flags=re.I) + " draws public attention in the region.",
+    # ---------- 1) Try OpenAI ----------
+    if OPENAI_API_KEY:
+        sys_prompt = (
+            "You are a careful historian writing daily almanac entries. "
+            "Given a real event, produce two false-but-plausible events that could appear in a daily timeline. "
+            "They MUST:\n"
+            "• be on the SAME month/day window (any year OK),\n"
+            "• match the real entry’s tone and approximate length,\n"
+            "• avoid copying exact names in the real entry (similar *type* is fine),\n"
+            "• avoid meta commentary, never say they are fake.\n"
+            "Return STRICT JSON only: {\"fake1\": \"...\", \"fake2\": \"...\"}."
         )
+        user_payload = {"real_event": real_text, "month_hint": month_name}
+        payload = {
+            "model": OAI_MODEL,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": f"{user_payload}"},
+            ],
+            "temperature": 0.8,
+            "response_format": {"type": "json_object"},
+        }
 
-    sys_prompt = (
-        "You are a careful historian writing daily almanac entries. "
-        "Given a real event, produce two false-but-plausible events that could appear in a daily timeline. "
-        "They MUST:\n"
-        "• be on the SAME month/day window (but any year is fine),\n"
-        "• match the real entry’s tone, length, and specificity (no extra details),\n"
-        "• avoid cartoonish claims, avoid obvious superlatives unless the real uses one,\n"
-        "• not reuse exact names in the real entry (similar *type* is OK),\n"
-        "• NEVER mention they are fake. No meta commentary.\n"
-        "Return STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"} — no extra text."
-    )
-
-    user_prompt = {
-        "real_event": real_text,
-        "month_hint": month_name
-    }
-
-    payload = {
-        "model": OAI_MODEL,
-        "messages": [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": f"{user_prompt}"}
-        ],
-        "temperature": 0.8,
-        "response_format": {"type": "json_object"}
-    }
-
-    for attempt in range(2):
-        try:
-            r = requests.post(
-                OAI_URL,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=30,
-            )
-            r.raise_for_status()
-            data = r.json()
-            content = data["choices"][0]["message"]["content"]
-            obj = {}
+        for attempt in range(2):
             try:
-                obj = requests.utils.json.loads(content)
+                r = requests.post(
+                    OAI_URL,
+                    headers={
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=30,
+                )
+                r.raise_for_status()
+                data = r.json()
+                content = data["choices"][0]["message"]["content"]
+                try:
+                    obj = requests.utils.json.loads(content)
+                except Exception:
+                    obj = requests.utils.json.loads(content.strip("` \n"))
+                f1 = (obj.get("fake1") or "").strip()
+                f2 = (obj.get("fake2") or "").strip()
+                # quick sanity: non-empty and not obviously duplicates of real
+                if f1 and f2 and f1.lower() != real_text.lower() and f2.lower() != real_text.lower():
+                    return f1, f2
             except Exception:
-                obj = requests.utils.json.loads(content.strip("` \n"))
-            f1 = obj.get("fake1", "").strip()
-            f2 = obj.get("fake2", "").strip()
-            if f1 and f2:
-                return f1, f2
-        except Exception:
-            time.sleep(0.8)
+                time.sleep(0.6)
 
-    # fallback if OAI hiccups
-    base = re.sub(r"[.!?]\s*$", "", real_text)
-    return (
-        re.sub(r"\bthe\b", "a", base, flags=re.I) + " is noted in contemporary accounts.",
-        re.sub(r"\bthe\b", "a", base, flags=re.I) + " is reported by local papers.",
-    )
+    # ---------- 2) Deterministic fallback (no API / API failed) ----------
+    base = re.sub(r"[.!?]\s*$", "", real_text or "").strip()
+    # Token set to avoid copying long real tokens
+    real_tokens = {t.lower() for t in re.findall(r"[A-Za-z]{4,}", base)}
+    # Seed by day so results are stable for the calendar day
+    _seed = int(datetime.now(TZ).strftime("%Y%m%d"))
+    rng = random.Random(_seed ^ (hash(base) & 0xFFFFFFFF))
 
+    # Word banks (neutral, historical tone)
+    actors = [
+        "regional leaders", "city officials", "trade guilds", "local magistrates",
+        "delegates", "civic groups", "scholars", "town elders", "envoys", "council members"
+    ]
+    actions = [
+        "announce", "convene", "ratify", "broker", "publish", "propose",
+        "draft", "endorse", "negotiate", "finalize"
+    ]
+    objects = [
+        "a provisional accord", "a charter reform", "a trade memorandum",
+        "an interim council", "a policy revision", "a public statement",
+        "new ordinances", "a compact to reduce unrest", "a joint declaration",
+        "a limited treaty"
+    ]
+    contexts = [
+        "after tense negotiations", "amid growing unease", "following weeks of debate",
+        "to calm unrest in key districts", "citing fiscal pressures",
+        "to resolve a longstanding dispute", "in response to petitions",
+        "as observers report a narrow vote", "after private deliberations",
+        "to standardize local practices"
+    ]
+
+    def _unique_pick(pool: list[str]) -> str:
+        rng.shuffle(pool)
+        for item in pool:
+            if not any(tok in real_tokens for tok in re.findall(r"[A-Za-z]{4,}", item)):
+                return item
+        return pool[0]
+
+    def _compose() -> str:
+        a = _unique_pick(actors[:])
+        v = _unique_pick(actions[:])
+        o = _unique_pick(objects[:])
+        c = _unique_pick(contexts[:])
+        # Two varied sentence shapes for diversity
+        if rng.random() < 0.5:
+            s = f"{a[0].upper() + a[1:]} {v} {o} {c}."
+        else:
+            s = f"After {c}, {a} {v} {o}."
+        # Light clean & period
+        s = re.sub(r"\s{2,}", " ", s).strip()
+        if not s.endswith("."):
+            s += "."
+        return s
+
+    def _len_ok(target: str, cand: str) -> bool:
+        if not target or not cand:
+            return False
+        t, c = len(target), len(cand)
+        return (0.55 * t) <= c <= (1.55 * t)
+
+    # Draw two distinct candidates
+    f1, f2 = "", ""
+    for _ in range(6):
+        cand = _compose()
+        if _len_ok(base, cand) and cand.lower() != base.lower():
+            if not f1:
+                f1 = cand
+            elif cand.lower() != f1.lower():
+                f2 = cand
+                break
+    if not f1:
+        f1 = "Regional leaders announce a provisional accord after tense negotiations."
+    if not f2:
+        f2 = "Delegates unveil a charter reform to resolve a longstanding dispute."
+
+    return f1, f2
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
