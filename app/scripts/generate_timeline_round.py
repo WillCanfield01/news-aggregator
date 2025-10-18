@@ -7,7 +7,7 @@ import random
 import time
 from datetime import datetime
 from typing import Tuple, Dict, Any, Optional
-
+from app.roulette.models import TimelineRound, TimelineGuess
 import pytz
 import requests
 from sqlalchemy import select
@@ -295,66 +295,100 @@ def _image_for(text: str) -> Tuple[str, str]:
     # Absolute last fallback
     return "data:image/gif;base64,R0lGODlhAQABAAAAACw=", ""
 
-def ensure_today_round(force: bool = False) -> bool:
-    """Creates today's round if missing (or if force==True). Returns True when a round exists."""
+def ensure_today_round(force: int = 0) -> bool:
+    """
+    Generate (or update) today's Timeline Round.
+
+    - force=0 : if exists, NO-OP (return True)
+    - force=1 : UPDATE the existing row in place (keep guesses)
+    - force=2 : DELETE today's guesses, then UPDATE the row in place
+    """
     today = _today_local_date()
+
+    # find today's round (if any)
     existing: TimelineRound | None = db.session.execute(
         select(TimelineRound).where(TimelineRound.round_date == today)
     ).scalar_one_or_none()
 
-    if existing and not force:
+    if existing and force == 0:
         return True
 
-    # If we’re forcing, try to delete existing safely
-    if existing and force:
-        # foreign keys might exist; let DB cascade if configured
-        db.session.delete(existing)
-        db.session.commit()
-        existing = None
-
-    # 1) pick a real event
+    # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
     real_soft = _soften_real_title(real_raw)
-
-    # 2) get two balanced fakes based on the softened real
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
 
-    # 3) icons + unsplash per card
     real_icon = pick_icon_for_text(real_soft)
-    f1_icon = pick_icon_for_text(fake1)
-    f2_icon = pick_icon_for_text(fake2)
+    f1_icon   = pick_icon_for_text(fake1)
+    f2_icon   = pick_icon_for_text(fake2)
+
+    # Prefer OpenAI → Unsplash → 1x1 fallback
+    def _image_for(text: str) -> tuple[Optional[str], str]:
+        # If you added _openai_image(), use it here; otherwise keep Unsplash
+        url, attr = _unsplash_for(text)
+        if not url:
+            url = "data:image/gif;base64,R0lGODlhAQABAAAAACw="
+        return url, (attr or "")
 
     real_img, real_attr = _image_for(real_soft)
-    f1_img, f1_attr  = _image_for(fake1)
-    f2_img, f2_attr  = _image_for(fake2)
-
-    # Guaranteed fallback (1x1 transparent GIF) if Unsplash returns nothing
-    FALLBACK = "data:image/gif;base64,R0lGODlhAQABAAAAACw="
-    real_img = real_img or FALLBACK
-    f1_img  = f1_img  or FALLBACK
-    f2_img  = f2_img  or FALLBACK
-
-    # Keep a single-line attribution if any
+    f1_img,  f1_attr    = _image_for(fake1)
+    f2_img,  f2_attr    = _image_for(fake2)
     img_attr = real_attr or f1_attr or f2_attr or ""
 
-    # 4) persist
-    round_row = TimelineRound(
-        round_date=today,
-        real_title=real_soft,
-        real_source_url=f"https://en.wikipedia.org/wiki/{_today_local_date().strftime('%B')}_{_today_local_date().day}",
-        fake1_title=fake1,
-        fake2_title=fake2,
-        correct_index=0,  # real = 0 before shuffling in route
-        real_icon=real_icon,
-        fake1_icon=f1_icon,
-        fake2_icon=f2_icon,
-        real_img_url=real_img,
-        fake1_img_url=f1_img,
-        fake2_img_url=f2_img,
-        real_img_attr=img_attr,   # store one attribution string
-        fake1_img_attr=None,
-        fake2_img_attr=None,
-    )
-    db.session.add(round_row)
-    db.session.commit()
-    return True
+    try:
+        if existing:
+            # force==2: clear guesses that reference today's round
+            if force == 2:
+                db.session.query(TimelineGuess).filter(
+                    TimelineGuess.round_id == existing.id
+                ).delete(synchronize_session=False)
+
+            # UPDATE IN PLACE (keep same round id for FK)
+            existing.real_title     = real_soft
+            existing.real_source_url = f"https://en.wikipedia.org/wiki/{today.strftime('%B')}_{today.day}"
+            existing.fake1_title    = fake1
+            existing.fake2_title    = fake2
+            existing.correct_index  = 0  # real is index 0; UI shuffles
+
+            # icons / images / attr
+            existing.real_icon      = real_icon
+            existing.fake1_icon     = f1_icon
+            existing.fake2_icon     = f2_icon
+
+            existing.real_img_url   = real_img
+            existing.fake1_img_url  = f1_img
+            existing.fake2_img_url  = f2_img
+
+            existing.real_img_attr  = img_attr
+            # keep compatibility fields if they exist
+            if hasattr(existing, "fake1_img_attr"): existing.fake1_img_attr = None
+            if hasattr(existing, "fake2_img_attr"): existing.fake2_img_attr = None
+
+        else:
+            # CREATE if missing
+            round_row = TimelineRound(
+                round_date=today,
+                real_title=real_soft,
+                real_source_url=f"https://en.wikipedia.org/wiki/{today.strftime('%B')}_{today.day}",
+                fake1_title=fake1,
+                fake2_title=fake2,
+                correct_index=0,
+                real_icon=real_icon,
+                fake1_icon=f1_icon,
+                fake2_icon=f2_icon,
+                real_img_url=real_img,
+                fake1_img_url=f1_img,
+                fake2_img_url=f2_img,
+                real_img_attr=img_attr,
+                fake1_img_attr=None,
+                fake2_img_attr=None,
+            )
+            db.session.add(round_row)
+
+        db.session.commit()
+        return True
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"[roulette] ensure_today_round failed: {e}")
+        return False
