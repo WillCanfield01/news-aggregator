@@ -14,8 +14,13 @@ from sqlalchemy import select
 
 from app.extensions import db
 from app.roulette.models import TimelineRound
-from app.roulette.icon_ai import pick_icon_for_text  # your adaptive icon picker
-
+try:
+    from app.roulette.icon_ai import pick_icon_for_text  # optional
+except Exception:  # pragma: no cover
+    def pick_icon_for_text(_: str) -> str:
+        # simplest safe fallback icon name that exists in /static/roulette/icons/
+        return "star.svg"
+    
 TZ = pytz.timezone(os.getenv("TIME_ZONE", "America/Denver"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
