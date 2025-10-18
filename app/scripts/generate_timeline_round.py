@@ -67,136 +67,92 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
+# --- replace _openai_fakes_from_real with this stronger version ---
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Try OpenAI; if unavailable or fails, synthesize two DISTINCT fake entries.
-    Deterministic per-day so users see stable choices.
+    Produce two plausible-but-false events similar in tone/length to the real item.
     """
     # ---------- 1) Try OpenAI ----------
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You are a careful historian writing daily almanac entries. "
-            "Given a real event, produce two false-but-plausible events that could appear in a daily timeline. "
-            "They MUST:\n"
-            "• be on the SAME month/day window (any year OK),\n"
-            "• match the real entry’s tone and approximate length,\n"
-            "• avoid copying exact names in the real entry (similar *type* is fine),\n"
-            "• avoid meta commentary, never say they are fake.\n"
-            "Return STRICT JSON only: {\"fake1\": \"...\", \"fake2\": \"...\"}."
+            "You write concise, believable 'On This Day' almanac entries.\n"
+            "Given ONE real entry, return TWO different **plausible but false** entries that:\n"
+            f"• Occur in {month_name} (any year),\n"
+            "• Match the tone and length (within ±15%) of the real entry,\n"
+            "• Each include at least ONE proper noun (org/place/person) and ONE 4-digit year,\n"
+            "• Sound specific (a concrete action or outcome),\n"
+            "• DO NOT copy exact entities from the real entry,\n"
+            "• No meta-text. No hedging words like 'reportedly' or 'allegedly'.\n"
+            'Return STRICT JSON only: {\"fake1\":\"...\",\"fake2\":\"...\"}'
         )
-        user_payload = {"real_event": real_text, "month_hint": month_name}
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"{user_payload}"},
+                {"role": "user", "content": f"real_entry={real_text}"},
             ],
-            "temperature": 0.8,
+            "temperature": 0.7,
             "response_format": {"type": "json_object"},
         }
-
-        for attempt in range(2):
+        for _ in range(2):
             try:
                 r = requests.post(
                     OAI_URL,
-                    headers={
-                        "Authorization": f"Bearer {OPENAI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
                     json=payload,
                     timeout=30,
                 )
                 r.raise_for_status()
-                data = r.json()
-                content = data["choices"][0]["message"]["content"]
+                content = r.json()["choices"][0]["message"]["content"]
                 try:
                     obj = requests.utils.json.loads(content)
                 except Exception:
                     obj = requests.utils.json.loads(content.strip("` \n"))
                 f1 = (obj.get("fake1") or "").strip()
                 f2 = (obj.get("fake2") or "").strip()
-                # quick sanity: non-empty and not obviously duplicates of real
                 if f1 and f2 and f1.lower() != real_text.lower() and f2.lower() != real_text.lower():
                     return f1, f2
             except Exception:
-                time.sleep(0.6)
+                time.sleep(0.5)
 
     # ---------- 2) Deterministic fallback (no API / API failed) ----------
-    base = re.sub(r"[.!?]\s*$", "", real_text or "").strip()
-    # Token set to avoid copying long real tokens
-    real_tokens = {t.lower() for t in re.findall(r"[A-Za-z]{4,}", base)}
-    # Seed by day so results are stable for the calendar day
-    _seed = int(datetime.now(TZ).strftime("%Y%m%d"))
-    rng = random.Random(_seed ^ (hash(base) & 0xFFFFFFFF))
+    # make fakes carry named entities + years to feel 'real'
+    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
+    regions = ["France", "Canada", "Brazil", "Japan", "India", "Italy", "Kenya", "Australia", "Spain", "Norway"]
+    cities  = ["Marseille", "Quebec City", "São Paulo", "Osaka", "Pune", "Milan", "Nairobi", "Perth", "Valencia", "Bergen"]
+    bodies  = ["National Assembly", "Supreme Court", "Railway Commission", "Postal Service", "Maritime Authority",
+               "Central Bank", "Broadcasting Corporation", "University Senate", "City Council", "Museum Board"]
+    verbs   = ["authorizes", "ratifies", "suspends", "standardizes", "opens", "formally adopts", "repeals", "announces"]
+    objects = ["a nationwide licensing scheme", "new safety codes", "a public broadcaster charter",
+               "provincial tax rules", "a national archive program", "interstate tariffs", "coastal fishing limits"]
+    years   = list(range(1860, 2022))
 
-    # Word banks (neutral, historical tone)
-    actors = [
-        "city officials", "provincial delegates", "trade guilds", "local magistrates",
-        "envoys from neighboring states", "civic petitioners", "university scholars",
-        "merchant councils", "town elders", "members of a royal court"
-    ]
-    actions = [
-        "announce", "convene", "ratify", "broker", "publish", "propose",
-        "draft", "endorse", "negotiate", "finalize"
-    ]
-    objects = [
-        "a provisional accord", "a charter reform", "a trade memorandum",
-        "an interim council", "a policy revision", "a public statement",
-        "new ordinances", "a compact to reduce unrest", "a joint declaration",
-        "a limited treaty"
-    ]
-    contexts = [
-        "after tense negotiations", "amid growing unease", "following weeks of debate",
-        "to calm unrest in key districts", "citing fiscal pressures",
-        "to resolve a longstanding dispute", "in response to petitions",
-        "as observers report a narrow vote", "after private deliberations",
-        "to standardize local practices"
-    ]
-
-    def _unique_pick(pool: list[str]) -> str:
-        rng.shuffle(pool)
-        for item in pool:
-            if not any(tok in real_tokens for tok in re.findall(r"[A-Za-z]{4,}", item)):
-                return item
-        return pool[0]
-
-    def _compose() -> str:
-        a = _unique_pick(actors[:])
-        v = _unique_pick(actions[:])
-        o = _unique_pick(objects[:])
-        c = _unique_pick(contexts[:])
-        # Two varied sentence shapes for diversity
-        if rng.random() < 0.5:
-            s = f"{a[0].upper() + a[1:]} {v} {o} {c}."
-        else:
-            s = f"After {c}, {a} {v} {o}."
-        # Light clean & period
-        s = re.sub(r"\s{2,}", " ", s).strip()
-        if not s.endswith("."):
-            s += "."
+    def one():
+        region = rng.choice(regions)
+        city   = rng.choice(cities)
+        body   = rng.choice(bodies)
+        verb   = rng.choice(verbs)
+        obj    = rng.choice(objects)
+        year   = rng.choice(years)
+        # target similar length
+        target_len = max(60, min(180, int(len(real_text)*rng.uniform(0.85, 1.15))))
+        s = f"{body} in {city}, {region}, {verb} {obj} in {year}."
+        # pad lightly with a motive/impact clause (but stay concise)
+        tails = [
+            "to streamline regional policy.",
+            "after months of debate.",
+            "citing budget pressures.",
+            "following a contested vote.",
+            "to align with international norms."
+        ]
+        if len(s) < target_len and rng.random() < 0.8:
+            s = s[:-1] + " " + rng.choice(tails)
         return s
 
-    def _len_ok(target: str, cand: str) -> bool:
-        if not target or not cand:
-            return False
-        t, c = len(target), len(cand)
-        return (0.55 * t) <= c <= (1.55 * t)
-
-    # Draw two distinct candidates
-    f1, f2 = "", ""
-    for _ in range(6):
-        cand = _compose()
-        if _len_ok(base, cand) and cand.lower() != base.lower():
-            if not f1:
-                f1 = cand
-            elif cand.lower() != f1.lower():
-                f2 = cand
-                break
-    if not f1:
-        f1 = "Regional leaders announce a provisional accord after tense negotiations."
-    if not f2:
-        f2 = "Delegates unveil a charter reform to resolve a longstanding dispute."
-
+    f1 = one()
+    f2 = one()
+    if f2.lower() == f1.lower():
+        f2 = one()
     return f1, f2
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -258,7 +214,12 @@ def _pick_real_event() -> Tuple[str, str]:
     month_name = today.strftime("%B")
     return real, month_name
 
+# --- replace _openai_image with this ---
 def _openai_image(prompt: str) -> Optional[str]:
+    """
+    Generate a small image and return a browser-safe data URL.
+    Returns None on any failure.
+    """
     if not OPENAI_API_KEY:
         return None
     try:
@@ -269,32 +230,39 @@ def _openai_image(prompt: str) -> Optional[str]:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "gpt-image-1",   # or your configured OPENAI_IMAGE_MODEL
+                "model": "gpt-image-1",
                 "prompt": prompt,
                 "size": "256x256",
                 "n": 1,
+                # IMPORTANT: most responses are base64 now
+                "response_format": "b64_json",
             },
             timeout=30,
         )
         r.raise_for_status()
         data = r.json()
-        return data["data"][0]["url"] if data.get("data") else None
+        if not data.get("data"):
+            return None
+        b64 = data["data"][0].get("b64_json")
+        if not b64:
+            # backward compatibility if a URL ever appears
+            url = data["data"][0].get("url")
+            return url or None
+        # return embeddable data URL (works in <img src>)
+        return f"data:image/png;base64,{b64}"
     except Exception:
         return None
 
-# Visible fallback (shows up in UI instead of transparent pixel)
+# keep this constant
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
 
+# --- replace _image_for with this ---
 def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
-    """Pick an image for `text`. Prefer OpenAI, then Unsplash; dedupe within a round."""
-    # 1) OpenAI image
-    if OPENAI_API_KEY:
-        u = _openai_image(f"flat minimal illustration; muted colors; historical vibe; about: {text}")
-        if u and u not in used:
-            used.add(u)
-            return u, "OpenAI generated"
-
-    # 2) Unsplash — try a few results to avoid nulls and duplicates
+    """
+    Pick an image for `text`. Prefer Unsplash (fast), then OpenAI, then a visible local fallback.
+    Deduplicate within a round using `used`.
+    """
+    # 1) Unsplash (prefer speed & reliability)
     if UNSPLASH_ACCESS_KEY:
         words = re.findall(r"[A-Za-z]{3,}", (text or "").lower())
         stop = {"the","and","for","with","from","into","across","over","under","in","on","at","to","of","by","an","a","is","are","was","were"}
@@ -316,8 +284,16 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
         except Exception:
             pass
 
-    # 3) Visible fallback (never breaks <img>)
-    used.add(FALLBACK_ICON_URL)
+    # 2) OpenAI image (now base64 data-url capable)
+    if OPENAI_API_KEY:
+        u = _openai_image(f"flat minimal illustration; muted colors; historical vibe; about: {text}")
+        if u and u not in used:
+            used.add(u)
+            return u, "OpenAI generated"
+
+    # 3) Guaranteed visible fallback (never blank)
+    if FALLBACK_ICON_URL not in used:
+        used.add(FALLBACK_ICON_URL)
     return FALLBACK_ICON_URL, ""
 
 def ensure_today_round(force: int = 0) -> bool:
