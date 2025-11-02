@@ -32,6 +32,101 @@ OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
+# ---------------- Youth relevance helpers ----------------
+POP_KEYWORDS = {
+    "social_media": ["tiktok","instagram","facebook","twitter","x.com","snapchat","youtube","reddit","twitch","vine","myspace"],
+    "gaming": ["nintendo","playstation","xbox","pokemon","minecraft","fortnite","roblox","steam","esports","blizzard","sony"],
+    "music": ["spotify","itunes","mtv","grammy","billboard","taylor swift","drake","bts","k-pop","eminem","nirvana"],
+    "film_tv": ["netflix","disney","marvel","star wars","hbo","pixar","oscars","imdb","hulu","prime video","anime"],
+    "tech": ["iphone","android","apple","google","microsoft","ai","openai","tesla","spacex","nasa","satellite","internet","www"],
+    "sports": ["nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl","ucla","alabama","yankees","lakers"],
+    "internet_culture": ["meme","viral","hashtag","emoji","stream","podcast","blog","wiki","open source","linux","browser"],
+}
+
+def _infer_domain(text: str) -> str:
+    lc = (text or "").lower()
+    for domain, words in POP_KEYWORDS.items():
+        if any(w in lc for w in words):
+            return domain
+    # backoffs
+    if any(k in lc for k in ("app","website","online","platform","streaming")): return "internet_culture"
+    if any(k in lc for k in ("rocket","mission","launch","orbit")): return "space"
+    return "general"
+
+def _score_for_youth(event_obj: dict) -> float:
+    """
+    Score a Wikipedia OTD event for 'youth appeal':
+    + keywords in pop domains
+    + recency (post-1980 weighted up)
+    + concise (<= 140 chars ideal)
+    """
+    t = (event_obj.get("text") or event_obj.get("displaytitle") or "").strip()
+    if not t:
+        return -1e9
+    lc = t.lower()
+
+    # keyword score
+    kw_score = 0.0
+    for words in POP_KEYWORDS.values():
+        if any(w in lc for w in words):
+            kw_score += 2.0
+
+    # recency score (Wikipedia OTD has 'year')
+    year = event_obj.get("year")  # often present
+    recency = 0.0
+    try:
+        y = int(year)
+        if y >= 2010:   recency = 3.0
+        elif y >= 2000: recency = 2.0
+        elif y >= 1980: recency = 1.0
+    except Exception:
+        recency = 0.0
+
+    # concision / readability
+    L = len(t)
+    concision = 1.0 if 60 <= L <= 140 else (0.3 if L <= 180 else -0.5)
+
+    # penalize dry bureaucratic verbs
+    if re.search(r"\b(henceforth|thereof|therein|whereby)\b", lc):
+        concision -= 0.5
+
+    return kw_score + recency + concision
+
+def _youthify_title(text: str) -> str:
+    """
+    Make copy punchier for cards: <~120 chars, plain words, active voice.
+    """
+    if not text:
+        return ""
+    t = _soften_real_title(text)
+
+    # remove parenthetical clutter
+    t = re.sub(r"\s*\([^)]{0,80}\)", "", t)
+
+    # friendlier verbs
+    replacements = {
+        r"\bannounces\b": "reveals",
+        r"\bauthorizes\b": "OKs",
+        r"\bcommissions\b": "greenlights",
+        r"\bcommences\b": "starts",
+        r"\bintroduces\b": "launches",
+        r"\butilizes\b": "uses",
+        r"\bpermits\b": "lets",
+    }
+    for pat, sub in replacements.items():
+        t = re.sub(pat, sub, t, flags=re.I)
+
+    # trim to ~120 without cutting words
+    limit = 120
+    if len(t) > limit:
+        cut = t[:limit].rsplit(" ", 1)[0].rstrip(",.;:- ")
+        if cut:
+            t = cut + "…"
+
+    # micro-style: drop leading year dash if present ("2009 – Facebook…")
+    t = re.sub(r"^\d{3,4}\s*[—–-]\s*", "", t)
+
+    return t.strip()
 
 # --------------------------- utilities ---------------------------
 
@@ -67,23 +162,22 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
-# --- replace _openai_fakes_from_real with this stronger version ---
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
-    """
-    Produce two plausible-but-false events similar in tone/length to the real item.
-    """
-    # ---------- 1) Try OpenAI ----------
+    domain = _infer_domain(real_text)
+
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You write concise, believable 'On This Day' almanac entries.\n"
-            "Given ONE real entry, return TWO different **plausible but false** entries that:\n"
-            f"• Occur in {month_name} (any year),\n"
-            "• Match the tone and length (within ±15%) of the real entry,\n"
-            "• Each include at least ONE proper noun (org/place/person) and ONE 4-digit year,\n"
-            "• Sound specific (a concrete action or outcome),\n"
-            "• DO NOT copy exact entities from the real entry,\n"
-            "• No meta-text. No hedging words like 'reportedly' or 'allegedly'.\n"
-            'Return STRICT JSON only: {\"fake1\":\"...\",\"fake2\":\"...\"}'
+            "You write short, believable 'On This Day' entries designed for social media.\n"
+            "Return TWO different plausible but false alternatives FOR THE SAME DOMAIN as the real entry "
+            f"(domain: {domain}). Keep them snappy and modern.\n"
+            f"Rules:\n"
+            f"• Occur in {month_name} (any year).\n"
+            "• Match the tone and length (±15%) of the real entry.\n"
+            "• Each MUST include a recognizable proper noun and a 4-digit year.\n"
+            "• Use domains like social media, gaming, music, film/TV, sports, tech, internet culture.\n"
+            "• Don’t reuse the real entry’s exact entities.\n"
+            "• No meta text. No hedging.\n"
+            "Output STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
         )
         payload = {
             "model": OAI_MODEL,
@@ -115,42 +209,38 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             except Exception:
                 time.sleep(0.5)
 
-    # ---------- 2) Deterministic fallback (no API / API failed) ----------
-    # make fakes carry named entities + years to feel 'real'
+    # deterministic fallback (kept, but nudged modern)
     rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
-    regions = ["France", "Canada", "Brazil", "Japan", "India", "Italy", "Kenya", "Australia", "Spain", "Norway"]
-    cities  = ["Marseille", "Quebec City", "São Paulo", "Osaka", "Pune", "Milan", "Nairobi", "Perth", "Valencia", "Bergen"]
-    bodies  = ["National Assembly", "Supreme Court", "Railway Commission", "Postal Service", "Maritime Authority",
-               "Central Bank", "Broadcasting Corporation", "University Senate", "City Council", "Museum Board"]
-    verbs   = ["authorizes", "ratifies", "suspends", "standardizes", "opens", "formally adopts", "repeals", "announces"]
-    objects = ["a nationwide licensing scheme", "new safety codes", "a public broadcaster charter",
-               "provincial tax rules", "a national archive program", "interstate tariffs", "coastal fishing limits"]
-    years   = list(range(1860, 2022))
+    banks = {
+        "social_media": (["Instagram","TikTok","YouTube","Twitter"], ["rolls out","debuts","tests","expands"], 
+                         ["creator fund","shorts feature","live tools","DM encryption"]),
+        "gaming": (["Nintendo","Sony","Microsoft","Blizzard","Valve"], ["announces","releases","patches","launches"],
+                   ["handheld console","cross-play update","online service","limited edition"]),
+        "music": (["Spotify","MTV","Billboard","Grammy Academy"], ["introduces","launches","rebrands","expands"],
+                  ["global chart","streaming tier","award category","artist program"]),
+        "film_tv": (["Netflix","Disney","HBO","Prime Video"], ["premieres","unveils","greenlights","adds"],
+                    ["original series","ad-supported plan","download feature","student plan"]),
+        "tech": (["Apple","Google","Microsoft","Samsung"], ["releases","announces","ships","open-sources"],
+                 ["smartphone update","AI toolkit","browser feature","cloud plan"]),
+        "sports": (["FIFA","NBA","NFL","IOC"], ["confirms","awards","announces","expands"],
+                   ["host city","play-in format","salary cap rules","streaming deal"]),
+        "internet_culture": (["Reddit","Twitch","Discord","Wikipedia"], ["adds","pilots","disables","restores"],
+                             ["awards program","streaming tool","mod tools","dark mode"]),
+        "general": (["NASA","SpaceX","UNESCO","BBC"], ["announces","opens","tests","adopts"],
+                    ["mission program","broadcast rule","education grant","archive"])
+    }
+    orgs, verbs, objs = banks.get(domain, banks["general"])
 
     def one():
-        region = rng.choice(regions)
-        city   = rng.choice(cities)
-        body   = rng.choice(bodies)
-        verb   = rng.choice(verbs)
-        obj    = rng.choice(objects)
-        year   = rng.choice(years)
-        # target similar length
-        target_len = max(60, min(180, int(len(real_text)*rng.uniform(0.85, 1.15))))
-        s = f"{body} in {city}, {region}, {verb} {obj} in {year}."
-        # pad lightly with a motive/impact clause (but stay concise)
-        tails = [
-            "to streamline regional policy.",
-            "after months of debate.",
-            "citing budget pressures.",
-            "following a contested vote.",
-            "to align with international norms."
-        ]
-        if len(s) < target_len and rng.random() < 0.8:
+        o = rng.choice(orgs); v = rng.choice(verbs); ob = rng.choice(objs); year = rng.randint(1980, 2022)
+        s = f"{o} {v} {ob} in {year}."
+        target = max(60, min(180, int(len(real_text) * rng.uniform(0.85, 1.15))))
+        tails = ["after months of testing.", "to boost creators.", "for a global audience.", "after a pilot run."]
+        if len(s) < target and rng.random() < 0.7:
             s = s[:-1] + " " + rng.choice(tails)
         return s
 
-    f1 = one()
-    f2 = one()
+    f1, f2 = one(), one()
     if f2.lower() == f1.lower():
         f2 = one()
     return f1, f2
@@ -188,31 +278,44 @@ def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
         pass
     return None, None
 
-
 def _pick_real_event() -> Tuple[str, str]:
     today = _today_local_date()
     url = WIKI_URL.format(m=today.month, d=today.day)
-    j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.0"})
+    j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.1"})
     events = j.get("events", [])
     if not events:
         raise RuntimeError("No events returned from Wikipedia OTD")
 
-    # Pick a mid-specificity item (avoid extremely niche or multisentence)
-    random.shuffle(events)
-    candidates = []
-    for e in events:
-        t = e.get("text") or e.get("displaytitle") or ""
-        if not t:
-            continue
-        if 40 <= len(t) <= 180 and t.count(".") <= 1:
-            candidates.append(t.strip())
-    if not candidates:
-        candidates = [e.get("text", "").strip() for e in events if e.get("text")]
+    # 1) score for youth appeal and keep top few
+    scored = sorted(
+        [e for e in events if (e.get("text") or e.get("displaytitle"))],
+        key=_score_for_youth,
+        reverse=True,
+    )
 
-    real = (candidates[0] if candidates else "A notable event is recorded by historians.")
-    # also return month name for hinting
+    # 2) choose the best concise candidate; fallback to generic heuristics
+    picked_text = None
+    for e in scored[:12]:
+        t = (e.get("text") or e.get("displaytitle") or "").strip()
+        if 40 <= len(t) <= 180 and t.count(".") <= 1:
+            picked_text = t
+            break
+
+    if not picked_text:
+        # original fallback
+        random.shuffle(events)
+        for e in events:
+            t = (e.get("text") or e.get("displaytitle") or "").strip()
+            if 40 <= len(t) <= 180 and t.count(".") <= 1:
+                picked_text = t
+                break
+
+    if not picked_text:
+        picked_text = "A notable pop-culture or tech milestone is recorded."
+
+    # month name for prompting
     month_name = today.strftime("%B")
-    return real, month_name
+    return picked_text, month_name
 
 # --- replace _openai_image with this ---
 def _openai_image(prompt: str) -> Optional[str]:
@@ -316,8 +419,10 @@ def ensure_today_round(force: int = 0) -> bool:
 
     # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
-    real_soft = _soften_real_title(real_raw)
+    real_soft = _youthify_title(real_raw)
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
+    fake1 = _youthify_title(fake1)
+    fake2 = _youthify_title(fake2)
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
