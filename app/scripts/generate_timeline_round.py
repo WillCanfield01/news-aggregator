@@ -33,8 +33,39 @@ OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
 
-# ---------------- length utilities ----------------
+# --------- similarity + token helpers ----------
 WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+
+def _words(s: str) -> list[str]:
+    return [w.lower() for w in WORD_RE.findall(s or "")]
+
+def _token_set(s: str) -> set[str]:
+    # only meaningful tokens (>=4 chars) to avoid overlap on "in/with/of"
+    return {w for w in _words(s) if len(w) >= 4}
+
+def _trigrams(s: str) -> set[tuple[str, str, str]]:
+    ws = _words(s)
+    return {(ws[i], ws[i+1], ws[i+2]) for i in range(max(0, len(ws)-2))}
+
+def _too_similar(a: str, b: str) -> bool:
+    """
+    Return True if a and b are 'too similar':
+    - token Jaccard > 0.55 OR
+    - trigram Jaccard > 0.40
+    """
+    if not a or not b:
+        return False
+    ta, tb = _token_set(a), _token_set(b)
+    if ta and tb:
+        j = len(ta & tb) / max(1, len(ta | tb))
+        if j > 0.55:
+            return True
+    ga, gb = _trigrams(a), _trigrams(b)
+    if ga and gb:
+        jg = len(ga & gb) / max(1, len(ga | gb))
+        if jg > 0.40:
+            return True
+    return False
 
 def _wlen(s: str) -> int:
     return len(WORD_RE.findall(s or ""))
@@ -47,57 +78,46 @@ def _clean_terminal_punct(s: str) -> str:
 
 def _equalize_length(text: str, target_words: int, rng: Optional[random.Random] = None) -> str:
     """
-    Ensure `text` falls within [target-3, target+3] words.
-    If longer: trim at a natural break. If shorter: add a short, neutral tail.
+    Bring `text` to within ±3 words of target length without obvious repetition.
     """
     rng = rng or random.Random()
     t = _clean_terminal_punct(text)
 
-    # If too long: trim at clause boundaries
     MAX_OVER = 3
+    MIN_UNDER = 3
+
+    # If too long: trim by clauses, then words
     while _wlen(t) > target_words + MAX_OVER:
-        # try removing trailing clause by common connectors
-        cut = re.split(r"(?:,?\s(?:after|as|to|for|while|following|amid|because|which)\b.*)$", t, maxsplit=1, flags=re.I)[0]
+        # drop trailing clause after common joiners
+        cut = re.split(r"(?:,?\s(?:after|as|to|for|while|following|amid|because|which)\b.*)$", t, 1, flags=re.I)[0]
         if cut and _wlen(cut) >= target_words - MAX_OVER:
-            t = _clean_terminal_punct(cut)
-            break
-        # otherwise, drop last phrase after comma or dash
+            t = _clean_terminal_punct(cut); break
         cut = re.split(r"[—–-]|,(?![^()]*\))", t)[0]
         if cut and _wlen(cut) >= target_words - MAX_OVER:
-            t = _clean_terminal_punct(cut)
-            break
-        # hard fall-back: drop last word
+            t = _clean_terminal_punct(cut); break
         t = _clean_terminal_punct(" ".join(t.split()[:-1] or t.split()))
-        if _wlen(t) <= target_words + MAX_OVER:
-            break
 
-    # If too short: add a compact tail
-    MIN_UNDER = 3
+    # If too short: add a short, neutral **one-time** tail
     if _wlen(t) < target_words - MIN_UNDER:
         tails = [
             "after tests.", "for a wider rollout.", "to boost creators.",
             "for a global audience.", "after a pilot run.", "to align with new rules.",
-            "following a close vote.", "with a software update."
+            "following a close vote.", "with a software update.", "in select regions."
         ]
-        # choose tails that get us close to target
-        best = None
-        best_gap = 10**9
+        rng.shuffle(tails)
         for tail in tails:
-            cand = _clean_terminal_punct(t[:-1] + " " + tail)
-            gap = abs(_wlen(cand) - target_words)
-            if gap < best_gap:
-                best, best_gap = cand, gap
-                if gap <= 1:
+            if tail.lower() not in t.lower():  # prevent duplicates like "today to align…"
+                cand = _clean_terminal_punct(t[:-1] + " " + tail)
+                if abs(_wlen(cand) - target_words) <= 3:
+                    t = cand
                     break
-        if best:
-            t = best
 
-    # final cleanup + ensure within ±3; if still off by one, trim/pad minimally
+    # final tidy and guardrails
     t = _clean_terminal_punct(t)
     if _wlen(t) > target_words + MAX_OVER:
         t = _clean_terminal_punct(" ".join(t.split()[:target_words + MAX_OVER]))
     elif _wlen(t) < target_words - MIN_UNDER:
-        t = _clean_terminal_punct(t + " today.")
+        t = _clean_terminal_punct(t + " worldwide.")
     return t
 
 # ---------------- Youth relevance helpers ----------------
@@ -232,84 +252,121 @@ def _soften_real_title(title: str) -> str:
 
 def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optional[int] = None) -> Tuple[str, str]:
     """
-    Produce two plausible-but-false events, matching tone/domain and
-    **within ±3 words** of `target_words` (if provided).
+    Two plausible-but-false entries:
+    - same domain vibe as real
+    - within ±3 words of target
+    - NOT too similar to the real or to each other
     """
     domain = _infer_domain(real_text)
     target_words = target_words or _wlen(real_text)
     rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
 
+    # ---------- 1) Try OpenAI with constraints ----------
     if OPENAI_API_KEY:
         sys_prompt = (
-            "Write short, believable 'On This Day' entries for social media. "
-            "Return TWO different plausible but false alternatives in the SAME DOMAIN as the real entry.\n"
-            f"Domain: {domain}. Month: {month_name} (any year).\n"
-            f"Length: aim for {target_words} words; must be within ±3 words.\n"
-            "Include a recognizable proper noun and a 4-digit year. No meta text, no hedging. "
-            "Output STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
+            "Write short, believable 'On This Day' entries for social media.\n"
+            f"Month: {month_name}. Domain: {domain} (e.g., social media, gaming, music, film/TV, sports, tech).\n"
+            f"Each entry MUST be {target_words} words ±3, include a proper noun + a 4-digit year, "
+            "and use a different subject/entity than the real entry.\n"
+            "Avoid repeating phrases, avoid hedging/meta. Output STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
         )
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"real_entry={real_text}"},
+                {"role": "user", "content": f"Real entry: {real_text}"},
             ],
             "temperature": 0.7,
             "response_format": {"type": "json_object"},
         }
-        for _ in range(2):
+        try:
+            r = requests.post(OAI_URL,
+                              headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                              json=payload, timeout=30)
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"]["content"]
             try:
-                r = requests.post(
-                    OAI_URL,
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                    json=payload,
-                    timeout=30,
-                )
-                r.raise_for_status()
-                content = r.json()["choices"][0]["message"]["content"]
-                try:
-                    obj = requests.utils.json.loads(content)
-                except Exception:
-                    obj = requests.utils.json.loads(content.strip("` \n"))
-                f1 = _clean_terminal_punct((obj.get("fake1") or "").strip())
-                f2 = _clean_terminal_punct((obj.get("fake2") or "").strip())
-                if f1 and f2:
-                    f1 = _equalize_length(f1, target_words, rng)
-                    f2 = _equalize_length(f2, target_words, rng)
-                    return f1, f2
+                obj = requests.utils.json.loads(content)
             except Exception:
-                time.sleep(0.4)
+                obj = requests.utils.json.loads(content.strip("` \n"))
+            cands = [obj.get("fake1","").strip(), obj.get("fake2","").strip()]
+            normed: list[str] = []
+            for s in cands:
+                s = _clean_terminal_punct(s)
+                s = _equalize_length(s, target_words, rng)
+                if s and not _too_similar(s, real_text):
+                    normed.append(s)
+            if len(normed) >= 2 and not _too_similar(normed[0], normed[1]):
+                return normed[0], normed[1]
+        except Exception:
+            time.sleep(0.4)
 
-    # --- deterministic fallback (domain-biased, then equalize) ---
+    # ---------- 2) Deterministic fallback with diversity ----------
     banks = {
-        "social_media": (["Instagram","TikTok","YouTube","Twitter"], ["rolls out","debuts","tests","expands"], 
-                         ["creator fund","shorts feature","live tools","DM encryption"]),
-        "gaming": (["Nintendo","Sony","Microsoft","Blizzard","Valve"], ["announces","releases","patches","launches"],
-                   ["handheld console","cross-play update","online service","limited edition"]),
-        "music": (["Spotify","MTV","Billboard","Grammy Academy"], ["introduces","launches","rebrands","expands"],
-                  ["global chart","streaming tier","award category","artist program"]),
-        "film_tv": (["Netflix","Disney","HBO","Prime Video"], ["premieres","unveils","greenlights","adds"],
-                    ["original series","ad-supported plan","download feature","student plan"]),
-        "tech": (["Apple","Google","Microsoft","Samsung"], ["releases","announces","ships","open-sources"],
-                 ["smartphone update","AI toolkit","browser feature","cloud plan"]),
-        "sports": (["FIFA","NBA","NFL","IOC"], ["confirms","awards","announces","expands"],
-                   ["host city","play-in format","salary cap rules","streaming deal"]),
-        "internet_culture": (["Reddit","Twitch","Discord","Wikipedia"], ["adds","pilots","disables","restores"],
-                             ["awards program","streaming tool","mod tools","dark mode"]),
-        "general": (["NASA","SpaceX","UNESCO","BBC"], ["announces","opens","tests","adopts"],
-                    ["mission program","broadcast rule","education grant","archive"]),
+        "social_media": (["Instagram","TikTok","YouTube","Twitter","Snapchat","Reddit"],
+                         ["rolls out","debuts","tests","expands","rebrands","enables"],
+                         ["creator fund","short-form tool","live shopping","DM encryption","music library","moderation update"],
+                         ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"]),
+        "gaming": (["Nintendo","Sony","Microsoft","Blizzard","Valve","Epic Games"],
+                   ["announces","releases","patches","launches","revives","updates"],
+                   ["handheld console","cross-play feature","online service","battle pass","esports circuit","mod support"],
+                   ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"]),
+        "music": (["Spotify","MTV","Billboard","Grammy Academy","Apple Music","SoundCloud"],
+                  ["introduces","launches","rebrands","expands","revamps","opens"],
+                  ["global chart","streaming tier","award category","curator program","student plan","royalty model"],
+                  ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"]),
+        "film_tv": (["Netflix","Disney","HBO","Prime Video","Hulu","Crunchyroll"],
+                    ["premieres","unveils","greenlights","adds","bundles","licenses"],
+                    ["original series","ad-supported plan","download option","anime slate","sports docuseries","student bundle"],
+                    ["Burbank","Tokyo","Toronto","Madrid","Mumbai","Sydney"]),
+        "tech": (["Apple","Google","Microsoft","Samsung","NVIDIA","OpenAI"],
+                 ["releases","announces","ships","open-sources","unveils","rolls out"],
+                 ["smartphone update","AI toolkit","browser feature","cloud plan","GPU program","assistant upgrade"],
+                 ["Cupertino","Seoul","Mountain View","Redmond","Taipei","Shenzhen"]),
+        "sports": (["FIFA","NBA","NFL","IOC","UEFA","MLB"],
+                   ["confirms","awards","announces","expands","adopts","approves"],
+                   ["host city","play-in format","salary cap rules","streaming deal","ref review system","wild-card slot"],
+                   ["Zurich","Paris","New York","Dallas","Doha","Tokyo"]),
+        "internet_culture": (["Reddit","Twitch","Discord","Wikipedia","GitHub","WordPress"],
+                             ["adds","pilots","disables","restores","launches","overhauls"],
+                             ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
+                             ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"]),
+        "general": (["NASA","SpaceX","UNESCO","BBC","ESA","CERN"],
+                    ["announces","opens","tests","adopts","extends","funds"],
+                    ["mission program","broadcast rule","education grant","archive","lab upgrade","satellite service"],
+                    ["Houston","Cape Canaveral","Paris","Geneva","Tokyo","Bangalore"]),
     }
-    orgs, verbs, objs = banks.get(domain, banks["general"])
+    ORGS, VERBS, OBJS, PLACES = banks.get(domain, banks["general"])
+    real_tokens = _token_set(real_text)
 
-    def one() -> str:
+    def compose() -> str:
+        # ensure different subject than the real one
+        choices = [o for o in ORGS if o.lower() not in real_tokens] or ORGS
+        org, verb, obj, place = rng.choice(choices), rng.choice(VERBS), rng.choice(OBJS), rng.choice(PLACES)
         year = rng.randint(1980, 2022)
-        s = f"{rng.choice(orgs)} {rng.choice(verbs)} {rng.choice(objs)} in {year}."
-        return _equalize_length(_clean_terminal_punct(s), target_words, rng)
+        s = f"{org} {verb} {obj} in {year} at {place}."
+        s = _equalize_length(_clean_terminal_punct(s), target_words, rng)
+        return s
 
-    f1, f2 = one(), one()
-    if f2.lower() == f1.lower():
-        f2 = one()
-    return f1, f2
+    # rejection sampling for diversity
+    fakes: list[str] = []
+    attempts = 0
+    while len(fakes) < 2 and attempts < 20:
+        attempts += 1
+        cand = compose()
+        if _too_similar(cand, real_text):
+            continue
+        if any(_too_similar(cand, x) for x in fakes):
+            continue
+        if cand not in fakes:
+            fakes.append(cand)
+
+    if len(fakes) < 2:
+        # guaranteed, distinct-ish backup
+        while len(fakes) < 2:
+            fakes.append(_equalize_length(compose() + " Update follows testing.", target_words, rng))
+
+    return fakes[0], fakes[1]
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -485,7 +542,7 @@ def ensure_today_round(force: int = 0) -> bool:
 
     # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
-    real_soft = _youthify_title(real_raw)  # keep or _soften_real_title if you prefer
+    real_soft = _youthify_title(real_raw)   # or _soften_real_title()
     target_words = _wlen(real_soft)
 
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, target_words)
