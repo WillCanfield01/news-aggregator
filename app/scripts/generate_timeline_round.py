@@ -32,6 +32,74 @@ OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
+
+# ---------------- length utilities ----------------
+WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+
+def _wlen(s: str) -> int:
+    return len(WORD_RE.findall(s or ""))
+
+def _clean_terminal_punct(s: str) -> str:
+    s = (s or "").strip()
+    s = s.rstrip("…").rstrip(" .,:;—–-") + "."
+    s = re.sub(r"\s{2,}", " ", s)
+    return s
+
+def _equalize_length(text: str, target_words: int, rng: Optional[random.Random] = None) -> str:
+    """
+    Ensure `text` falls within [target-3, target+3] words.
+    If longer: trim at a natural break. If shorter: add a short, neutral tail.
+    """
+    rng = rng or random.Random()
+    t = _clean_terminal_punct(text)
+
+    # If too long: trim at clause boundaries
+    MAX_OVER = 3
+    while _wlen(t) > target_words + MAX_OVER:
+        # try removing trailing clause by common connectors
+        cut = re.split(r"(?:,?\s(?:after|as|to|for|while|following|amid|because|which)\b.*)$", t, maxsplit=1, flags=re.I)[0]
+        if cut and _wlen(cut) >= target_words - MAX_OVER:
+            t = _clean_terminal_punct(cut)
+            break
+        # otherwise, drop last phrase after comma or dash
+        cut = re.split(r"[—–-]|,(?![^()]*\))", t)[0]
+        if cut and _wlen(cut) >= target_words - MAX_OVER:
+            t = _clean_terminal_punct(cut)
+            break
+        # hard fall-back: drop last word
+        t = _clean_terminal_punct(" ".join(t.split()[:-1] or t.split()))
+        if _wlen(t) <= target_words + MAX_OVER:
+            break
+
+    # If too short: add a compact tail
+    MIN_UNDER = 3
+    if _wlen(t) < target_words - MIN_UNDER:
+        tails = [
+            "after tests.", "for a wider rollout.", "to boost creators.",
+            "for a global audience.", "after a pilot run.", "to align with new rules.",
+            "following a close vote.", "with a software update."
+        ]
+        # choose tails that get us close to target
+        best = None
+        best_gap = 10**9
+        for tail in tails:
+            cand = _clean_terminal_punct(t[:-1] + " " + tail)
+            gap = abs(_wlen(cand) - target_words)
+            if gap < best_gap:
+                best, best_gap = cand, gap
+                if gap <= 1:
+                    break
+        if best:
+            t = best
+
+    # final cleanup + ensure within ±3; if still off by one, trim/pad minimally
+    t = _clean_terminal_punct(t)
+    if _wlen(t) > target_words + MAX_OVER:
+        t = _clean_terminal_punct(" ".join(t.split()[:target_words + MAX_OVER]))
+    elif _wlen(t) < target_words - MIN_UNDER:
+        t = _clean_terminal_punct(t + " today.")
+    return t
+
 # ---------------- Youth relevance helpers ----------------
 POP_KEYWORDS = {
     "social_media": ["tiktok","instagram","facebook","twitter","x.com","snapchat","youtube","reddit","twitch","vine","myspace"],
@@ -116,12 +184,12 @@ def _youthify_title(text: str) -> str:
     for pat, sub in replacements.items():
         t = re.sub(pat, sub, t, flags=re.I)
 
-    # trim to ~120 without cutting words
-    limit = 120
+    # trim to ~140 but avoid ellipsis (we need stable word counts)
+    limit = 140
     if len(t) > limit:
         cut = t[:limit].rsplit(" ", 1)[0].rstrip(",.;:- ")
         if cut:
-            t = cut + "…"
+            t = cut  # no "…"
 
     # micro-style: drop leading year dash if present ("2009 – Facebook…")
     t = re.sub(r"^\d{3,4}\s*[—–-]\s*", "", t)
@@ -162,21 +230,22 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
-def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
+def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optional[int] = None) -> Tuple[str, str]:
+    """
+    Produce two plausible-but-false events, matching tone/domain and
+    **within ±3 words** of `target_words` (if provided).
+    """
     domain = _infer_domain(real_text)
+    target_words = target_words or _wlen(real_text)
+    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
 
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You write short, believable 'On This Day' entries designed for social media.\n"
-            "Return TWO different plausible but false alternatives FOR THE SAME DOMAIN as the real entry "
-            f"(domain: {domain}). Keep them snappy and modern.\n"
-            f"Rules:\n"
-            f"• Occur in {month_name} (any year).\n"
-            "• Match the tone and length (±15%) of the real entry.\n"
-            "• Each MUST include a recognizable proper noun and a 4-digit year.\n"
-            "• Use domains like social media, gaming, music, film/TV, sports, tech, internet culture.\n"
-            "• Don’t reuse the real entry’s exact entities.\n"
-            "• No meta text. No hedging.\n"
+            "Write short, believable 'On This Day' entries for social media. "
+            "Return TWO different plausible but false alternatives in the SAME DOMAIN as the real entry.\n"
+            f"Domain: {domain}. Month: {month_name} (any year).\n"
+            f"Length: aim for {target_words} words; must be within ±3 words.\n"
+            "Include a recognizable proper noun and a 4-digit year. No meta text, no hedging. "
             "Output STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
         )
         payload = {
@@ -202,15 +271,16 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
                     obj = requests.utils.json.loads(content)
                 except Exception:
                     obj = requests.utils.json.loads(content.strip("` \n"))
-                f1 = (obj.get("fake1") or "").strip()
-                f2 = (obj.get("fake2") or "").strip()
-                if f1 and f2 and f1.lower() != real_text.lower() and f2.lower() != real_text.lower():
+                f1 = _clean_terminal_punct((obj.get("fake1") or "").strip())
+                f2 = _clean_terminal_punct((obj.get("fake2") or "").strip())
+                if f1 and f2:
+                    f1 = _equalize_length(f1, target_words, rng)
+                    f2 = _equalize_length(f2, target_words, rng)
                     return f1, f2
             except Exception:
-                time.sleep(0.5)
+                time.sleep(0.4)
 
-    # deterministic fallback (kept, but nudged modern)
-    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
+    # --- deterministic fallback (domain-biased, then equalize) ---
     banks = {
         "social_media": (["Instagram","TikTok","YouTube","Twitter"], ["rolls out","debuts","tests","expands"], 
                          ["creator fund","shorts feature","live tools","DM encryption"]),
@@ -227,18 +297,14 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
         "internet_culture": (["Reddit","Twitch","Discord","Wikipedia"], ["adds","pilots","disables","restores"],
                              ["awards program","streaming tool","mod tools","dark mode"]),
         "general": (["NASA","SpaceX","UNESCO","BBC"], ["announces","opens","tests","adopts"],
-                    ["mission program","broadcast rule","education grant","archive"])
+                    ["mission program","broadcast rule","education grant","archive"]),
     }
     orgs, verbs, objs = banks.get(domain, banks["general"])
 
-    def one():
-        o = rng.choice(orgs); v = rng.choice(verbs); ob = rng.choice(objs); year = rng.randint(1980, 2022)
-        s = f"{o} {v} {ob} in {year}."
-        target = max(60, min(180, int(len(real_text) * rng.uniform(0.85, 1.15))))
-        tails = ["after months of testing.", "to boost creators.", "for a global audience.", "after a pilot run."]
-        if len(s) < target and rng.random() < 0.7:
-            s = s[:-1] + " " + rng.choice(tails)
-        return s
+    def one() -> str:
+        year = rng.randint(1980, 2022)
+        s = f"{rng.choice(orgs)} {rng.choice(verbs)} {rng.choice(objs)} in {year}."
+        return _equalize_length(_clean_terminal_punct(s), target_words, rng)
 
     f1, f2 = one(), one()
     if f2.lower() == f1.lower():
@@ -419,10 +485,12 @@ def ensure_today_round(force: int = 0) -> bool:
 
     # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
-    real_soft = _youthify_title(real_raw)
-    fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
-    fake1 = _youthify_title(fake1)
-    fake2 = _youthify_title(fake2)
+    real_soft = _youthify_title(real_raw)  # keep or _soften_real_title if you prefer
+    target_words = _wlen(real_soft)
+
+    fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, target_words)
+    fake1 = _equalize_length(_youthify_title(fake1), target_words)
+    fake2 = _equalize_length(_youthify_title(fake2), target_words)
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
