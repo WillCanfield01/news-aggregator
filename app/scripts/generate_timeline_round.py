@@ -131,14 +131,21 @@ POP_KEYWORDS = {
     "internet_culture": ["meme","viral","hashtag","emoji","stream","podcast","blog","wiki","open source","linux","browser"],
 }
 
+# --- domain detection (expanded) ---
 def _infer_domain(text: str) -> str:
     lc = (text or "").lower()
-    for domain, words in POP_KEYWORDS.items():
-        if any(w in lc for w in words):
-            return domain
-    # backoffs
-    if any(k in lc for k in ("app","website","online","platform","streaming")): return "internet_culture"
-    if any(k in lc for k in ("rocket","mission","launch","orbit")): return "space"
+    # pop domains
+    if any(k in lc for k in ("tiktok","instagram","youtube","snapchat","twitter","x.com","reddit","twitch")): return "social_media"
+    if any(k in lc for k in ("nintendo","playstation","xbox","fortnite","roblox","minecraft","steam","esports")): return "gaming"
+    if any(k in lc for k in ("spotify","mtv","billboard","grammy","k-pop","taylor swift","drake","bts")): return "music"
+    if any(k in lc for k in ("netflix","disney","marvel","star wars","hbo","anime","pixar")): return "film_tv"
+    if any(k in lc for k in ("iphone","android","apple","google","microsoft","samsung","ai","openai","tesla")): return "tech"
+    if any(k in lc for k in ("nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl")): return "sports"
+    if any(k in lc for k in ("meme","viral","hashtag","emoji","podcast","blog","wiki","browser","internet")): return "internet_culture"
+    # NEW: align when real is security/aviation/etc.
+    if any(k in lc for k in ("worm","virus","malware","breach","hacker","ddos","trojan","cert","rfc")): return "cybersec"
+    if any(k in lc for k in ("airline","airport","airways","boeing","airbus","flight","cockpit","runway","crash","hijack","aviation")): return "aviation"
+    if any(k in lc for k in ("earthquake","hurricane","typhoon","flood","wildfire","eruption")): return "disaster"
     return "general"
 
 def _score_for_youth(event_obj: dict) -> float:
@@ -304,33 +311,42 @@ def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optio
     # ---------- 2) Deterministic fallback with diversity ----------
     banks = {
         "social_media": (["Instagram","TikTok","YouTube","Twitter","Snapchat","Reddit"],
-                         ["rolls out","debuts","tests","expands","rebrands","enables"],
-                         ["creator fund","short-form tool","live shopping","DM encryption","music library","moderation update"],
-                         ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"]),
+                        ["rolls out","debuts","tests","expands","rebrands","enables"],
+                        ["creator fund","short-form tool","live shopping","DM encryption","music library","moderation update"],
+                        ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"]),
         "gaming": (["Nintendo","Sony","Microsoft","Blizzard","Valve","Epic Games"],
-                   ["announces","releases","patches","launches","revives","updates"],
-                   ["handheld console","cross-play feature","online service","battle pass","esports circuit","mod support"],
-                   ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"]),
+                ["announces","releases","patches","launches","revives","updates"],
+                ["handheld console","cross-play feature","online service","battle pass","esports circuit","mod support"],
+                ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"]),
         "music": (["Spotify","MTV","Billboard","Grammy Academy","Apple Music","SoundCloud"],
-                  ["introduces","launches","rebrands","expands","revamps","opens"],
-                  ["global chart","streaming tier","award category","curator program","student plan","royalty model"],
-                  ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"]),
+                ["introduces","launches","rebrands","expands","revamps","opens"],
+                ["global chart","streaming tier","award category","curator program","student plan","royalty model"],
+                ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"]),
         "film_tv": (["Netflix","Disney","HBO","Prime Video","Hulu","Crunchyroll"],
                     ["premieres","unveils","greenlights","adds","bundles","licenses"],
                     ["original series","ad-supported plan","download option","anime slate","sports docuseries","student bundle"],
                     ["Burbank","Tokyo","Toronto","Madrid","Mumbai","Sydney"]),
         "tech": (["Apple","Google","Microsoft","Samsung","NVIDIA","OpenAI"],
-                 ["releases","announces","ships","open-sources","unveils","rolls out"],
-                 ["smartphone update","AI toolkit","browser feature","cloud plan","GPU program","assistant upgrade"],
-                 ["Cupertino","Seoul","Mountain View","Redmond","Taipei","Shenzhen"]),
+                ["releases","announces","ships","open-sources","unveils","rolls out"],
+                ["smartphone update","AI toolkit","browser feature","cloud plan","GPU program","assistant upgrade"],
+                ["Cupertino","Seoul","Mountain View","Redmond","Taipei","Shenzhen"]),
+        # NEW — matches your real example
+        "aviation": (["Pan Am","Air France","Iberia","Aeroflot","British Airways","American Airlines","KLM","LATAM"],
+                    ["opens","suspends","restarts","standardizes","updates","announces"],
+                    ["international route","safety protocol","jet service","fleet upgrade","runway procedures","pilot training"],
+                    ["Heathrow","JFK","Charles de Gaulle","Barajas","Changi","Narita"]),
+        "cybersec": (["CERT","MIT","DARPA","USENIX","ICANN","Mozilla","Linux Foundation"],
+                    ["publishes","issues","announces","standardizes","discloses","documents"],
+                    ["vulnerability note","malware analysis","security guideline","RFC draft","patch program","incident report"],
+                    ["Cambridge","Berkeley","Zurich","Redmond","Boston","Palo Alto"]),
         "sports": (["FIFA","NBA","NFL","IOC","UEFA","MLB"],
-                   ["confirms","awards","announces","expands","adopts","approves"],
-                   ["host city","play-in format","salary cap rules","streaming deal","ref review system","wild-card slot"],
-                   ["Zurich","Paris","New York","Dallas","Doha","Tokyo"]),
+                ["confirms","awards","announces","expands","adopts","approves"],
+                ["host city","play-in format","salary cap rules","streaming deal","ref review system","wild-card slot"],
+                ["Zurich","Paris","New York","Dallas","Doha","Tokyo"]),
         "internet_culture": (["Reddit","Twitch","Discord","Wikipedia","GitHub","WordPress"],
-                             ["adds","pilots","disables","restores","launches","overhauls"],
-                             ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
-                             ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"]),
+                            ["adds","pilots","disables","restores","launches","overhauls"],
+                            ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
+                            ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"]),
         "general": (["NASA","SpaceX","UNESCO","BBC","ESA","CERN"],
                     ["announces","opens","tests","adopts","extends","funds"],
                     ["mission program","broadcast rule","education grant","archive","lab upgrade","satellite service"],
@@ -340,11 +356,13 @@ def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optio
     real_tokens = _token_set(real_text)
 
     def compose() -> str:
-        # ensure different subject than the real one
-        choices = [o for o in ORGS if o.lower() not in real_tokens] or ORGS
-        org, verb, obj, place = rng.choice(choices), rng.choice(VERBS), rng.choice(OBJS), rng.choice(PLACES)
+        orgs, verbs, objs, places = banks.get(domain, banks["general"])
         year = rng.randint(1980, 2022)
-        s = f"{org} {verb} {obj} in {year} at {place}."
+        org, verb, obj, place = rng.choice(orgs), rng.choice(verbs), rng.choice(objs), rng.choice(places)
+        if domain in ("aviation","cybersec"):
+            s = f"{org} {verb} {obj} in {year} at {place}."
+        else:
+            s = f"{org} {verb} {obj} in {year}."
         s = _equalize_length(_clean_terminal_punct(s), target_words, rng)
         return s
 
@@ -497,11 +515,14 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
         try:
             j = _http_get_json(
                 "https://api.unsplash.com/search/photos",
-                params={"query": q, "orientation": "squarish", "per_page": 6, "content_filter": "high"},
+                params={"query": q, "orientation": "squarish", "per_page": 10, "content_filter": "high"},
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
             for r in j.get("results", []):
-                img = r.get("urls", {}).get("small")
+                # use 'thumb' for avatars; append fit params
+                img = (r.get("urls", {}) or {}).get("thumb")
+                if img:
+                    img = f"{img}&fit=crop&auto=format"
                 if img and img not in used:
                     used.add(img)
                     u = r.get("user", {}) or {}
@@ -542,7 +563,7 @@ def ensure_today_round(force: int = 0) -> bool:
 
     # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
-    real_soft = _youthify_title(real_raw)   # or _soften_real_title()
+    real_soft = _youthify_title(real_raw)  # or _soften_real_title()
     target_words = _wlen(real_soft)
 
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, target_words)
