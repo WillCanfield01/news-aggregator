@@ -34,10 +34,34 @@ WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
 
 # --------- similarity + token helpers ----------
+# ---------- normalization helpers (add) ----------
 WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 
 def _words(s: str) -> list[str]:
-    return [w.lower() for w in WORD_RE.findall(s or "")]
+    return [w for w in WORD_RE.findall(s or "")]
+
+def _dedupe_consecutive_words(s: str) -> str:
+    # collapse consecutive duplicate tokens: "worldwide. worldwide." → "worldwide."
+    toks = s.strip().split()
+    out = []
+    for t in toks:
+        if not out or out[-1].lower().strip(".,;:—–-") != t.lower().strip(".,;:—–-"):
+            out.append(t)
+    return " ".join(out)
+
+def _clean_terminal_punct(s: str) -> str:
+    s = (s or "").strip()
+    # drop repeated punctuation and dots
+    s = re.sub(r"[.]{2,}", ".", s)
+    s = re.sub(r"\s*([,;:.])\s*", r"\1 ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    s = _dedupe_consecutive_words(s)
+    # ensure single terminal period
+    s = s.rstrip(" .,:;—–-") + "."
+    return s
+
+def _wlen(s: str) -> int:
+    return len(WORD_RE.findall(s or ""))
 
 def _token_set(s: str) -> set[str]:
     # only meaningful tokens (>=4 chars) to avoid overlap on "in/with/of"
@@ -67,58 +91,59 @@ def _too_similar(a: str, b: str) -> bool:
             return True
     return False
 
-def _wlen(s: str) -> int:
-    return len(WORD_RE.findall(s or ""))
-
-def _clean_terminal_punct(s: str) -> str:
-    s = (s or "").strip()
-    s = s.rstrip("…").rstrip(" .,:;—–-") + "."
-    s = re.sub(r"\s{2,}", " ", s)
-    return s
-
 def _equalize_length(text: str, target_words: int, rng: Optional[random.Random] = None) -> str:
-    """
-    Bring `text` to within ±3 words of target length without obvious repetition.
-    """
     rng = rng or random.Random()
     t = _clean_terminal_punct(text)
 
     MAX_OVER = 3
     MIN_UNDER = 3
 
-    # If too long: trim by clauses, then words
+    # Trim if long
     while _wlen(t) > target_words + MAX_OVER:
-        # drop trailing clause after common joiners
+        # remove trailing clause after common joiners
         cut = re.split(r"(?:,?\s(?:after|as|to|for|while|following|amid|because|which)\b.*)$", t, 1, flags=re.I)[0]
         if cut and _wlen(cut) >= target_words - MAX_OVER:
             t = _clean_terminal_punct(cut); break
+        # drop last comma/dash phrase
         cut = re.split(r"[—–-]|,(?![^()]*\))", t)[0]
         if cut and _wlen(cut) >= target_words - MAX_OVER:
             t = _clean_terminal_punct(cut); break
+        # drop last word
         t = _clean_terminal_punct(" ".join(t.split()[:-1] or t.split()))
 
-    # If too short: add a short, neutral **one-time** tail
+    # Pad if short (choose tails once; avoid duplicates & bland words like 'worldwide')
     if _wlen(t) < target_words - MIN_UNDER:
         tails = [
-            "after tests.", "for a wider rollout.", "to boost creators.",
-            "for a global audience.", "after a pilot run.", "to align with new rules.",
-            "following a close vote.", "with a software update.", "in select regions."
+            "after tests.", "in a limited rollout.", "for a wider audience.",
+            "following a close vote.", "with a software update.", "in select regions.",
+            "for early adopters.", "after a pilot run."
         ]
         rng.shuffle(tails)
         for tail in tails:
-            if tail.lower() not in t.lower():  # prevent duplicates like "today to align…"
+            if tail.lower().strip(".") not in t.lower():
                 cand = _clean_terminal_punct(t[:-1] + " " + tail)
                 if abs(_wlen(cand) - target_words) <= 3:
                     t = cand
                     break
+    return _clean_terminal_punct(t)
 
-    # final tidy and guardrails
-    t = _clean_terminal_punct(t)
-    if _wlen(t) > target_words + MAX_OVER:
-        t = _clean_terminal_punct(" ".join(t.split()[:target_words + MAX_OVER]))
-    elif _wlen(t) < target_words - MIN_UNDER:
-        t = _clean_terminal_punct(t + " worldwide.")
-    return t
+# ---------- domain year ranges (add) ----------
+def _year_for_domain(domain: str, rng: random.Random) -> int:
+    ranges = {
+        "tech": (1995, 2022),
+        "social_media": (2003, 2022),
+        "gaming": (1985, 2022),
+        "internet_culture": (1995, 2022),
+        "cybersec": (1988, 2022),
+        "film_tv": (1970, 2022),
+        "music": (1960, 2022),
+        "sports": (1950, 2022),
+        "aviation": (1950, 2022),
+        "disaster": (1950, 2022),
+        "general": (1900, 2022),
+    }
+    lo, hi = ranges.get(domain, ranges["general"])
+    return rng.randint(lo, hi)
 
 # ---------------- Youth relevance helpers ----------------
 POP_KEYWORDS = {
@@ -262,20 +287,23 @@ def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optio
     Two plausible-but-false entries:
     - same domain vibe as real
     - within ±3 words of target
-    - NOT too similar to the real or to each other
+    - domain-plausible year
+    - not too similar to real or each other
+    - no junk padding (normalized)
     """
     domain = _infer_domain(real_text)
     target_words = target_words or _wlen(real_text)
     rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
 
-    # ---------- 1) Try OpenAI with constraints ----------
+    # ---- 1) OpenAI path with hard constraints ----
     if OPENAI_API_KEY:
         sys_prompt = (
             "Write short, believable 'On This Day' entries for social media.\n"
-            f"Month: {month_name}. Domain: {domain} (e.g., social media, gaming, music, film/TV, sports, tech).\n"
+            f"Month: {month_name}. Domain: {domain}.\n"
             f"Each entry MUST be {target_words} words ±3, include a proper noun + a 4-digit year, "
-            "and use a different subject/entity than the real entry.\n"
-            "Avoid repeating phrases, avoid hedging/meta. Output STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
+            "use natural language (no repeated words, no filler like 'worldwide'), "
+            "and use a different subject/entity than the real entry. No meta/hedging."
+            "Return STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
         )
         payload = {
             "model": OAI_MODEL,
@@ -283,7 +311,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optio
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": f"Real entry: {real_text}"},
             ],
-            "temperature": 0.7,
+            "temperature": 0.6,
             "response_format": {"type": "json_object"},
         }
         try:
@@ -299,8 +327,10 @@ def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optio
             cands = [obj.get("fake1","").strip(), obj.get("fake2","").strip()]
             normed: list[str] = []
             for s in cands:
-                s = _clean_terminal_punct(s)
-                s = _equalize_length(s, target_words, rng)
+                s = _equalize_length(_clean_terminal_punct(s), target_words, rng)
+                # kill obvious junk tokens
+                if re.search(r"\b(worldwide|today)\b\W*\1?\b", s, flags=re.I):
+                    continue
                 if s and not _too_similar(s, real_text):
                     normed.append(s)
             if len(normed) >= 2 and not _too_similar(normed[0], normed[1]):
@@ -308,81 +338,80 @@ def _openai_fakes_from_real(real_text: str, month_name: str, target_words: Optio
         except Exception:
             time.sleep(0.4)
 
-    # ---------- 2) Deterministic fallback with diversity ----------
+    # ---- 2) Deterministic fallback with diversity ----
     banks = {
+        "tech": (["Apple","Google","Microsoft","Samsung","NVIDIA","OpenAI"],
+                 ["releases","announces","ships","open-sources","unveils","rolls out"],
+                 ["smartphone update","AI toolkit","browser feature","cloud plan","GPU program","assistant upgrade"],
+                 ["Cupertino","Seoul","Mountain View","Redmond","Taipei","Shenzhen"]),
         "social_media": (["Instagram","TikTok","YouTube","Twitter","Snapchat","Reddit"],
-                        ["rolls out","debuts","tests","expands","rebrands","enables"],
-                        ["creator fund","short-form tool","live shopping","DM encryption","music library","moderation update"],
-                        ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"]),
+                         ["rolls out","debuts","tests","expands","rebrands","enables"],
+                         ["creator fund","short-form tool","live shopping","DM encryption","music library","moderation update"],
+                         ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"]),
         "gaming": (["Nintendo","Sony","Microsoft","Blizzard","Valve","Epic Games"],
-                ["announces","releases","patches","launches","revives","updates"],
-                ["handheld console","cross-play feature","online service","battle pass","esports circuit","mod support"],
-                ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"]),
+                   ["announces","releases","patches","launches","revives","updates"],
+                   ["handheld console","cross-play feature","online service","battle pass","esports circuit","mod support"],
+                   ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"]),
         "music": (["Spotify","MTV","Billboard","Grammy Academy","Apple Music","SoundCloud"],
-                ["introduces","launches","rebrands","expands","revamps","opens"],
-                ["global chart","streaming tier","award category","curator program","student plan","royalty model"],
-                ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"]),
+                  ["introduces","launches","rebrands","expands","revamps","opens"],
+                  ["global chart","streaming tier","award category","curator program","student plan","royalty model"],
+                  ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"]),
         "film_tv": (["Netflix","Disney","HBO","Prime Video","Hulu","Crunchyroll"],
                     ["premieres","unveils","greenlights","adds","bundles","licenses"],
                     ["original series","ad-supported plan","download option","anime slate","sports docuseries","student bundle"],
                     ["Burbank","Tokyo","Toronto","Madrid","Mumbai","Sydney"]),
-        "tech": (["Apple","Google","Microsoft","Samsung","NVIDIA","OpenAI"],
-                ["releases","announces","ships","open-sources","unveils","rolls out"],
-                ["smartphone update","AI toolkit","browser feature","cloud plan","GPU program","assistant upgrade"],
-                ["Cupertino","Seoul","Mountain View","Redmond","Taipei","Shenzhen"]),
-        # NEW — matches your real example
-        "aviation": (["Pan Am","Air France","Iberia","Aeroflot","British Airways","American Airlines","KLM","LATAM"],
-                    ["opens","suspends","restarts","standardizes","updates","announces"],
-                    ["international route","safety protocol","jet service","fleet upgrade","runway procedures","pilot training"],
-                    ["Heathrow","JFK","Charles de Gaulle","Barajas","Changi","Narita"]),
-        "cybersec": (["CERT","MIT","DARPA","USENIX","ICANN","Mozilla","Linux Foundation"],
-                    ["publishes","issues","announces","standardizes","discloses","documents"],
-                    ["vulnerability note","malware analysis","security guideline","RFC draft","patch program","incident report"],
-                    ["Cambridge","Berkeley","Zurich","Redmond","Boston","Palo Alto"]),
         "sports": (["FIFA","NBA","NFL","IOC","UEFA","MLB"],
-                ["confirms","awards","announces","expands","adopts","approves"],
-                ["host city","play-in format","salary cap rules","streaming deal","ref review system","wild-card slot"],
-                ["Zurich","Paris","New York","Dallas","Doha","Tokyo"]),
+                   ["confirms","awards","announces","expands","adopts","approves"],
+                   ["host city","play-in format","salary cap rules","streaming deal","ref review system","wild-card slot"],
+                   ["Zurich","Paris","New York","Dallas","Doha","Tokyo"]),
         "internet_culture": (["Reddit","Twitch","Discord","Wikipedia","GitHub","WordPress"],
-                            ["adds","pilots","disables","restores","launches","overhauls"],
-                            ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
-                            ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"]),
+                             ["adds","pilots","disables","restores","launches","overhauls"],
+                             ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
+                             ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"]),
+        "cybersec": (["CERT","USENIX","ICANN","Mozilla","Linux Foundation","MIT"],
+                     ["publishes","issues","announces","standardizes","discloses","documents"],
+                     ["vulnerability note","malware analysis","security guideline","RFC draft","patch program","incident report"],
+                     ["Cambridge","Berkeley","Zurich","Redmond","Boston","Palo Alto"]),
+        "aviation": (["Pan Am","Air France","Iberia","Aeroflot","British Airways","American Airlines","KLM","LATAM"],
+                     ["opens","suspends","restarts","standardizes","updates","announces"],
+                     ["international route","safety protocol","jet service","fleet upgrade","runway procedures","pilot training"],
+                     ["Heathrow","JFK","Charles de Gaulle","Barajas","Changi","Narita"]),
         "general": (["NASA","SpaceX","UNESCO","BBC","ESA","CERN"],
                     ["announces","opens","tests","adopts","extends","funds"],
                     ["mission program","broadcast rule","education grant","archive","lab upgrade","satellite service"],
                     ["Houston","Cape Canaveral","Paris","Geneva","Tokyo","Bangalore"]),
     }
     ORGS, VERBS, OBJS, PLACES = banks.get(domain, banks["general"])
-    real_tokens = _token_set(real_text)
+    real_tokens = {w.lower() for w in _words(real_text)}
 
     def compose() -> str:
-        orgs, verbs, objs, places = banks.get(domain, banks["general"])
-        year = rng.randint(1980, 2022)
-        org, verb, obj, place = rng.choice(orgs), rng.choice(verbs), rng.choice(objs), rng.choice(places)
+        year = _year_for_domain(domain, rng)
+        org_choices = [o for o in ORGS if o.lower() not in real_tokens] or ORGS
+        org, verb, obj, place = rng.choice(org_choices), rng.choice(VERBS), rng.choice(OBJS), rng.choice(PLACES)
+        # include a place for aviation/cybersec to mirror real style
         if domain in ("aviation","cybersec"):
             s = f"{org} {verb} {obj} in {year} at {place}."
         else:
             s = f"{org} {verb} {obj} in {year}."
-        s = _equalize_length(_clean_terminal_punct(s), target_words, rng)
+        s = _equalize_length(s, target_words, rng)
         return s
 
-    # rejection sampling for diversity
+    # rejection sampling for diversity and dissimilarity
     fakes: list[str] = []
     attempts = 0
-    while len(fakes) < 2 and attempts < 20:
+    while len(fakes) < 2 and attempts < 24:
         attempts += 1
-        cand = compose()
-        if _too_similar(cand, real_text):
+        cand = _clean_terminal_punct(compose())
+        if re.search(r"\b(worldwide|today)\b\W*\1?\b", cand, flags=re.I):
             continue
-        if any(_too_similar(cand, x) for x in fakes):
+        if _too_similar(cand, real_text) or any(_too_similar(cand, x) for x in fakes):
             continue
         if cand not in fakes:
             fakes.append(cand)
 
-    if len(fakes) < 2:
-        # guaranteed, distinct-ish backup
-        while len(fakes) < 2:
-            fakes.append(_equalize_length(compose() + " Update follows testing.", target_words, rng))
+    # guaranteed backup
+    while len(fakes) < 2:
+        fakes.append(_clean_terminal_punct(_equalize_length(compose(), target_words, rng)))
 
     return fakes[0], fakes[1]
 
