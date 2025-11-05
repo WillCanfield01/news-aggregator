@@ -308,17 +308,32 @@ def leaderboard():
 # Admin: hit this to force-generate today's round
 # GET /roulette/admin/regen?token=...&force=1
 # -----------------------------------------------------------------------------
-@roulette_bp.get("/roulette/admin/regen")
+@roulette_bp.route("/roulette/admin/regen", methods=["GET", "POST"])
 def admin_regen():
-    token = request.args.get("token", "")
     expected = os.getenv("ROULETTE_ADMIN_TOKEN", "")
+    token = request.args.get("token") or request.headers.get("X-Admin-Token", "")
     if not expected or token != expected:
         # Hide existence of this route
         abort(404)
 
-    force = request.args.get("force", "0") in ("1", "true", "True", "yes")
-    # Late import to avoid circular import at module load
+    # Parse force as an int: 0=no-op if exists, 1=update in place, 2=wipe guesses then update
+    force_raw = request.args.get("force", "1")
+    try:
+        force = int(force_raw)
+    except Exception:
+        force = 1
+    if force not in (0, 1, 2):
+        force = 1
+
+    # Late import to avoid circulars
     from app.scripts.generate_timeline_round import ensure_today_round
 
     ok = bool(ensure_today_round(force=force))
-    return jsonify({"ok": ok, "date": _local_today().isoformat(), "tz": _TZ_NAME})
+    resp = jsonify({
+        "ok": ok,
+        "date": _local_today().isoformat(),
+        "tz": _TZ_NAME,
+        "force": force,
+    })
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp, (200 if ok else 500)
