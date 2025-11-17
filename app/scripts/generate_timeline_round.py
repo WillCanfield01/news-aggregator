@@ -156,6 +156,17 @@ POP_KEYWORDS = {
     "internet_culture": ["meme","viral","hashtag","emoji","stream","podcast","blog","wiki","open source","linux","browser"],
 }
 
+NEGATIVE_TERMS = [
+    "killed", "killing", "dead", "dies", "death", "fatal",
+    "massacre", "genocide", "famine",
+    "bomb", "bombing", "explosion", "blast",
+    "attack", "assault", "raid", "airstrike", "suicide bomber",
+    "war", "battle", "invasion", "occupation", "uprising", "coup",
+    "shooting", "gunman", "terrorist", "hostage",
+    "crash", "collides", "collision", "derailment",
+    "earthquake", "hurricane", "typhoon", "tsunami", "flood", "wildfire",
+]
+
 # --- domain detection (expanded) ---
 def _infer_domain(text: str) -> str:
     lc = (text or "").lower()
@@ -175,42 +186,71 @@ def _infer_domain(text: str) -> str:
 
 def _score_for_youth(event_obj: dict) -> float:
     """
-    Score a Wikipedia OTD event for 'youth appeal':
-    + keywords in pop domains
-    + recency (post-1980 weighted up)
-    + concise (<= 140 chars ideal)
+    Score a Wikipedia OTD event for 'youth appeal' / nostalgia.
+
+    High scores:
+      - pop-culture / tech / games / internet / sports domains
+      - years roughly 1980–2016, extra for 1995–2012
+      - concise & readable
+      - includes modern/pop keywords
+
+    Heavy penalty:
+      - obvious tragedies: crashes, war, killings, disasters, etc.
     """
     t = (event_obj.get("text") or event_obj.get("displaytitle") or "").strip()
     if not t:
         return -1e9
     lc = t.lower()
 
-    # keyword score
-    kw_score = 0.0
-    for words in POP_KEYWORDS.values():
-        if any(w in lc for w in words):
-            kw_score += 2.0
+    score = 0.0
 
-    # recency score (Wikipedia OTD has 'year')
-    year = event_obj.get("year")  # often present
-    recency = 0.0
+    # 1) Domain bonus – we really want pop / tech / games / sports
+    domain = _infer_domain(t)
+    pop_domains = {"tech", "social_media", "gaming", "music", "film_tv", "internet_culture", "sports"}
+    if domain in pop_domains:
+        score += 2.5
+    elif domain != "general":
+        score += 0.5  # mild bonus for any non-general domain
+
+    # 2) Keyword bonus from POP_KEYWORDS
+    for cat, words in POP_KEYWORDS.items():
+        if any(w in lc for w in words):
+            score += 2.0 if cat in {"tech", "social_media", "gaming", "music", "film_tv"} else 1.0
+
+    # 3) Recency / nostalgia curve (hit 80s-00s hard)
+    year = event_obj.get("year")
     try:
         y = int(year)
-        if y >= 2010:   recency = 3.0
-        elif y >= 2000: recency = 2.0
-        elif y >= 1980: recency = 1.0
+        if 1995 <= y <= 2012:
+            score += 3.5      # peak nostalgia zone
+        elif 1985 <= y <= 1994:
+            score += 2.5
+        elif 2013 <= y <= 2020:
+            score += 2.0
+        elif 1980 <= y < 1985:
+            score += 1.5
+        # very old stuff is neutral; no extra bonus
     except Exception:
-        recency = 0.0
+        pass
 
-    # concision / readability
+    # 4) Concision / readability (we want tweet-sized facts)
     L = len(t)
-    concision = 1.0 if 60 <= L <= 140 else (0.3 if L <= 180 else -0.5)
+    if 60 <= L <= 150:
+        score += 1.0
+    elif L <= 200:
+        score += 0.3
+    else:
+        score -= 0.5
 
-    # penalize dry bureaucratic verbs
+    # 5) Penalize tragedies / disasters HARD
+    if any(w in lc for w in NEGATIVE_TERMS):
+        score -= 5.0
+
+    # 6) Penalize super dry bureaucratic phrasing a bit
     if re.search(r"\b(henceforth|thereof|therein|whereby)\b", lc):
-        concision -= 0.5
+        score -= 0.5
 
-    return kw_score + recency + concision
+    return score
 
 def _youthify_title(text: str) -> str:
     """
