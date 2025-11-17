@@ -187,146 +187,118 @@ def _soften_real_title(title: str) -> str:
 
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Produce two plausible-but-false events that match the real event in
-    tone, domain, era, and length.
+    Produce two fakes that match:
+    - era and domain of real event
+    - tone and realism
+    - narrative style (not corporate marketing)
+    - no repeated wording between fakes
     """
-    target_words = max(10, _wlen(real_text))
+    target_len = max(12, _wlen(real_text))
     domain = _infer_domain(real_text)
 
-    # ---------- 1) Try OpenAI ----------
+    # ------------------------------------------
+    # 1) OpenAI path (best quality)
+    # ------------------------------------------
     if OPENAI_API_KEY:
         domain_hint = {
-            "tech": "tech and consumer gadgets",
-            "social_media": "social media platforms and creator culture",
-            "gaming": "video games, consoles, esports",
-            "music": "popular music, streaming, bands, artists",
-            "film_tv": "movies, TV, streaming platforms",
-            "sports": "major leagues and global tournaments",
-            "internet_culture": "memes, online communities, internet culture",
-        }.get(domain, "modern history and culture")
+            "tech": "historical tech developments and notable milestones",
+            "social_media": "notable shifts in online culture",
+            "gaming": "video game industry history and console timelines",
+            "music": "music history and notable artist or industry events",
+            "film_tv": "film and television history and production milestones",
+            "sports": "sports history and league milestones",
+            "internet_culture": "memes, communities, and notable online events",
+        }.get(domain, "modern historical events")
 
         sys_prompt = (
-            "You write short, believable 'On This Day' entries for a trivia game "
-            "aimed at Gen Z and millennials.\n"
-            f"Month: {month_name}. Focus domain: {domain_hint}.\n"
-            f"The REAL entry is:\n{real_text}\n\n"
-            "Return TWO different entries that are plausible but false.\n"
+            "You create short, realistic 'On This Day' historical entries.\n"
+            "Generate TWO false entries that feel like real historical facts.\n"
             "Rules:\n"
-            f"- Each entry is {target_words} words plus or minus 4.\n"
-            "- Each includes at least one proper noun and one 4 digit year.\n"
-            "- Match the style and level of detail of the real entry.\n"
-            "- Stay in roughly the same era as the real entry (same decade or nearby).\n"
-            "- No wars, disasters, mass deaths, crashes, or tragedies.\n"
-            "- Do not reuse the same main entities as the real entry.\n"
-            "- No meta or hedging language.\n"
-            'Return STRICT JSON only: {\"fake1\":\"...\",\"fake2\":\"...\"}'
+            f"- They must occur in the month of {month_name}, any year.\n"
+            "- Must be plausible and grounded in real-world history.\n"
+            "- Match the tone and complexity of Wikipedia 'On This Day' entries.\n"
+            "- Must NOT feel like product announcements or marketing.\n"
+            "- Include at least one proper noun and one 4-digit year.\n"
+            "- Use different sentence structures for the two entries.\n"
+            "- Avoid repeated wording, avoid corporate phrases, avoid 'targeting younger users'.\n"
+            "- Stay in a similar era and vibe as the real entry.\n"
+            "- No tragedies, no crashes, no warfare, no mass casualty events.\n"
+            "- No meta commentary.\n"
+            "Return STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
         )
+
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": f"Real entry: {real_text}"},
             ],
-            "temperature": 0.7,
+            "temperature": 0.75,
             "response_format": {"type": "json_object"},
         }
-        for _ in range(2):
+
+        try:
+            r = requests.post(OAI_URL,
+                              headers={"Authorization": f"Bearer {OPENAI_API_KEY}",
+                                       "Content-Type": "application/json"},
+                              json=payload, timeout=30)
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"]["content"]
             try:
-                r = requests.post(
-                    OAI_URL,
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                    json=payload,
-                    timeout=30,
-                )
-                r.raise_for_status()
-                content = r.json()["choices"][0]["message"]["content"]
-                try:
-                    obj = requests.utils.json.loads(content)
-                except Exception:
-                    obj = requests.utils.json.loads(content.strip("` \n"))
-                f1 = (obj.get("fake1") or "").strip()
-                f2 = (obj.get("fake2") or "").strip()
-                if f1 and f2 and f1.lower() != real_text.lower() and f2.lower() != real_text.lower():
-                    return f1, f2
+                obj = requests.utils.json.loads(content)
             except Exception:
-                time.sleep(0.5)
+                obj = requests.utils.json.loads(content.strip("` "))
+            f1 = (obj.get("fake1") or "").strip()
+            f2 = (obj.get("fake2") or "").strip()
+            if f1 and f2:
+                return f1, f2
+        except Exception:
+            pass
 
-    # ---------- 2) Deterministic pop-culture fallback ----------
-    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
+    # ------------------------------------------
+    # 2) Fallback if API fails — now naturalistic
+    # ------------------------------------------
+    rng = random.Random(
+        int(datetime.now(TZ).strftime("%Y%m%d")) ^
+        (hash(real_text) & 0xFFFFFFFF)
+    )
 
-    banks = {
-        "tech": (
-            ["Apple","Google","Microsoft","Samsung","NVIDIA","OpenAI","Meta","Sony"],
-            ["announces","releases","ships","rolls out","launches","unveils"],
-            ["smartphone update","laptop line","cloud service","AI feature","gaming console revision","music player"],
-            ["Cupertino","Seoul","Mountain View","Redmond","Tokyo","London"],
-        ),
-        "social_media": (
-            ["Instagram","TikTok","YouTube","Twitter","Snapchat","Reddit"],
-            ["rolls out","debuts","tests","expands","rebrands","enables"],
-            ["creator fund","short video format","live shopping tool","DM encryption","music library","moderation update"],
-            ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"],
-        ),
-        "gaming": (
-            ["Nintendo","Sony","Microsoft","Valve","Epic Games","Blizzard"],
-            ["announces","releases","patches","launches","revives","updates"],
-            ["handheld console","online service","battle pass","cross play feature","esports circuit","mod tools"],
-            ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"],
-        ),
-        "music": (
-            ["Spotify","MTV","Billboard","Apple Music","SoundCloud","Grammy Academy"],
-            ["introduces","launches","rebrands","expands","revamps","opens"],
-            ["streaming tier","global chart","award category","student plan","royalty model","curator program"],
-            ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"],
-        ),
-        "film_tv": (
-            ["Netflix","Disney","HBO","Prime Video","Hulu","Crunchyroll"],
-            ["premieres","unveils","greenlights","adds","bundles","licenses"],
-            ["original series","ad supported plan","download option","anime slate","sports docuseries","bundle deal"],
-            ["Burbank","Tokyo","Toronto","Madrid","Mumbai","Sydney"],
-        ),
-        "sports": (
-            ["FIFA","NBA","NFL","IOC","UEFA","MLB"],
-            ["confirms","awards","announces","expands","adopts","approves"],
-            ["host city","play in format","salary cap rules","streaming deal","review system","wild card slot"],
-            ["Zurich","Paris","New York","Dallas","Doha","Tokyo"],
-        ),
-        "internet_culture": (
-            ["Reddit","Twitch","Discord","Wikipedia","GitHub","WordPress"],
-            ["adds","pilots","disables","restores","launches","overhauls"],
-            ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
-            ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"],
-        ),
-        "general": (
-            ["NASA","SpaceX","UNESCO","BBC","ESA","CERN"],
-            ["announces","opens","tests","adopts","extends","funds"],
-            ["mission program","broadcast rule","education grant","archive","lab upgrade","satellite service"],
-            ["Houston","Cape Canaveral","Paris","Geneva","Tokyo","Bangalore"],
-        ),
-    }
+    subjects = [
+        "The National Archives", "A regional broadcasting authority", "A major university",
+        "A scientific committee", "A transportation board", "A cultural institute",
+        "A historical society", "A municipal planning council", "An independent research group"
+    ]
 
-    ORGS, VERBS, OBJS, PLACES = banks.get(domain, banks["general"])
+    actions = [
+        "publishes a landmark report on", "formally recognizes", "approves a long-debated guideline on",
+        "establishes a new framework for", "confirms updated standards for", 
+        "announces the completion of a study on"
+    ]
 
-    def one_fake() -> str:
-        year = rng.randint(1985, 2018)
-        org = rng.choice(ORGS)
-        verb = rng.choice(VERBS)
-        obj = rng.choice(OBJS)
-        place = rng.choice(PLACES)
-        s = f"{org} {verb} a new {obj} in {year} in {place}, targeting younger users."
-        # simple length nudging
-        while _wlen(s) < target_words - 4:
-            s += " After months of testing with early adopters."
-        while _wlen(s) > target_words + 4:
-            parts = s.split()
-            s = " ".join(parts[:-1])
-        if not s.endswith("."):
-            s += "."
+    topics = [
+        "digital record preservation", "public infrastructure planning", "early computer networking",
+        "community radio development", "archival photography", "educational technology policy",
+        "regional transit coordination", "cultural heritage mapping", "meteorological observations"
+    ]
+
+    locations = [
+        "in Toronto", "in Helsinki", "in Sydney", "in Dublin", "in Kyoto",
+        "in Vancouver", "in Lisbon", "in Cape Town", "in Copenhagen"
+    ]
+
+    def build_fake():
+        year = rng.randint(1965, 2015)
+        s = f"{rng.choice(subjects)} {rng.choice(actions)} {rng.choice(topics)} {rng.choice(locations)} in {year}."
+        # length polishing
+        if _wlen(s) < target_len - 4 and rng.random() < 0.5:
+            s = s[:-1] + " after several years of preliminary review."
         return s
 
-    f1 = one_fake()
-    f2 = one_fake()
-    if f2.lower() == f1.lower():
-        f2 = one_fake()
+    f1 = build_fake()
+    f2 = build_fake()
+    while f2 == f1:
+        f2 = build_fake()
+
     return f1, f2
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
