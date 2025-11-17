@@ -41,6 +41,14 @@ def _words(s: str) -> list[str]:
 def _wlen(s: str) -> int:
     return len(_words(s))
 
+def _extract_year(text: str) -> Optional[int]:
+    m = re.search(r"\b(19|20)\d{2}\b", text or "")
+    if not m:
+        return None
+    try:
+        return int(m.group(0))
+    except ValueError:
+        return None
 
 # Domains and nostalgia signals for younger / TikTok crowd
 POP_KEYWORDS = {
@@ -187,111 +195,133 @@ def _soften_real_title(title: str) -> str:
 
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Produce two fakes that match:
-    - era and domain of real event
-    - tone and realism
-    - narrative style (not corporate marketing)
-    - no repeated wording between fakes
+    Produce two fakes that feel like simple, pop-culture 'On This Day' facts.
+    They should:
+      - match the era and general domain of the real event
+      - feel relevant to tech, games, social, music, film, sports, or internet
+      - be short and easy to read
     """
-    target_len = max(12, _wlen(real_text))
+    target_len = max(10, _wlen(real_text))
     domain = _infer_domain(real_text)
+    real_year = _extract_year(real_text)
 
     # ------------------------------------------
-    # 1) OpenAI path (best quality)
+    # 1) OpenAI path
     # ------------------------------------------
     if OPENAI_API_KEY:
         domain_hint = {
-            "tech": "historical tech developments and notable milestones",
-            "social_media": "notable shifts in online culture",
-            "gaming": "video game industry history and console timelines",
-            "music": "music history and notable artist or industry events",
-            "film_tv": "film and television history and production milestones",
-            "sports": "sports history and league milestones",
-            "internet_culture": "memes, communities, and notable online events",
-        }.get(domain, "modern historical events")
+            "tech": "tech milestones, gadgets, internet companies",
+            "social_media": "social platforms, creator culture, viral features",
+            "gaming": "console launches, game studios, esports moments",
+            "music": "artists, albums, charts, streaming moments",
+            "film_tv": "movies, TV premieres, streaming originals",
+            "sports": "major league moments and sports culture",
+            "internet_culture": "memes, online communities, viral internet history",
+        }.get(domain, "modern pop culture and internet history")
 
         sys_prompt = (
-            "You create short, realistic 'On This Day' historical entries.\n"
-            "Generate TWO false entries that feel like real historical facts.\n"
+            "You write short, punchy pop-culture 'On This Day' facts for a daily trivia game "
+            "aimed at Gen Z and Millennials.\n"
+            f"Month: {month_name}.\n"
+            f"Domain: {domain_hint}.\n"
+            "Given ONE real event, invent TWO different events that are plausible but false.\n"
             "Rules:\n"
-            f"- They must occur in the month of {month_name}, any year.\n"
-            "- Must be plausible and grounded in real-world history.\n"
-            "- Match the tone and complexity of Wikipedia 'On This Day' entries.\n"
-            "- Must NOT feel like product announcements or marketing.\n"
-            "- Include at least one proper noun and one 4-digit year.\n"
-            "- Use different sentence structures for the two entries.\n"
-            "- Avoid repeated wording, avoid corporate phrases, avoid 'targeting younger users'.\n"
-            "- Stay in a similar era and vibe as the real entry.\n"
-            "- No tragedies, no crashes, no warfare, no mass casualty events.\n"
-            "- No meta commentary.\n"
-            "Return STRICT JSON: {\"fake1\":\"...\",\"fake2\":\"...\"}"
+            "- Each event must be under 26 words.\n"
+            "- Each must include at least one recognizable name (brand, platform, artist, team, show) and one 4 digit year.\n"
+            "- Style should feel like a fun history headline, not a government report.\n"
+            "- No long bureaucratic phrases, no councils, no committees, no regulations.\n"
+            "- No tragedies, crashes, wars, disasters, or mass deaths.\n"
+            "- Keep language simple and readable.\n"
+            "- Do not reuse the same main entities as the real event.\n"
+            'Return STRICT JSON only: {"fake1":"...","fake2":"..."}'
         )
 
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Real entry: {real_text}"},
+                {"role": "user", "content": f"Real event: {real_text}"},
             ],
-            "temperature": 0.75,
+            "temperature": 0.8,
             "response_format": {"type": "json_object"},
         }
 
         try:
-            r = requests.post(OAI_URL,
-                              headers={"Authorization": f"Bearer {OPENAI_API_KEY}",
-                                       "Content-Type": "application/json"},
-                              json=payload, timeout=30)
+            r = requests.post(
+                OAI_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=30,
+            )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
             try:
                 obj = requests.utils.json.loads(content)
             except Exception:
-                obj = requests.utils.json.loads(content.strip("` "))
+                obj = requests.utils.json.loads(content.strip("` \n"))
             f1 = (obj.get("fake1") or "").strip()
             f2 = (obj.get("fake2") or "").strip()
             if f1 and f2:
                 return f1, f2
         except Exception:
-            pass
+            # fall through to deterministic fallback
+            time.sleep(0.3)
 
     # ------------------------------------------
-    # 2) Fallback if API fails — now naturalistic
+    # 2) Deterministic pop-culture fallback
     # ------------------------------------------
     rng = random.Random(
-        int(datetime.now(TZ).strftime("%Y%m%d")) ^
-        (hash(real_text) & 0xFFFFFFFF)
+        int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF)
     )
 
-    subjects = [
-        "The National Archives", "A regional broadcasting authority", "A major university",
-        "A scientific committee", "A transportation board", "A cultural institute",
-        "A historical society", "A municipal planning council", "An independent research group"
+    brands = [
+        "Netflix", "Disney", "Spotify", "Apple", "Google", "Microsoft",
+        "Nintendo", "PlayStation", "Xbox", "TikTok", "Instagram", "YouTube",
+        "Twitch", "Reddit", "Epic Games", "HBO", "MTV"
     ]
 
-    actions = [
-        "publishes a landmark report on", "formally recognizes", "approves a long-debated guideline on",
-        "establishes a new framework for", "confirms updated standards for", 
-        "announces the completion of a study on"
+    verbs = [
+        "launches", "debuts", "announces", "tests", "rolls out",
+        "brings back", "adds", "premieres", "updates"
     ]
 
-    topics = [
-        "digital record preservation", "public infrastructure planning", "early computer networking",
-        "community radio development", "archival photography", "educational technology policy",
-        "regional transit coordination", "cultural heritage mapping", "meteorological observations"
+    features = [
+        "a new streaming feature",
+        "a retro themed interface",
+        "a limited event for fans",
+        "a cross platform update",
+        "a creator focused tool",
+        "a live concert special",
+        "a classic game collection",
+        "a surprise season of a hit show",
+        "a short form video mode",
     ]
 
-    locations = [
-        "in Toronto", "in Helsinki", "in Sydney", "in Dublin", "in Kyoto",
-        "in Vancouver", "in Lisbon", "in Cape Town", "in Copenhagen"
+    places = [
+        "in Los Angeles", "in Tokyo", "in London", "in New York",
+        "in Seoul", "in Toronto", "in Sydney", "in Berlin"
     ]
 
-    def build_fake():
-        year = rng.randint(1965, 2015)
-        s = f"{rng.choice(subjects)} {rng.choice(actions)} {rng.choice(topics)} {rng.choice(locations)} in {year}."
-        # length polishing
-        if _wlen(s) < target_len - 4 and rng.random() < 0.5:
-            s = s[:-1] + " after several years of preliminary review."
+    def pick_year() -> int:
+        if real_year:
+            lo = max(1985, real_year - 5)
+            hi = min(2022, real_year + 5)
+            if lo <= hi:
+                return rng.randint(lo, hi)
+        return rng.randint(1990, 2020)
+
+    def build_fake() -> str:
+        year = pick_year()
+        s = f"{rng.choice(brands)} {rng.choice(verbs)} {rng.choice(features)} {rng.choice(places)} in {year}."
+        # keep roughly near real length but still short
+        while _wlen(s) > max(target_len + 4, 22):
+            parts = s.split()
+            s = " ".join(parts[:-1])
+            if not s.endswith("."):
+                s += "."
         return s
 
     f1 = build_fake()
