@@ -33,6 +33,124 @@ OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
 
+WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+
+def _words(s: str) -> list[str]:
+    return [w for w in WORD_RE.findall(s or "")]
+
+def _wlen(s: str) -> int:
+    return len(_words(s))
+
+
+# Domains and nostalgia signals for younger / TikTok crowd
+POP_KEYWORDS = {
+    "social_media": ["tiktok","instagram","facebook","twitter","x.com","snapchat","youtube","reddit","twitch","vine","myspace"],
+    "gaming": ["nintendo","playstation","xbox","pokemon","minecraft","fortnite","roblox","steam","esports","blizzard","sony"],
+    "music": ["spotify","itunes","mtv","grammy","billboard","taylor swift","drake","bts","k-pop","eminem","nirvana"],
+    "film_tv": ["netflix","disney","marvel","star wars","hbo","pixar","oscars","hulu","prime video","anime"],
+    "tech": ["iphone","android","apple","google","microsoft","ai","openai","tesla","spacex","nvidia","samsung","internet","www"],
+    "sports": ["nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl","lakers","yankees","patriots"],
+    "internet_culture": ["meme","viral","hashtag","emoji","stream","podcast","blog","wiki","open source","linux","browser"],
+}
+
+NEGATIVE_TERMS = [
+    "killed", "killing", "dead", "dies", "death", "fatal",
+    "massacre", "genocide", "famine",
+    "bomb", "bombing", "explosion", "blast",
+    "attack", "assault", "raid", "airstrike", "suicide bomber",
+    "war", "battle", "invasion", "occupation", "uprising", "coup",
+    "shooting", "gunman", "terrorist", "hostage",
+    "crash", "collides", "collision", "derailment",
+    "earthquake", "hurricane", "typhoon", "tsunami", "flood", "wildfire",
+    "eruption", "eruptions", "erupts", "volcano", "volcanic",
+]
+
+def _infer_domain(text: str) -> str:
+    """Rough guess: tech / gaming / sports / etc."""
+    if not text:
+        return "general"
+    lc = text.lower()
+
+    if any(k in lc for k in ("tiktok","instagram","youtube","snapchat","twitter","x.com","reddit","twitch")):
+        return "social_media"
+    if any(k in lc for k in ("nintendo","playstation","xbox","pokemon","fortnite","roblox","minecraft","steam","esports")):
+        return "gaming"
+    if any(k in lc for k in ("spotify","itunes","mtv","billboard","grammy","taylor swift","drake","bts","k-pop","eminem","nirvana")):
+        return "music"
+    if any(k in lc for k in ("netflix","disney","marvel","star wars","hbo","anime","pixar","oscars","prime video","hulu")):
+        return "film_tv"
+    if any(k in lc for k in ("iphone","android","apple","google","microsoft","ai","openai","tesla","spacex","nvidia","samsung")):
+        return "tech"
+    if any(k in lc for k in ("nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl","lakers","yankees")):
+        return "sports"
+    if any(k in lc for k in ("meme","viral","hashtag","emoji","podcast","blog","wiki","browser","internet")):
+        return "internet_culture"
+    return "general"
+
+def _is_tragedy(text: str) -> bool:
+    lc = (text or "").lower()
+    return any(w in lc for w in NEGATIVE_TERMS)
+
+def _score_for_youth(event_obj: dict) -> float:
+    """
+    Score a Wikipedia event for 'TikTok generation nostalgia'.
+
+    High score:
+      - tech / gaming / social / music / film / sports / internet culture
+      - year roughly 1985–2018 (extra sweet spot 1995–2012)
+      - short and readable
+      - includes modern pop keywords
+    Strong penalty:
+      - wars, disasters, mass deaths
+      - ancient or medieval history
+    """
+    t = (event_obj.get("text") or event_obj.get("displaytitle") or "").strip()
+    if not t:
+        return -1e9
+    if _is_tragedy(t):
+        return -1e9
+
+    lc = t.lower()
+    score = 0.0
+
+    domain = _infer_domain(t)
+    pop_domains = {"tech","social_media","gaming","music","film_tv","internet_culture","sports"}
+    if domain in pop_domains:
+        score += 4.0
+    elif domain != "general":
+        score += 0.5
+
+    # bonus if specific pop keywords appear
+    for cat, words in POP_KEYWORDS.items():
+        if any(w in lc for w in words):
+            score += 1.5
+
+    # nostalgia year curve
+    year = event_obj.get("year")
+    try:
+        y = int(year)
+        if 1995 <= y <= 2012:
+            score += 4.0
+        elif 1985 <= y <= 1994:
+            score += 3.0
+        elif 2013 <= y <= 2018:
+            score += 2.0
+        elif 1960 <= y < 1985:
+            score += 1.0
+        elif y < 1950:
+            score -= 2.5
+    except Exception:
+        pass
+
+    # concision
+    L = len(t)
+    if 60 <= L <= 160:
+        score += 1.0
+    elif L > 220:
+        score -= 0.5
+
+    return score
+
 # --------------------------- utilities ---------------------------
 
 def _today_local_date():
@@ -67,29 +185,46 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
-# --- replace _openai_fakes_from_real with this stronger version ---
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Produce two plausible-but-false events similar in tone/length to the real item.
+    Produce two plausible-but-false events that match the real event in
+    tone, domain, era, and length.
     """
+    target_words = max(10, _wlen(real_text))
+    domain = _infer_domain(real_text)
+
     # ---------- 1) Try OpenAI ----------
     if OPENAI_API_KEY:
+        domain_hint = {
+            "tech": "tech and consumer gadgets",
+            "social_media": "social media platforms and creator culture",
+            "gaming": "video games, consoles, esports",
+            "music": "popular music, streaming, bands, artists",
+            "film_tv": "movies, TV, streaming platforms",
+            "sports": "major leagues and global tournaments",
+            "internet_culture": "memes, online communities, internet culture",
+        }.get(domain, "modern history and culture")
+
         sys_prompt = (
-            "You write concise, believable 'On This Day' almanac entries.\n"
-            "Given ONE real entry, return TWO different **plausible but false** entries that:\n"
-            f"• Occur in {month_name} (any year),\n"
-            "• Match the tone and length (within ±15%) of the real entry,\n"
-            "• Each include at least ONE proper noun (org/place/person) and ONE 4-digit year,\n"
-            "• Sound specific (a concrete action or outcome),\n"
-            "• DO NOT copy exact entities from the real entry,\n"
-            "• No meta-text. No hedging words like 'reportedly' or 'allegedly'.\n"
+            "You write short, believable 'On This Day' entries for a trivia game "
+            "aimed at Gen Z and millennials.\n"
+            f"Month: {month_name}. Focus domain: {domain_hint}.\n"
+            f"The REAL entry is:\n{real_text}\n\n"
+            "Return TWO different entries that are plausible but false.\n"
+            "Rules:\n"
+            f"- Each entry is {target_words} words plus or minus 4.\n"
+            "- Each includes at least one proper noun and one 4 digit year.\n"
+            "- Match the style and level of detail of the real entry.\n"
+            "- Stay in roughly the same era as the real entry (same decade or nearby).\n"
+            "- No wars, disasters, mass deaths, crashes, or tragedies.\n"
+            "- Do not reuse the same main entities as the real entry.\n"
+            "- No meta or hedging language.\n"
             'Return STRICT JSON only: {\"fake1\":\"...\",\"fake2\":\"...\"}'
         )
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"real_entry={real_text}"},
             ],
             "temperature": 0.7,
             "response_format": {"type": "json_object"},
@@ -115,44 +250,83 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             except Exception:
                 time.sleep(0.5)
 
-    # ---------- 2) Deterministic fallback (no API / API failed) ----------
-    # make fakes carry named entities + years to feel 'real'
+    # ---------- 2) Deterministic pop-culture fallback ----------
     rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
-    regions = ["France", "Canada", "Brazil", "Japan", "India", "Italy", "Kenya", "Australia", "Spain", "Norway"]
-    cities  = ["Marseille", "Quebec City", "São Paulo", "Osaka", "Pune", "Milan", "Nairobi", "Perth", "Valencia", "Bergen"]
-    bodies  = ["National Assembly", "Supreme Court", "Railway Commission", "Postal Service", "Maritime Authority",
-               "Central Bank", "Broadcasting Corporation", "University Senate", "City Council", "Museum Board"]
-    verbs   = ["authorizes", "ratifies", "suspends", "standardizes", "opens", "formally adopts", "repeals", "announces"]
-    objects = ["a nationwide licensing scheme", "new safety codes", "a public broadcaster charter",
-               "provincial tax rules", "a national archive program", "interstate tariffs", "coastal fishing limits"]
-    years   = list(range(1860, 2022))
 
-    def one():
-        region = rng.choice(regions)
-        city   = rng.choice(cities)
-        body   = rng.choice(bodies)
-        verb   = rng.choice(verbs)
-        obj    = rng.choice(objects)
-        year   = rng.choice(years)
-        # target similar length
-        target_len = max(60, min(180, int(len(real_text)*rng.uniform(0.85, 1.15))))
-        s = f"{body} in {city}, {region}, {verb} {obj} in {year}."
-        # pad lightly with a motive/impact clause (but stay concise)
-        tails = [
-            "to streamline regional policy.",
-            "after months of debate.",
-            "citing budget pressures.",
-            "following a contested vote.",
-            "to align with international norms."
-        ]
-        if len(s) < target_len and rng.random() < 0.8:
-            s = s[:-1] + " " + rng.choice(tails)
+    banks = {
+        "tech": (
+            ["Apple","Google","Microsoft","Samsung","NVIDIA","OpenAI","Meta","Sony"],
+            ["announces","releases","ships","rolls out","launches","unveils"],
+            ["smartphone update","laptop line","cloud service","AI feature","gaming console revision","music player"],
+            ["Cupertino","Seoul","Mountain View","Redmond","Tokyo","London"],
+        ),
+        "social_media": (
+            ["Instagram","TikTok","YouTube","Twitter","Snapchat","Reddit"],
+            ["rolls out","debuts","tests","expands","rebrands","enables"],
+            ["creator fund","short video format","live shopping tool","DM encryption","music library","moderation update"],
+            ["Los Angeles","Seoul","London","New York","Tokyo","Berlin"],
+        ),
+        "gaming": (
+            ["Nintendo","Sony","Microsoft","Valve","Epic Games","Blizzard"],
+            ["announces","releases","patches","launches","revives","updates"],
+            ["handheld console","online service","battle pass","cross play feature","esports circuit","mod tools"],
+            ["Kyoto","Seattle","Helsinki","Montreal","Osaka","Austin"],
+        ),
+        "music": (
+            ["Spotify","MTV","Billboard","Apple Music","SoundCloud","Grammy Academy"],
+            ["introduces","launches","rebrands","expands","revamps","opens"],
+            ["streaming tier","global chart","award category","student plan","royalty model","curator program"],
+            ["Stockholm","Los Angeles","Nashville","London","Seoul","Berlin"],
+        ),
+        "film_tv": (
+            ["Netflix","Disney","HBO","Prime Video","Hulu","Crunchyroll"],
+            ["premieres","unveils","greenlights","adds","bundles","licenses"],
+            ["original series","ad supported plan","download option","anime slate","sports docuseries","bundle deal"],
+            ["Burbank","Tokyo","Toronto","Madrid","Mumbai","Sydney"],
+        ),
+        "sports": (
+            ["FIFA","NBA","NFL","IOC","UEFA","MLB"],
+            ["confirms","awards","announces","expands","adopts","approves"],
+            ["host city","play in format","salary cap rules","streaming deal","review system","wild card slot"],
+            ["Zurich","Paris","New York","Dallas","Doha","Tokyo"],
+        ),
+        "internet_culture": (
+            ["Reddit","Twitch","Discord","Wikipedia","GitHub","WordPress"],
+            ["adds","pilots","disables","restores","launches","overhauls"],
+            ["awards program","streaming tool","mod tools","dark mode","sponsorships","plugin store"],
+            ["San Francisco","Vancouver","Dublin","Singapore","Austin","Amsterdam"],
+        ),
+        "general": (
+            ["NASA","SpaceX","UNESCO","BBC","ESA","CERN"],
+            ["announces","opens","tests","adopts","extends","funds"],
+            ["mission program","broadcast rule","education grant","archive","lab upgrade","satellite service"],
+            ["Houston","Cape Canaveral","Paris","Geneva","Tokyo","Bangalore"],
+        ),
+    }
+
+    ORGS, VERBS, OBJS, PLACES = banks.get(domain, banks["general"])
+
+    def one_fake() -> str:
+        year = rng.randint(1985, 2018)
+        org = rng.choice(ORGS)
+        verb = rng.choice(VERBS)
+        obj = rng.choice(OBJS)
+        place = rng.choice(PLACES)
+        s = f"{org} {verb} a new {obj} in {year} in {place}, targeting younger users."
+        # simple length nudging
+        while _wlen(s) < target_words - 4:
+            s += " After months of testing with early adopters."
+        while _wlen(s) > target_words + 4:
+            parts = s.split()
+            s = " ".join(parts[:-1])
+        if not s.endswith("."):
+            s += "."
         return s
 
-    f1 = one()
-    f2 = one()
+    f1 = one_fake()
+    f2 = one_fake()
     if f2.lower() == f1.lower():
-        f2 = one()
+        f2 = one_fake()
     return f1, f2
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -188,31 +362,63 @@ def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
         pass
     return None, None
 
-
 def _pick_real_event() -> Tuple[str, str]:
     today = _today_local_date()
     url = WIKI_URL.format(m=today.month, d=today.day)
-    j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.0"})
+    j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.1"})
     events = j.get("events", [])
     if not events:
         raise RuntimeError("No events returned from Wikipedia OTD")
 
-    # Pick a mid-specificity item (avoid extremely niche or multisentence)
-    random.shuffle(events)
-    candidates = []
-    for e in events:
-        t = e.get("text") or e.get("displaytitle") or ""
-        if not t:
-            continue
-        if 40 <= len(t) <= 180 and t.count(".") <= 1:
-            candidates.append(t.strip())
-    if not candidates:
-        candidates = [e.get("text", "").strip() for e in events if e.get("text")]
+    def _text(e: dict) -> str:
+        return (e.get("text") or e.get("displaytitle") or "").strip()
 
-    real = (candidates[0] if candidates else "A notable event is recorded by historians.")
-    # also return month name for hinting
+    # filter out tragedies first
+    pool = [e for e in events if _text(e) and not _is_tragedy(_text(e))]
+    if not pool:
+        pool = [e for e in events if _text(e)]
+
+    # score for youth appeal
+    scored = sorted(pool, key=_score_for_youth, reverse=True)
+
+    picked_text: Optional[str] = None
+
+    # first try high scoring, post-1980, single sentence, reasonable length
+    for e in scored[:20]:
+        t = _text(e)
+        year = e.get("year")
+        try:
+            y = int(year)
+        except Exception:
+            y = None
+        if y is not None and y < 1980:
+            continue
+        if 40 <= len(t) <= 200 and t.count(".") <= 1:
+            picked_text = t
+            break
+
+    # fallback to any high-scoring event that reads cleanly
+    if not picked_text:
+        for e in scored[:20]:
+            t = _text(e)
+            if 40 <= len(t) <= 200 and t.count(".") <= 1:
+                picked_text = t
+                break
+
+    # final fallback: original rough filter
+    if not picked_text:
+        random.shuffle(events)
+        for e in events:
+            t = _text(e)
+            if 40 <= len(t) <= 200 and t.count(".") <= 1:
+                picked_text = t
+                break
+
+    if not picked_text:
+        picked_text = "A pop-culture or tech milestone is recorded."
+
     month_name = today.strftime("%B")
-    return real, month_name
+    return picked_text, month_name
 
 # --- replace _openai_image with this ---
 def _openai_image(prompt: str) -> Optional[str]:
