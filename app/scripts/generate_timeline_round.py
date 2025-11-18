@@ -220,20 +220,20 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
         }.get(domain, "modern pop culture and internet history")
 
         sys_prompt = (
-            "You write short, punchy pop-culture 'On This Day' facts for a daily trivia game "
-            "aimed at Gen Z and Millennials.\n"
-            f"Month: {month_name}.\n"
-            f"Domain: {domain_hint}.\n"
-            "Given ONE real event, invent TWO different events that are plausible but false.\n"
-            "Rules:\n"
-            "- Each event must be under 26 words.\n"
-            "- Each must include at least one recognizable name (brand, platform, artist, team, show) and one 4 digit year.\n"
-            "- Style should feel like a fun history headline, not a government report.\n"
-            "- No long bureaucratic phrases, no councils, no committees, no regulations.\n"
-            "- No tragedies, crashes, wars, disasters, or mass deaths.\n"
-            "- Keep language simple and readable.\n"
-            "- Do not reuse the same main entities as the real event.\n"
-            'Return STRICT JSON only: {"fake1":"...","fake2":"..."}'
+            "You write short, believable, pop-culture 'On This Day' facts.\n"
+            "Your job is to create TWO plausible but false events based on a real one.\n"
+            "Your output MUST follow these rules:\n"
+            "• The events must match the real event’s era. If the real event happened in a certain decade, "
+            "  the fakes must also use years that make sense for that decade.\n"
+            "• Do NOT create anachronisms. If a brand, app, game, musician, technology, or platform "
+            "  did not exist in the given year, you must NOT use it.\n"
+            "• You must self-verify each detail for timeline accuracy.\n"
+            "• Use simple, readable pop-culture language.\n"
+            "• Keep each entry under 26 words.\n"
+            "• Each entry must include a proper noun and one 4-digit year.\n"
+            "• No tragedies, disasters, wars, or deaths.\n"
+            "• No corporate-speak. No 'targeting younger users'. No committees.\n"
+            "Return STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
         )
 
         payload = {
@@ -383,10 +383,14 @@ def _pick_real_event() -> Tuple[str, str]:
     # score for youth appeal
     scored = sorted(pool, key=_score_for_youth, reverse=True)
 
+    # take the top few and randomize so you can re-roll the real event
+    top = scored[:20]
+    random.shuffle(top)
+
     picked_text: Optional[str] = None
 
     # first try high scoring, post-1980, single sentence, reasonable length
-    for e in scored[:20]:
+    for e in top:
         t = _text(e)
         year = e.get("year")
         try:
@@ -399,15 +403,15 @@ def _pick_real_event() -> Tuple[str, str]:
             picked_text = t
             break
 
-    # fallback to any high-scoring event that reads cleanly
+    # fallback to any clean item inside the same randomized top set
     if not picked_text:
-        for e in scored[:20]:
+        for e in top:
             t = _text(e)
             if 40 <= len(t) <= 200 and t.count(".") <= 1:
                 picked_text = t
                 break
 
-    # final fallback: original rough filter
+    # final fallback: original rough filter over all events
     if not picked_text:
         random.shuffle(events)
         for e in events:
