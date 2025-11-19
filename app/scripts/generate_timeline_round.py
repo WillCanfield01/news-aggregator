@@ -193,56 +193,105 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
+ENTITY_SWAPS: list[tuple[re.Pattern, list[str]]] = [
+    (re.compile(r"\bGoogle\b"), ["Microsoft", "Apple", "Yahoo", "Amazon"]),
+    (re.compile(r"\bMicrosoft\b"), ["Google", "Apple", "IBM"]),
+    (re.compile(r"\bApple\b"), ["Samsung", "Google", "Sony"]),
+    (re.compile(r"\bNASA\b"), ["ESA", "Roscosmos", "JAXA"]),
+    (re.compile(r"\bSpace Shuttle Columbia\b"), ["Space Shuttle Discovery", "Space Shuttle Atlantis", "Space Shuttle Endeavour"]),
+    (re.compile(r"\bLos Angeles\b"), ["New York", "Seattle", "San Francisco", "Chicago"]),
+    (re.compile(r"\bNew York\b"), ["Los Angeles", "Chicago", "Boston"]),
+]
+
+def _mutate_event_like(real_text: str, rng: random.Random) -> str:
+    """
+    Create a fake that stays close to the real event:
+    - same general topic and sentence shape
+    - tweak org / vehicle / place / mission number / year
+    """
+    s = real_text.strip()
+
+    # 1) tweak an organization / place / vehicle if present
+    for pattern, alts in ENTITY_SWAPS:
+        if pattern.search(s):
+            replacement = rng.choice(alts)
+            s = pattern.sub(replacement, s)
+            break
+
+    # 2) tweak STS mission numbers like STS-87 -> STS-89
+    m = re.search(r"\bSTS-(\d+)\b", s)
+    if m:
+        try:
+            n = int(m.group(1))
+            delta = rng.choice([-3, -2, -1, 1, 2, 3])
+            new_n = max(1, n + delta)
+            s = s[:m.start(1)] + str(new_n) + s[m.end(1):]
+        except ValueError:
+            pass
+
+    # 3) tweak the year if present
+    y = _extract_year(s)
+    if y:
+        delta = rng.choice([-5, -3, -2, -1, 1, 2, 3, 5])
+        new_y = max(1900, y + delta)
+        s = re.sub(r"\b(19|20)\d{2}\b", str(new_y), s, count=1)
+
+    # clean up spacing and punctuation
+    s = s.strip()
+    if not s.endswith("."):
+        s += "."
+
+    return s
+
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Produce two fakes that feel like simple, pop-culture 'On This Day' facts.
+    Produce two fakes that feel like close siblings of the real event.
     They should:
-      - match the era and general domain of the real event
-      - feel relevant to tech, games, social, music, film, sports, or internet
-      - be short and easy to read
+      - stay in the same topic family (space mission, band, game, law, etc.)
+      - have similar length and style
+      - be different from each other in subject / wording
     """
-    target_len = max(10, _wlen(real_text))
+    target_words = max(8, _wlen(real_text))
     domain = _infer_domain(real_text)
     real_year = _extract_year(real_text)
 
     # ------------------------------------------
-    # 1) OpenAI path
+    # 1) OpenAI path (preferred)
     # ------------------------------------------
     if OPENAI_API_KEY:
-        domain_hint = {
-            "tech": "tech milestones, gadgets, internet companies",
-            "social_media": "social platforms, creator culture, viral features",
-            "gaming": "console launches, game studios, esports moments",
-            "music": "artists, albums, charts, streaming moments",
-            "film_tv": "movies, TV premieres, streaming originals",
-            "sports": "major league moments and sports culture",
-            "internet_culture": "memes, online communities, viral internet history",
-        }.get(domain, "modern pop culture and internet history")
-
         sys_prompt = (
-            "You write short, believable, pop-culture 'On This Day' facts.\n"
-            "Your job is to create TWO plausible but false events based on a real one.\n"
-            "Your output MUST follow these rules:\n"
-            "• The events must match the real event’s era. If the real event happened in a certain decade, "
-            "  the fakes must also use years that make sense for that decade.\n"
-            "• Do NOT create anachronisms. If a brand, app, game, musician, technology, or platform "
-            "  did not exist in the given year, you must NOT use it.\n"
-            "• You must self-verify each detail for timeline accuracy.\n"
-            "• Use simple, readable pop-culture language.\n"
-            "• Keep each entry under 26 words.\n"
-            "• Each entry must include a proper noun and one 4-digit year.\n"
-            "• No tragedies, disasters, wars, or deaths.\n"
-            "• No corporate-speak. No 'targeting younger users'. No committees.\n"
+            "You write short 'On This Day' history facts for a daily guessing game.\n"
+            "You will be given ONE real event.\n"
+            "Create TWO different events that are plausible but false.\n"
+            "They must look like they belong on the same list as the real event.\n"
+            "\n"
+            "Rules:\n"
+            f"- Keep the same general topic family as the original (e.g., space missions with space missions, "
+            f"music acts with music acts, sports with sports, tech with tech).\n"
+            "- Stay roughly in the same era. Years should be believable for that topic.\n"
+            "- Each fake should be within ±20% of the original's word count.\n"
+            "- Vary the sentence structure between the two fakes; do NOT use the same pattern twice.\n"
+            "- Do NOT always use 'launches a new streaming feature' or similar product-announcement phrasing.\n"
+            "- Each fake must include at least one proper noun and one 4-digit year.\n"
+            "- Avoid wars, disasters, or mass-casualty events.\n"
+            "- Language should be simple and readable.\n"
             "Return STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
+        )
+
+        user_content = (
+            f"Original event: {real_text}\n"
+            f"Month: {month_name}\n"
+            f"Guessed topic/domain: {domain}\n"
+            f"Approximate year (if present): {real_year if real_year else 'unknown'}\n"
         )
 
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Real event: {real_text}"},
+                {"role": "user", "content": user_content},
             ],
-            "temperature": 0.8,
+            "temperature": 0.7,
             "response_format": {"type": "json_object"},
         }
 
@@ -267,67 +316,19 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             if f1 and f2:
                 return f1, f2
         except Exception:
-            # fall through to deterministic fallback
-            time.sleep(0.3)
+            time.sleep(0.3)  # fall through to deterministic fallback
 
     # ------------------------------------------
-    # 2) Deterministic pop-culture fallback
+    # 2) Deterministic fallback: mutate real event
     # ------------------------------------------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF)
     )
 
-    brands = [
-        "Netflix", "Disney", "Spotify", "Apple", "Google", "Microsoft",
-        "Nintendo", "PlayStation", "Xbox", "TikTok", "Instagram", "YouTube",
-        "Twitch", "Reddit", "Epic Games", "HBO", "MTV"
-    ]
-
-    verbs = [
-        "launches", "debuts", "announces", "tests", "rolls out",
-        "brings back", "adds", "premieres", "updates"
-    ]
-
-    features = [
-        "a new streaming feature",
-        "a retro themed interface",
-        "a limited event for fans",
-        "a cross platform update",
-        "a creator focused tool",
-        "a live concert special",
-        "a classic game collection",
-        "a surprise season of a hit show",
-        "a short form video mode",
-    ]
-
-    places = [
-        "in Los Angeles", "in Tokyo", "in London", "in New York",
-        "in Seoul", "in Toronto", "in Sydney", "in Berlin"
-    ]
-
-    def pick_year() -> int:
-        if real_year:
-            lo = max(1985, real_year - 5)
-            hi = min(2022, real_year + 5)
-            if lo <= hi:
-                return rng.randint(lo, hi)
-        return rng.randint(1990, 2020)
-
-    def build_fake() -> str:
-        year = pick_year()
-        s = f"{rng.choice(brands)} {rng.choice(verbs)} {rng.choice(features)} {rng.choice(places)} in {year}."
-        # keep roughly near real length but still short
-        while _wlen(s) > max(target_len + 4, 22):
-            parts = s.split()
-            s = " ".join(parts[:-1])
-            if not s.endswith("."):
-                s += "."
-        return s
-
-    f1 = build_fake()
-    f2 = build_fake()
+    f1 = _mutate_event_like(real_text, rng)
+    f2 = _mutate_event_like(real_text, rng)
     while f2 == f1:
-        f2 = build_fake()
+        f2 = _mutate_event_like(real_text, rng)
 
     return f1, f2
 
