@@ -295,6 +295,26 @@ def _fallback_adjacent_fakes(real_text: str, rng: random.Random) -> Tuple[str, s
 
     return fake1, fake2
 
+def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) -> str:
+    """
+    Clamp an event description into a nice, game-friendly length window.
+    - Prefer 20–25 words.
+    - If longer, hard-trim to max_words.
+    - If shorter, leave it alone (no weird filler).
+    """
+    words = _words(text)
+    if not words:
+        return text or ""
+
+    if len(words) > max_words:
+        words = words[:max_words]
+
+    s = " ".join(words)
+    s = s.rstrip(" .,;")
+    if not s.endswith("."):
+        s += "."
+    return s
+
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
     Produce two fakes that feel like close siblings of the real event.
@@ -321,7 +341,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             "- Keep the same general topic family as the original "
             "(space missions with space missions, sports with sports, tech with tech, etc.).\n"
             "- Stay roughly in the same era. Years should be believable for that topic.\n"
-            "- Each fake should be within ±20% of the original's word count and under 30 words.\n"
+            "- Each fake should be within ±20% of the original's word count.\n"
+            "- Aim for 20–25 words for each fake when possible; if the original is longer, condense details instead of adding filler.\n"
             "- Each fake must include at least one proper noun and one 4-digit year.\n"
             "- Avoid wars, disasters, or mass-casualty events.\n"
             "- Use simple, readable language. No corporate-speak like 'targeting younger users'.\n"
@@ -589,6 +610,11 @@ def ensure_today_round(force: int = 0) -> bool:
     real_raw, month_name = _pick_real_event()
     real_soft = _soften_real_title(real_raw)
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
+
+    # Clamp all three to a similar word window so length isn't a giveaway
+    real_soft = _fit_length_for_game(real_soft)
+    fake1 = _fit_length_for_game(fake1)
+    fake2 = _fit_length_for_game(fake2)
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
