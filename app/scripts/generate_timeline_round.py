@@ -317,99 +317,149 @@ def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) ->
 
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Produce two fakes that feel like close siblings of the real event.
-    They should:
-      - stay in the same topic family (space mission, band, game, law, etc.)
-      - have similar length and style
-      - be different from each other in subject / wording
+    Create two fakes that:
+      • match the real event’s domain (space, tech, music, politics, sports, etc.)
+      • stay within the same era (±10 years unless impossible)
+      • do NOT copy structure, nouns, or numbers from each other
+      • each contain 20–25 words
+      • are believable, safe, and non-tragic
+      • avoid product-launch tropes and avoid repeating the real event
     """
-    target_words = max(8, _wlen(real_text))
-    domain = _infer_domain(real_text)
-    real_year = _extract_year(real_text)
 
-    # ------------------------------------------
-    # 1) OpenAI path (preferred)
-    # ------------------------------------------
+    target_len = 22  # sweet spot for all 3 options
+    real_year = _extract_year(real_text)
+    domain = _infer_domain(real_text)
+
+    # -----------------------------------------------
+    # 1) OpenAI path — much stricter and safer
+    # -----------------------------------------------
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You write short 'On This Day' history facts for a daily guessing game.\n"
-            "You will be given ONE real event.\n"
-            "Create TWO different events that are plausible but false.\n"
-            "They must look like they belong on the same list as the real event.\n"
+            "You generate highly believable but fictional 'On This Day' historical entries.\n"
+            "You will be given a real historical event. Create TWO different fake events.\n"
             "\n"
-            "Rules for BOTH fakes:\n"
-            "- Keep the same general topic family as the original "
-            "(space missions with space missions, sports with sports, tech with tech, etc.).\n"
-            "- Stay roughly in the same era. Years should be believable for that topic.\n"
-            "- Each fake should be within ±20% of the original's word count.\n"
-            "- Aim for 20–25 words for each fake when possible; if the original is longer, condense details instead of adding filler.\n"
-            "- Each fake must include at least one proper noun and one 4-digit year.\n"
-            "- Avoid wars, disasters, or mass-casualty events.\n"
-            "- Use simple, readable language. No corporate-speak like 'targeting younger users'.\n"
+            "HARD RULES:\n"
+            "• Both fakes must be 20–25 words each.\n"
+            "• The two fakes must not resemble each other in structure, nouns, or numbers.\n"
+            "• Keep the same general domain/topic as the real event.\n"
+            "• Year must be plausible for the topic, and never contradict real-world invention dates.\n"
+            "• Avoid tragedies, deaths, attacks, disasters, crashes, and anything violent.\n"
+            "• Avoid product launches, corporate marketing language, or feature announcements.\n"
+            "• Do NOT reuse the real event’s mission numbers, spacecraft names, or unique nouns.\n"
+            "• No repeated sentence pattern between the two fakes.\n"
+            "• Must include exactly one four-digit year.\n"
+            "• Tone should match Wikipedia’s 'On This Day' style.\n"
             "\n"
-            "Differences between fake1 and fake2:\n"
-            "- fake1 should feel like a variation of the original: similar kind of event, "
-            "  but change mission/name/place/year.\n"
-            "- fake2 should be a related but clearly different scenario in the same topic family "
-            "  (for example a follow-up mission, a similar achievement by another organization, "
-            "  or a parallel milestone).\n"
-            "- fake1 and fake2 must NOT describe the exact same main subject or mission.\n"
-            "\n"
-            "Return STRICT JSON only: {\"fake1\": \"...\", \"fake2\": \"...\"}"
+            "Output STRICT JSON:\n"
+            "{\"fake1\": \"...\", \"fake2\": \"...\"}"
         )
 
-        user_content = (
-            f"Original event: {real_text}\n"
+        user = (
+            f"Real event: {real_text}\n"
             f"Month: {month_name}\n"
-            f"Guessed topic/domain: {domain}\n"
-            f"Approximate year (if present): {real_year if real_year else 'unknown'}\n"
-            f"Target word count: around {target_words} words."
+            f"Domain hint: {domain}\n"
+            f"Approx real year: {real_year}\n"
         )
 
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_content},
+                {"role": "user", "content": user},
             ],
-            "temperature": 0.7,
+            "temperature": 0.75,
             "response_format": {"type": "json_object"},
         }
 
         try:
             r = requests.post(
                 OAI_URL,
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=30,
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}",
+                         "Content-Type": "application/json"},
+                json=payload, timeout=30
             )
             r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"]
+            raw = r.json()["choices"][0]["message"]["content"]
             try:
-                obj = requests.utils.json.loads(content)
+                obj = requests.utils.json.loads(raw)
             except Exception:
-                obj = requests.utils.json.loads(content.strip("` \n"))
-            f1 = (obj.get("fake1") or "").strip()
-            f2 = (obj.get("fake2") or "").strip()
-            if (
-                f1
-                and f2
-                and f1.strip().lower() != f2.strip().lower()
-            ):
-                return f1, f2
-        except Exception:
-            time.sleep(0.3)  # fall through to deterministic fallback
+                obj = requests.utils.json.loads(raw.strip("` "))
 
-    # ------------------------------------------
-    # 2) Deterministic fallback: adjacent fakes
-    # ------------------------------------------
+            f1 = obj.get("fake1", "").strip()
+            f2 = obj.get("fake2", "").strip()
+
+            # soft length enforcement
+            if 18 <= _wlen(f1) <= 28 and 18 <= _wlen(f2) <= 28:
+                return f1, f2
+
+        except Exception:
+            pass  # fallback below
+
+    # ---------------------------------------------------------
+    # 2) Deterministic fallback — now MUCH stronger + diverse
+    # ---------------------------------------------------------
     rng = random.Random(
-        int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF)
+        int(datetime.now(TZ).strftime("%Y%m%d")) ^
+        (hash(real_text) & 0xFFFFFFFF)
     )
-    return _fallback_adjacent_fakes(real_text, rng)
+
+    # domains → vocab pools
+    domain_pool = {
+        "tech": ["engineers", "research team", "laboratory group", "software pioneers",
+                 "robotics division", "computing institute"],
+        "gaming": ["game studio", "developers", "arcade group", "console designers",
+                   "retro gaming team"],
+        "film_tv": ["film crew", "television network", "production studio", "cinema group"],
+        "music": ["band", "recording artists", "music collective", "touring group"],
+        "sports": ["national team", "club organization", "athletic board"],
+        "social_media": ["online community", "digital forum", "early internet group"],
+        "internet_culture": ["web enthusiasts", "open-source community", "online archivists"],
+        "general": ["organization", "committee", "historical group"],
+        "gaming": ["design studio", "arcade engineers", "console project"],
+        "space": ["satellite team", "orbital research group", "aerospace division"],
+    }
+
+    pool = domain_pool.get(domain, domain_pool["general"])
+
+    def fallback_fake() -> str:
+        base = rng.choice(pool)
+        action = rng.choice([
+            "completes a notable demonstration of",
+            "tests a prototype related to",
+            "reveals early research into",
+            "presents archival findings about",
+            "documents a little-known development in",
+            "hosts a collaborative experiment on",
+        ])
+        subject = rng.choice([
+            "communications systems", "data processing", "orbital tracking",
+            "digital imaging", "broadcast methods", "network signaling",
+            "experimental hardware", "early remote sensing"
+        ])
+
+        # year selection
+        if real_year:
+            year = max(1900, min(2022, real_year + rng.choice([-6,-4,-3,-2,-1,1,2,3,4,6])))
+        else:
+            year = rng.randint(1965, 2020)
+
+        sentence = f"{base} {action} {subject} during a specialized project in {year}."
+
+        # enforce approximate word count
+        words = _words(sentence)
+        if len(words) < 20:
+            sentence += " The initiative gains attention from researchers."
+        elif len(words) > 25:
+            sentence = " ".join(words[:25]) + "."
+
+        return sentence
+
+    f1 = fallback_fake()
+    f2 = fallback_fake()
+    while f2 == f1 or (set(_words(f1)) & set(_words(f2))):
+        f2 = fallback_fake()
+
+    return f1, f2
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -444,32 +494,109 @@ def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
         pass
     return None, None
 
+def _paraphrase_real_event(text: str, target_min: int = 19, target_max: int = 25) -> str:
+    """
+    Paraphrase the real Wikipedia event into a clean 19–25 word sentence.
+    Preserves factual meaning but ensures uniform choice lengths.
+    Falls back to trimmed/normalized version if API unavailable.
+    """
+    if not text:
+        return ""
+
+    # If we have OpenAI, do a controlled paraphrase
+    if OPENAI_API_KEY:
+        sys_prompt = (
+            "You rewrite historical event summaries.\n"
+            "You must create a factually accurate paraphrase of the given event.\n"
+            "Rules:\n"
+            f"• Length must be between {target_min} and {target_max} words.\n"
+            "• Keep all factual details true.\n"
+            "• Keep it one clean sentence.\n"
+            "• No embellishments, no added claims, no interpretation.\n"
+            "• Maintain a neutral Wikipedia-like tone.\n"
+            "• No tragedies may be softened; keep accuracy while maintaining safety.\n"
+            "Return only the rewritten sentence."
+        )
+
+        payload = {
+            "model": OAI_MODEL,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0.3,
+        }
+
+        try:
+            r = requests.post(
+                OAI_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=25
+            )
+            r.raise_for_status()
+            paraphrased = r.json()["choices"][0]["message"]["content"].strip()
+
+            # soft length validation
+            w = _wlen(paraphrased)
+            if target_min <= w <= target_max:
+                return paraphrased
+
+        except Exception:
+            pass
+
+    # If API unavailable or paraphrase fails, soft fallback
+    # Keep only essential elements + enforce target range by trimming/padding neutrally
+    base = text.strip()
+
+    # remove trailing long clauses but keep core meaning
+    base = re.sub(r",[^.]+", "", base)
+
+    words = _words(base)
+    if len(words) > target_max:
+        words = words[:target_max]
+    elif len(words) < target_min:
+        # gently expand with neutral Wikipedia-ish phrasing
+        extra = ["in", "a", "notable", "historical", "context"]
+        while len(words) < target_min:
+            words += extra[: max(0, target_min - len(words))]
+
+    return " ".join(words).rstrip(".") + "."
+
 def _pick_real_event() -> Tuple[str, str]:
+    """
+    Fetches today's real event from Wikipedia.
+    Selects a youth-relevant, non-tragic item.
+    Then paraphrases it to ~22 words for consistency with fake entries.
+    Returns (paraphrased_real_event, month_name).
+    """
+
     today = _today_local_date()
     url = WIKI_URL.format(m=today.month, d=today.day)
     j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.1"})
     events = j.get("events", [])
-    if not events:
-        raise RuntimeError("No events returned from Wikipedia OTD")
 
     def _text(e: dict) -> str:
         return (e.get("text") or e.get("displaytitle") or "").strip()
 
-    # filter out tragedies first
+    # Filter tragedies
     pool = [e for e in events if _text(e) and not _is_tragedy(_text(e))]
     if not pool:
         pool = [e for e in events if _text(e)]
 
-    # score for youth appeal
+    # Score and pick youth-relevant events
     scored = sorted(pool, key=_score_for_youth, reverse=True)
 
-    # take the top few and randomize so you can re-roll the real event
+    # Shuffle top picks so re-rolling gets variation
     top = scored[:20]
     random.shuffle(top)
 
-    picked_text: Optional[str] = None
+    picked_text = None
 
-    # first try high scoring, post-1980, single sentence, reasonable length
+    # Prefer post-1980, clean single-sentence events
     for e in top:
         t = _text(e)
         year = e.get("year")
@@ -477,34 +604,31 @@ def _pick_real_event() -> Tuple[str, str]:
             y = int(year)
         except Exception:
             y = None
+
         if y is not None and y < 1980:
             continue
-        if 40 <= len(t) <= 200 and t.count(".") <= 1:
+
+        if 20 <= len(t) <= 240 and t.count(".") <= 1:
             picked_text = t
             break
 
-    # fallback to any clean item inside the same randomized top set
+    # fallback inside shuffled list
     if not picked_text:
         for e in top:
             t = _text(e)
-            if 40 <= len(t) <= 200 and t.count(".") <= 1:
+            if 20 <= len(t) <= 240 and t.count(".") <= 1:
                 picked_text = t
                 break
 
-    # final fallback: original rough filter over all events
+    # last fallback
     if not picked_text:
-        random.shuffle(events)
-        for e in events:
-            t = _text(e)
-            if 40 <= len(t) <= 200 and t.count(".") <= 1:
-                picked_text = t
-                break
+        picked_text = _text(scored[0]) or "A significant event is recorded."
 
-    if not picked_text:
-        picked_text = "A pop-culture or tech milestone is recorded."
+    # 🔥 NEW: produce 22±3 word paraphrase
+    real_paraphrased = _paraphrase_real_event(picked_text)
 
     month_name = today.strftime("%B")
-    return picked_text, month_name
+    return real_paraphrased, month_name
 
 # --- replace _openai_image with this ---
 def _openai_image(prompt: str) -> Optional[str]:
