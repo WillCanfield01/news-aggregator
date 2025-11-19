@@ -193,12 +193,17 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
+# --- adjacency helpers -------------------------------------------------
+
 ENTITY_SWAPS: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"\bGoogle\b"), ["Microsoft", "Apple", "Yahoo", "Amazon"]),
     (re.compile(r"\bMicrosoft\b"), ["Google", "Apple", "IBM"]),
     (re.compile(r"\bApple\b"), ["Samsung", "Google", "Sony"]),
     (re.compile(r"\bNASA\b"), ["ESA", "Roscosmos", "JAXA"]),
     (re.compile(r"\bSpace Shuttle Columbia\b"), ["Space Shuttle Discovery", "Space Shuttle Atlantis", "Space Shuttle Endeavour"]),
+    (re.compile(r"\bSpace Shuttle Discovery\b"), ["Space Shuttle Columbia", "Space Shuttle Atlantis", "Space Shuttle Endeavour"]),
+    (re.compile(r"\bSpace Shuttle Atlantis\b"), ["Space Shuttle Columbia", "Space Shuttle Discovery", "Space Shuttle Endeavour"]),
+    (re.compile(r"\bSpace Shuttle Endeavour\b"), ["Space Shuttle Columbia", "Space Shuttle Discovery", "Space Shuttle Atlantis"]),
     (re.compile(r"\bLos Angeles\b"), ["New York", "Seattle", "San Francisco", "Chicago"]),
     (re.compile(r"\bNew York\b"), ["Los Angeles", "Chicago", "Boston"]),
 ]
@@ -243,6 +248,53 @@ def _mutate_event_like(real_text: str, rng: random.Random) -> str:
 
     return s
 
+def _fallback_adjacent_fakes(real_text: str, rng: random.Random) -> Tuple[str, str]:
+    """
+    Deterministic fallback when OpenAI is unavailable.
+    - For space-style events: one shuttle variation + one related satellite/mission.
+    - For others: first fake is a mutation of the real, second fake is a mutation of the first.
+    """
+    lc = real_text.lower()
+
+    # Space / shuttle style events
+    if "space shuttle" in lc or "sts-" in lc or "nasa" in lc or "orbit" in lc:
+        year = _extract_year(real_text) or rng.randint(1981, 2011)
+
+        # variation of the original
+        fake1 = _mutate_event_like(real_text, rng)
+
+        # adjacent but different scenario (satellite or different kind of mission)
+        mission_num = rng.randint(60, 95)
+        fake2 = (
+            f"A communications satellite is deployed during NASA mission STS-{mission_num} "
+            f"to expand global coverage in {year}."
+        )
+
+        # small safety: avoid accidental duplicates
+        if fake2.strip().lower() == fake1.strip().lower():
+            mission_num += 2
+            fake2 = (
+                f"A joint NASA–ESA mission STS-{mission_num} conducts microgravity experiments "
+                f"on board a laboratory module in {year}."
+            )
+        return fake1, fake2
+
+    # Generic path: chain two different mutations
+    fake1 = _mutate_event_like(real_text, rng)
+    base_for_second = fake1
+    fake2 = _mutate_event_like(base_for_second, rng)
+    tries = 0
+    while (
+        fake2.strip().lower() in {
+            fake1.strip().lower(),
+            real_text.strip().lower(),
+        } and tries < 5
+    ):
+        fake2 = _mutate_event_like(base_for_second, rng)
+        tries += 1
+
+    return fake1, fake2
+
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
     Produce two fakes that feel like close siblings of the real event.
@@ -265,17 +317,24 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             "Create TWO different events that are plausible but false.\n"
             "They must look like they belong on the same list as the real event.\n"
             "\n"
-            "Rules:\n"
-            f"- Keep the same general topic family as the original (e.g., space missions with space missions, "
-            f"music acts with music acts, sports with sports, tech with tech).\n"
+            "Rules for BOTH fakes:\n"
+            "- Keep the same general topic family as the original "
+            "(space missions with space missions, sports with sports, tech with tech, etc.).\n"
             "- Stay roughly in the same era. Years should be believable for that topic.\n"
-            "- Each fake should be within ±20% of the original's word count.\n"
-            "- Vary the sentence structure between the two fakes; do NOT use the same pattern twice.\n"
-            "- Do NOT always use 'launches a new streaming feature' or similar product-announcement phrasing.\n"
+            "- Each fake should be within ±20% of the original's word count and under 30 words.\n"
             "- Each fake must include at least one proper noun and one 4-digit year.\n"
             "- Avoid wars, disasters, or mass-casualty events.\n"
-            "- Language should be simple and readable.\n"
-            "Return STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
+            "- Use simple, readable language. No corporate-speak like 'targeting younger users'.\n"
+            "\n"
+            "Differences between fake1 and fake2:\n"
+            "- fake1 should feel like a variation of the original: similar kind of event, "
+            "  but change mission/name/place/year.\n"
+            "- fake2 should be a related but clearly different scenario in the same topic family "
+            "  (for example a follow-up mission, a similar achievement by another organization, "
+            "  or a parallel milestone).\n"
+            "- fake1 and fake2 must NOT describe the exact same main subject or mission.\n"
+            "\n"
+            "Return STRICT JSON only: {\"fake1\": \"...\", \"fake2\": \"...\"}"
         )
 
         user_content = (
@@ -283,6 +342,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             f"Month: {month_name}\n"
             f"Guessed topic/domain: {domain}\n"
             f"Approximate year (if present): {real_year if real_year else 'unknown'}\n"
+            f"Target word count: around {target_words} words."
         )
 
         payload = {
@@ -313,24 +373,22 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
                 obj = requests.utils.json.loads(content.strip("` \n"))
             f1 = (obj.get("fake1") or "").strip()
             f2 = (obj.get("fake2") or "").strip()
-            if f1 and f2:
+            if (
+                f1
+                and f2
+                and f1.strip().lower() != f2.strip().lower()
+            ):
                 return f1, f2
         except Exception:
             time.sleep(0.3)  # fall through to deterministic fallback
 
     # ------------------------------------------
-    # 2) Deterministic fallback: mutate real event
+    # 2) Deterministic fallback: adjacent fakes
     # ------------------------------------------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF)
     )
-
-    f1 = _mutate_event_like(real_text, rng)
-    f2 = _mutate_event_like(real_text, rng)
-    while f2 == f1:
-        f2 = _mutate_event_like(real_text, rng)
-
-    return f1, f2
+    return _fallback_adjacent_fakes(real_text, rng)
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -485,7 +543,7 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
             j = _http_get_json(
                 "https://api.unsplash.com/search/photos",
                 params={"query": q, "orientation": "squarish", "per_page": 6, "content_filter": "high"},
-                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+                headers={"Authorization": "Client-ID " + UNSPLASH_ACCESS_KEY},
             )
             for r in j.get("results", []):
                 img = r.get("urls", {}).get("small")
