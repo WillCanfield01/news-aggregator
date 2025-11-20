@@ -396,7 +396,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             pass  # fallback below
 
     # ---------------------------------------------------------
-    # 2) Deterministic fallback — now MUCH stronger + diverse
+    # 2) Deterministic fallback — now MUCH safer + bounded
     # ---------------------------------------------------------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^
@@ -415,7 +415,6 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
         "social_media": ["online community", "digital forum", "early internet group"],
         "internet_culture": ["web enthusiasts", "open-source community", "online archivists"],
         "general": ["organization", "committee", "historical group"],
-        "gaming": ["design studio", "arcade engineers", "console project"],
         "space": ["satellite team", "orbital research group", "aerospace division"],
     }
 
@@ -456,7 +455,10 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
 
     f1 = fallback_fake()
     f2 = fallback_fake()
-    while f2 == f1 or (set(_words(f1)) & set(_words(f2))):
+    # only avoid exact duplicates, and cap attempts to avoid loops
+    for _ in range(5):
+        if f2.strip().lower() != f1.strip().lower():
+            break
         f2 = fallback_fake()
 
     return f1, f2
