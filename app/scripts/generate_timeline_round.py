@@ -100,6 +100,61 @@ def _infer_domain(text: str) -> str:
         return "internet_culture"
     return "general"
 
+def _domain_flair(domain: str, rng: random.Random) -> str:
+    """Add a short believable detail to change phrasing without leaving the domain."""
+    flair = {
+        "sports": [
+            "during a dramatic season finale",
+            "after a late surge in points",
+            "under rainy track conditions",
+            "in front of a huge TV audience",
+        ],
+        "tech": [
+            "at a packed press event",
+            "after months of speculation",
+            "marking a major milestone for the company",
+            "sparking wide coverage online",
+        ],
+        "social_media": [
+            "trending across platforms that week",
+            "drawing massive online reactions",
+            "shared widely by fans",
+            "picked up by creators everywhere",
+        ],
+        "gaming": [
+            "after a record-breaking tournament",
+            "as players flooded servers",
+            "during a big livestream reveal",
+            "becoming a fan-favorite moment",
+        ],
+        "music": [
+            "ahead of a sold-out tour",
+            "topping popular charts",
+            "getting heavy radio play",
+            "featured in viral clips",
+        ],
+        "film_tv": [
+            "during a buzzy premiere weekend",
+            "earning strong fan reviews",
+            "becoming a quotable moment",
+            "sparking watch parties",
+        ],
+        "internet_culture": [
+            "after memes spread quickly",
+            "landing on front pages",
+            "as forums lit up with posts",
+            "becoming a gif everyone shared",
+        ],
+        "general": [
+            "drawing wide news coverage",
+            "reported around the world",
+            "quickly picked up by headlines",
+            "highlighted in year-end recaps",
+        ],
+    }
+    options = flair.get(domain, flair["general"])
+    return rng.choice(options)
+
 def _is_tragedy(text: str) -> bool:
     lc = (text or "").lower()
     return any(w in lc for w in NEGATIVE_TERMS)
@@ -370,7 +425,7 @@ def _too_similar(a: str, b: str) -> bool:
     inter = len(sa & sb)
     union = len(sa | sb) or 1
     jacc = inter / union
-    return jacc > 0.6
+    return jacc > 0.5
 
 def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> Tuple[str, str]:
     """
@@ -537,11 +592,14 @@ def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> T
     def _fallback_fake() -> str:
         base = _mutate_event_like(real_text, rng)
         if _too_similar(base, real_text):
-            for _ in range(3):
-                base = _force_variation(real_text)
+            for _ in range(4):
+                base = _force_variation(base)
                 if not _too_similar(base, real_text):
                     break
         base = _reshape_structure(base)
+        # add a short domain-specific flair to break phrasing sameness
+        flair = _domain_flair(domain, rng)
+        base = f"{base.rstrip('.')} {flair}."
         base = _fit_length_for_game(base, min_len, max_len)
         return _sentence_case(base)
 
@@ -780,6 +838,17 @@ def _openai_image(prompt: str) -> Optional[str]:
 
 # keep this constant
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
+FALLBACK_ICON_DATA_URL = (
+    "data:image/svg+xml;base64,"
+    "PHN2ZyB3aWR0aD0iNzIiIGhlaWdodD0iNzIiIHZpZXdCb3g9IjAgMCA3MiA3MiIgZmlsbD0ibm9uZSIg"
+    "eG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjcyIiBoZWlnaHQ9"
+    "IjcyIiByeD0iMjQiIGZpbGw9IiNmMWYyZjUiIHN0cm9rZT0iI2Q5ZGE5YSIgc3Ryb2tlLXdpZHRoPSIy"
+    "Ii8+CjxjaXJjbGUgY3g9IjM2IiBjeT0iMzYiIHI9IjE2IiBmaWxsPSIjOWNhY2RmIiBzdHJva2U9IiM4"
+    "NmJiYmMiIHN0cm9rZS13aWR0aD0iMiIvPgo8cGF0aCBkPSJNMzYgMTQuN2w0LjYgOS4zIDEwLjMgMS41"
+    "LTcuNCA3LjIgMS43IDEwLjMtOS4yLTQuOC05LjIgNC44IDEuNy0xMC4zLTcuNC03LjItNy4zIDEuNy0x"
+    "MC4zLTEwLjMtMS41IDcuNC03LjItNC42LTkuMyA0LjYgOS4zIiBmaWxsPSIjZjRmOGZmIiBzdHJva2U9"
+    "IiNlYWM3YWQiIHN0cm9rZS13aWR0aD0iMiIvPgo8L3N2Zz4="
+)
 
 # --- replace _image_for with this ---
 def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
@@ -817,9 +886,10 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
             return u, "OpenAI generated"
 
     # 3) Guaranteed visible fallback (never blank)
-    if FALLBACK_ICON_URL not in used:
-        used.add(FALLBACK_ICON_URL)
-    return FALLBACK_ICON_URL, ""
+    fallback_url = FALLBACK_ICON_DATA_URL
+    if fallback_url not in used:
+        used.add(fallback_url)
+    return fallback_url, ""
 
 def ensure_today_round(force: int = 0) -> bool:
     """
@@ -861,6 +931,16 @@ def ensure_today_round(force: int = 0) -> bool:
         fake1 = _normalize_choice(f1)
         fake2 = _normalize_choice(f2)
         salt += 1
+
+    def _unique_front(a: str, b: str) -> bool:
+        ta, tb = _normalize_tokens(a)[:4], _normalize_tokens(b)[:4]
+        return ta != tb
+
+    # If openings still match, prepend light differentiators
+    if not _unique_front(fake1, real_soft):
+        fake1 = _normalize_choice(f"In another account, {fake1}")
+    if not _unique_front(fake2, real_soft) or not _unique_front(fake2, fake1):
+        fake2 = _normalize_choice(f"A different take says {fake2}")
 
     if _too_similar(fake1, real_soft):
         fake1 = _normalize_choice(f"Another account notes {fake1}")
