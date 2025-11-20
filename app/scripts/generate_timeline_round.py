@@ -442,6 +442,29 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
         (hash(real_text) & 0xFFFFFFFF)
     )
 
+    def _reshape_structure(src: str) -> str:
+        """
+        Change the sentence shape so we don't get three "In 20xx the first..." clones.
+        Keeps content, but moves the year and adds a light intro.
+        """
+        year = _extract_year(src) or rng.choice(range(1990, 2020))
+        stripped = re.sub(r"\b(19|20)\d{2}\b", "", src).strip()
+        stripped = re.sub(r"^(in|on)\b[:\s,]*", "", stripped, flags=re.I).strip()
+        # keep lowercase start so templates can control capitalization
+        if stripped and stripped[0].isupper():
+            stripped = stripped[0].lower() + stripped[1:]
+
+        templates = [
+            f"In {year}, {stripped}",
+            f"{stripped.capitalize()} It took place in {year}.",
+            f"A story from {year}: {stripped}",
+            f"{stripped.capitalize()} during {year}.",
+        ]
+        pick = rng.choice(templates).strip()
+        if not pick.endswith("."):
+            pick += "."
+        return pick
+
     def _force_variation(src: str) -> str:
         """If mutation didn't create distance, substitute a generic noun/verb or inject a year prefix."""
         tokens = _words(src)
@@ -476,21 +499,24 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
                 base = _force_variation(real_text)
                 if not _too_similar(base, real_text):
                     break
+        base = _reshape_structure(base)
         base = _fit_length_for_game(base, min_len, max_len)
         return _sentence_case(base)
 
-    f1 = _fallback_fake()
-    for _ in range(8):
-        f2 = _fallback_fake()
-        if not _too_similar(f1, f2) and not _too_similar(f2, real_text):
-            return f1, f2
+    candidates: list[str] = []
+    for _ in range(12):
+        cand = _fallback_fake()
+        if not _too_similar(cand, real_text):
+            if all(not _too_similar(cand, c) for c in candidates):
+                candidates.append(cand)
+        if len(candidates) >= 2:
+            break
 
-    if f1.strip().lower() == f2.strip().lower():
-        f2 = _mutate_event_like(f1, rng)
-        f2 = _fit_length_for_game(f2, min_len, max_len)
-        f2 = _sentence_case(f2)
+    # pad out if we somehow didn't get two distinct ones
+    while len(candidates) < 2:
+        candidates.append(_sentence_case(_fit_length_for_game(_force_variation(real_text), min_len, max_len)))
 
-    return f1, f2
+    return candidates[0], candidates[1]
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -591,10 +617,19 @@ def _paraphrase_real_event(text: str, target_min: int = 19, target_max: int = 25
     if len(words) > target_max:
         words = words[:target_max]
     elif len(words) < target_min:
-        # gently expand with neutral Wikipedia-ish phrasing
-        extra = ["in", "a", "notable", "historical", "context"]
+        # gently expand with neutral, non-repeating filler
+        fillers = [
+            "in a notable historical context",
+            "recognized by contemporary reports",
+            "remembered for its cultural impact",
+            "noted in popular coverage",
+        ]
+        fi = 0
         while len(words) < target_min:
-            words += extra[: max(0, target_min - len(words))]
+            add = _words(fillers[fi % len(fillers)])
+            take = min(target_min - len(words), len(add))
+            words += add[:take]
+            fi += 1
 
     return " ".join(words).rstrip(".") + "."
 
