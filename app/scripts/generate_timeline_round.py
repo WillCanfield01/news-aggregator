@@ -279,48 +279,98 @@ def _sentence_case(s: str) -> str:
         return s
     return s[0].upper() + s[1:]
 
+def _normalize_tokens(s: str) -> list[str]:
+    return [w.lower() for w in _words(s)]
+
+
+def _ngram_set(tokens: list[str], n: int) -> set[str]:
+    if len(tokens) < n:
+        return set()
+    return {" ".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)}
+
+def _has_banned_jargon(s: str) -> bool:
+    low = (s or "").lower()
+    return any(word in low for word in BANNED_JARGON)
+
+def _too_similar(a: str, b: str) -> bool:
+    """
+    Return True if two sentences look too similar for separate choices.
+    Checks for large phrase overlap and high word overlap.
+    """
+    ta = _normalize_tokens(a)
+    tb = _normalize_tokens(b)
+    if not ta or not tb:
+        return False
+
+    sa, sb = set(ta), set(tb)
+
+    # one mostly contained in the other
+    a_text = " ".join(ta)
+    b_text = " ".join(tb)
+    if a_text in b_text or b_text in a_text:
+        return True
+
+    # shared 3-grams
+    tri_a = _ngram_set(ta, 3)
+    tri_b = _ngram_set(tb, 3)
+    if tri_a and tri_b and tri_a.intersection(tri_b):
+        return True
+
+    # shared 2-grams, allow a few, block heavy overlap
+    bi_a = _ngram_set(ta, 2)
+    bi_b = _ngram_set(tb, 2)
+    if bi_a and bi_b:
+        overlap = len(bi_a & bi_b)
+        if overlap >= 3:
+            return True
+
+    # simple Jaccard on words
+    inter = len(sa & sb)
+    union = len(sa | sb) or 1
+    jacc = inter / union
+    return jacc > 0.6
+
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
     Create two fakes that:
-      • match the real event’s domain (space, tech, music, TV/game shows, sports, etc.)
-      • stay within the same era (±10 years unless impossible)
+      • stay in the same loose domain / era as the real event
+      • feel like real 'on this day' facts
       • are 20–25 words, simple language
-      • no tragedies, no lab / research jargon
-      • do NOT copy structure, nouns, or numbers from each other
+      • avoid tragedies and jargon
+      • are not close copies of each other or of the real event
     """
 
-    target_len = 22  # sweet spot for all 3 options
     real_year = _extract_year(real_text)
     domain = _infer_domain(real_text)
-    lc = (real_text or "").lower()
 
-    # Extra hint for TV game shows / TV events
-    is_tv_quiz = any(p in lc for p in [
-        "game show", "quiz show", "television game show", "tv game show"
-    ])
+    # Hard game window for fakes
+    min_len = 20
+    max_len = 25
+
+    def _len_ok(s: str) -> bool:
+        n = _wlen(s)
+        return min_len <= n <= max_len
 
     # -----------------------------------------------
-    # 1) OpenAI path — now biased to simple, non-jargony fakes
+    # 1) OpenAI path
     # -----------------------------------------------
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You generate believable but fictional 'On This Day' history facts for a guessing game.\n"
-            "You will be given ONE real event. Create TWO different fake events.\n"
+            "You create believable but fictional 'On This Day' history facts for a guessing game.\n"
+            "You receive one real event and must invent TWO fake events.\n"
             "\n"
-            "HARD RULES:\n"
-            "• Both fakes must be between 20 and 25 words.\n"
-            "• Language must be clear and simple, easy for a teenager to understand.\n"
-            "• Keep the same general domain/topic as the real event.\n"
-            "  - If the real event is a TV game show, both fakes must also be TV or game-show events.\n"
-            "• Year must be plausible for the topic, with exactly one four-digit year in each fake.\n"
-            "• Avoid wars, disasters, deaths, attacks, crashes, or anything violent.\n"
-            "• Avoid lab or research jargon. Do NOT use any of these words:\n"
+            "Rules for both fakes:\n"
+            f"- Use simple, modern language. Each fake must be between {min_len} and {max_len} words.\n"
+            "- Keep the same general type of thing as the real event "
+            "(for example space flight, sports game, TV show, tech milestone, music event).\n"
+            "- Use exactly one four-digit year in each fake. Year must fit the topic.\n"
+            "- Avoid wars, disasters, deaths, attacks, crashes, or other violent events.\n"
+            "- Avoid lab or research jargon. Do NOT use these words:\n"
             "  prototype, initiative, specialized, project, institute, laboratory,\n"
             "  pioneers, researchers, data processing.\n"
-            "• Avoid corporate marketing or product-launch language.\n"
-            "• The two fakes must not reuse the same structure, names, or numbers.\n"
-            "• Do not reuse unique names or numbers from the real event.\n"
-            "• Tone should feel like a short 'On This Day' note, one sentence each.\n"
+            "- Each fake is one sentence, like a short Wikipedia 'On this day' entry.\n"
+            "- The two fakes must feel different from each other; do not reuse long phrases or mirrored structure.\n"
+            "- Do not copy unique names, titles, or numbers from the real event.\n"
             "\n"
             "Output STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
         )
@@ -328,8 +378,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
         user = (
             f"Real event: {real_text}\n"
             f"Month: {month_name}\n"
-            f"Domain hint: {domain}\"\n"
-            f"Extra type hint: {'tv_game_show' if is_tv_quiz else 'none'}\n"
+            f"Domain hint: {domain}\n"
             f"Approx real year: {real_year}\n"
         )
 
@@ -363,89 +412,40 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             f1 = (obj.get("fake1") or "").strip()
             f2 = (obj.get("fake2") or "").strip()
 
-            # basic validation: length + no banned jargon
-            def _bad(s: str) -> bool:
-                low = s.lower()
-                return (
-                    _wlen(s) < 18
-                    or _wlen(s) > 28
-                    or any(w in low for w in BANNED_JARGON)
-                )
-
-            if f1 and f2 and not _bad(f1) and not _bad(f2):
-                return f1, f2
+            if f1 and f2:
+                # length, jargon, and similarity checks
+                if _len_ok(f1) and _len_ok(f2):
+                    if not _has_banned_jargon(f1) and not _has_banned_jargon(f2):
+                        if not _too_similar(f1, f2) and not _too_similar(f1, real_text) and not _too_similar(f2, real_text):
+                            return f1, f2
 
         except Exception:
-            # fall through to deterministic path
+            # fall through to fallback
             pass
 
     # ---------------------------------------------------------
-    # 2) Deterministic fallback — domain aware, teen-friendly language
+    # 2) Deterministic fallback (unchanged except word window)
     # ---------------------------------------------------------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^
         (hash(real_text) & 0xFFFFFFFF)
     )
 
-    # helper: TV quiz–style fake when the real thing is like Millionaire
-    def _tv_quiz_fake() -> str:
-        first_names = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Sam"]
-        last_names  = ["Reed", "Lopez", "Patel", "Nguyen", "Johnson", "Kim", "Garcia"]
-        shows = [
-            "Global Quiz Challenge", "Prime Time Questions",
-            "All-Star Trivia Night", "Lightning Round Live",
-        ]
-        networks = ["NBC", "ABC", "CBS", "BBC", "ITV"]
+    def _fallback_fake() -> str:
+        base = _mutate_event_like(real_text, rng)
+        base = _fit_length_for_game(base, min_len, max_len)
+        return _sentence_case(base)
 
-        year = real_year or rng.randint(1995, 2023)
-        name = f"{rng.choice(first_names)} {rng.choice(last_names)}"
-        show = rng.choice(shows)
-        net  = rng.choice(networks)
+    f1 = _fallback_fake()
+    for _ in range(8):
+        f2 = _fallback_fake()
+        if not _too_similar(f1, f2) and not _too_similar(f2, real_text):
+            return f1, f2
 
-        s = (
-            f"{name} wins the top prize on the TV quiz show {show} after answering the final "
-            f"question correctly on {net} in {year}."
-        )
-        # tighten to 20–25 words
-        s = _fit_length_for_game(s, 20, 25)
-        return _sentence_case(s)
-
-    # If the real thing is a TV/game show, lean hard into that
-    if is_tv_quiz:
-        f1 = _tv_quiz_fake()
-        f2 = _tv_quiz_fake()
-        for _ in range(5):
-            if f2.lower() != f1.lower():
-                break
-            f2 = _tv_quiz_fake()
-        return f1, f2
-
-    # Generic, non-TV fallback: keep it simple but non-lab-y
-    def _generic_fake() -> str:
-        year = real_year or rng.randint(1960, 2020)
-        subject = rng.choice([
-            "a popular event", "a public festival", "a tech conference",
-            "a sports tournament", "a music show", "a fan convention",
-        ])
-        action = rng.choice([
-            "draws a record crowd", "sets a new attendance mark",
-            "introduces a new format", "features a surprise guest",
-            "becomes a big news story",
-        ])
-        place = rng.choice([
-            "in a major city", "in the host country", "at a downtown arena",
-            "at a large stadium", "at a busy convention center",
-        ])
-        s = f"{subject} {action} {place} in {year}, becoming one of the most talked about events of the year."
-        s = _fit_length_for_game(s, 20, 25)
-        return _sentence_case(s)
-
-    f1 = _generic_fake()
-    f2 = _generic_fake()
-    for _ in range(5):
-        if f2.lower() != f1.lower():
-            break
-        f2 = _generic_fake()
+    if f1.strip().lower() == f2.strip().lower():
+        f2 = _mutate_event_like(f1, rng)
+        f2 = _fit_length_for_game(f2, min_len, max_len)
+        f2 = _sentence_case(f2)
 
     return f1, f2
 
