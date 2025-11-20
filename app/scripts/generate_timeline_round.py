@@ -213,6 +213,17 @@ ENTITY_SWAPS: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"\bNew York\b"), ["Los Angeles", "Chicago", "Boston"]),
 ]
 
+GENERIC_SWAPS: dict[str, list[str]] = {
+    "committee": ["commission", "council", "panel"],
+    "ethics": ["conduct", "oversight", "accountability"],
+    "censured": ["reprimanded", "rebuked", "issued a warning to"],
+    "senator": ["representative", "governor", "mayor"],
+    "executive": ["financier", "lobbyist", "advisor"],
+    "hearing": ["session", "meeting", "review"],
+    "congress": ["parliament", "assembly", "legislature"],
+    "program": ["initiative", "campaign", "drive"],
+}
+
 def _mutate_event_like(real_text: str, rng: random.Random) -> str:
     """
     Create a fake that stays close to the real event:
@@ -431,8 +442,40 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
         (hash(real_text) & 0xFFFFFFFF)
     )
 
+    def _force_variation(src: str) -> str:
+        """If mutation didn't create distance, substitute a generic noun/verb or inject a year prefix."""
+        tokens = _words(src)
+        swapped = False
+        new_tokens: list[str] = []
+
+        for w in tokens:
+            lw = w.lower()
+            if not swapped and lw in GENERIC_SWAPS:
+                repl = rng.choice(GENERIC_SWAPS[lw])
+                # Preserve capitalization if it looked like a proper noun
+                repl = repl.capitalize() if w[0].isupper() else repl
+                new_tokens.append(repl)
+                swapped = True
+            else:
+                new_tokens.append(w)
+
+        if not swapped:
+            # inject a plausible year to guarantee a difference
+            year = rng.choice(range(1984, 2019))
+            new_tokens = ["In", str(year) + ","] + new_tokens
+
+        s = " ".join(new_tokens)
+        if not s.endswith("."):
+            s += "."
+        return s
+
     def _fallback_fake() -> str:
         base = _mutate_event_like(real_text, rng)
+        if _too_similar(base, real_text):
+            for _ in range(3):
+                base = _force_variation(real_text)
+                if not _too_similar(base, real_text):
+                    break
         base = _fit_length_for_game(base, min_len, max_len)
         return _sentence_case(base)
 
