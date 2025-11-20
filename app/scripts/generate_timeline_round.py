@@ -248,53 +248,6 @@ def _mutate_event_like(real_text: str, rng: random.Random) -> str:
 
     return s
 
-def _fallback_adjacent_fakes(real_text: str, rng: random.Random) -> Tuple[str, str]:
-    """
-    Deterministic fallback when OpenAI is unavailable.
-    - For space-style events: one shuttle variation + one related satellite/mission.
-    - For others: first fake is a mutation of the real, second fake is a mutation of the first.
-    """
-    lc = real_text.lower()
-
-    # Space / shuttle style events
-    if "space shuttle" in lc or "sts-" in lc or "nasa" in lc or "orbit" in lc:
-        year = _extract_year(real_text) or rng.randint(1981, 2011)
-
-        # variation of the original
-        fake1 = _mutate_event_like(real_text, rng)
-
-        # adjacent but different scenario (satellite or different kind of mission)
-        mission_num = rng.randint(60, 95)
-        fake2 = (
-            f"A communications satellite is deployed during NASA mission STS-{mission_num} "
-            f"to expand global coverage in {year}."
-        )
-
-        # small safety: avoid accidental duplicates
-        if fake2.strip().lower() == fake1.strip().lower():
-            mission_num += 2
-            fake2 = (
-                f"A joint NASA–ESA mission STS-{mission_num} conducts microgravity experiments "
-                f"on board a laboratory module in {year}."
-            )
-        return fake1, fake2
-
-    # Generic path: chain two different mutations
-    fake1 = _mutate_event_like(real_text, rng)
-    base_for_second = fake1
-    fake2 = _mutate_event_like(base_for_second, rng)
-    tries = 0
-    while (
-        fake2.strip().lower() in {
-            fake1.strip().lower(),
-            real_text.strip().lower(),
-        } and tries < 5
-    ):
-        fake2 = _mutate_event_like(base_for_second, rng)
-        tries += 1
-
-    return fake1, fake2
-
 def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) -> str:
     """
     Clamp an event description into a nice, game-friendly length window.
@@ -314,6 +267,12 @@ def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) ->
     if not s.endswith("."):
         s += "."
     return s
+
+def _sentence_case(s: str) -> str:
+    s = s.strip()
+    if not s:
+        return s
+    return s[0].upper() + s[1:]
 
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
@@ -421,37 +380,48 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     pool = domain_pool.get(domain, domain_pool["general"])
 
     def fallback_fake() -> str:
-        base = rng.choice(pool)
-        action = rng.choice([
-            "completes a notable demonstration of",
-            "tests a prototype related to",
-            "reveals early research into",
-            "presents archival findings about",
-            "documents a little-known development in",
-            "hosts a collaborative experiment on",
-        ])
-        subject = rng.choice([
-            "communications systems", "data processing", "orbital tracking",
-            "digital imaging", "broadcast methods", "network signaling",
-            "experimental hardware", "early remote sensing"
-        ])
+        """
+        Youth-friendly, simple, modern language. ~22 words.
+        No jargon, no research-heavy phrasing, no 'specialized project'.
+        """
+        subjects = [
+            "a NASA team", "engineers at ESA", "a science group", "a university team",
+            "a tech organization", "a space agency crew"
+        ]
 
-        # year selection
+        actions = [
+            "tests a small prototype", 
+            "tries a new tool", 
+            "runs a quick experiment", 
+            "checks early equipment", 
+            "works on a simple demo", 
+            "shares an early concept",
+        ]
+
+        extras = [
+            "to study radio signals", 
+            "to track satellites", 
+            "to measure sensors", 
+            "to improve communications", 
+            "for a space workshop", 
+            "for a training session",
+        ]
+
         if real_year:
-            year = max(1900, min(2022, real_year + rng.choice([-6,-4,-3,-2,-1,1,2,3,4,6])))
+            year = max(1980, min(2022, real_year + rng.choice([-4,-3,-1,1,2,3,4])))
         else:
-            year = rng.randint(1965, 2020)
+            year = rng.randint(1980, 2020)
 
-        sentence = f"{base} {action} {subject} during a specialized project in {year}."
+        s = f"{rng.choice(subjects)} {rng.choice(actions)} {rng.choice(extras)} in {year}."
 
-        # enforce approximate word count
-        words = _words(sentence)
+        # enforce 20–25 words
+        words = _words(s)
         if len(words) < 20:
-            sentence += " The initiative gains attention from researchers."
+            s += " The team posts the results online."
         elif len(words) > 25:
-            sentence = " ".join(words[:25]) + "."
+            s = " ".join(words[:25]) + "."
 
-        return sentence
+        return _sentence_case(s)
 
     f1 = fallback_fake()
     f2 = fallback_fake()
@@ -732,10 +702,17 @@ def ensure_today_round(force: int = 0) -> bool:
     if existing and force == 0:
         return True
 
-    # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
     real_soft = _soften_real_title(real_raw)
+
+    # ensure nice capitalization
+    real_soft = _sentence_case(real_soft)
+
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
+
+    # ensure fakes are capitalized too
+    fake1 = _sentence_case(fake1)
+    fake2 = _sentence_case(fake2)
 
     # Clamp all three to a similar word window so length isn't a giveaway
     real_soft = _fit_length_for_game(real_soft)
