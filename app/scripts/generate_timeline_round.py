@@ -224,6 +224,24 @@ GENERIC_SWAPS: dict[str, list[str]] = {
     "program": ["initiative", "campaign", "drive"],
 }
 
+PHRASE_SWAPS: list[tuple[re.Pattern, list[str]]] = [
+    (re.compile(r"\bwins\b", re.I), ["clinches", "secures", "captures", "takes"]),
+    (re.compile(r"\bequals\b", re.I), ["matches", "ties", "draws even with"]),
+    (re.compile(r"\bequaling\b", re.I), ["matching", "tying", "drawing even with"]),
+    (re.compile(r"\bchampionship\b", re.I), ["title", "crown", "season trophy"]),
+    (re.compile(r"\bseventh\b", re.I), ["record-tying seventh", "historic seventh", "another championship"]),
+    (re.compile(r"\bfirst\b", re.I), ["early", "initial", "debut"]),
+    (re.compile(r"\blaunch\b", re.I), ["liftoff", "mission start", "blastoff"]),
+    (re.compile(r"\brecord\b", re.I), ["milestone", "benchmark", "mark"]),
+]
+
+LENGTH_FILLERS = [
+    "widely covered at the time",
+    "noted across popular headlines",
+    "remembered as a cultural moment",
+    "seen as a milestone for fans",
+]
+
 def _mutate_event_like(real_text: str, rng: random.Random) -> str:
     """
     Create a fake that stays close to the real event:
@@ -269,11 +287,20 @@ def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) ->
     Clamp an event description into a nice, game-friendly length window.
     - Prefer 20–25 words.
     - If longer, hard-trim to max_words.
-    - If shorter, leave it alone (no weird filler).
+    - If shorter, gently pad with neutral filler.
     """
     words = _words(text)
     if not words:
         return text or ""
+
+    # pad if too short with rotating neutral phrases
+    if len(words) < min_words:
+        idx = len(words) % len(LENGTH_FILLERS)
+        while len(words) < min_words:
+            filler_tokens = _words(LENGTH_FILLERS[idx % len(LENGTH_FILLERS)])
+            take = min(min_words - len(words), len(filler_tokens))
+            words += filler_tokens[:take]
+            idx += 1
 
     if len(words) > max_words:
         words = words[:max_words]
@@ -313,6 +340,10 @@ def _too_similar(a: str, b: str) -> bool:
     if not ta or not tb:
         return False
 
+    # identical starts/ends
+    if ta[:6] == tb[:6] or ta[-6:] == tb[-6:]:
+        return True
+
     sa, sb = set(ta), set(tb)
 
     # one mostly contained in the other
@@ -341,7 +372,7 @@ def _too_similar(a: str, b: str) -> bool:
     jacc = inter / union
     return jacc > 0.6
 
-def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
+def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> Tuple[str, str]:
     """
     Create two fakes that:
       • stay in the same loose domain / era as the real event
@@ -381,7 +412,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             "  pioneers, researchers, data processing.\n"
             "- Each fake is one sentence, like a short Wikipedia 'On this day' entry.\n"
             "- The two fakes must feel different from each other; do not reuse long phrases or mirrored structure.\n"
+            "- Start each fake with a different opening. Do not start both with 'In <year>'.\n"
             "- Do not copy unique names, titles, or numbers from the real event.\n"
+            "- Keep the same voice and length style as the real event: clear, youth-friendly, ~22 words.\n"
             "\n"
             "Output STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
         )
@@ -439,7 +472,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     # ---------------------------------------------------------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^
-        (hash(real_text) & 0xFFFFFFFF)
+        (hash(real_text) & 0xFFFFFFFF) ^
+        (salt & 0xFFFF)
     )
 
     def _reshape_structure(src: str) -> str:
@@ -459,6 +493,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             f"{stripped.capitalize()} It took place in {year}.",
             f"A story from {year}: {stripped}",
             f"{stripped.capitalize()} during {year}.",
+            f"By {year}, {stripped}",
+            f"{stripped.capitalize()} — headline moment in {year}.",
         ]
         pick = rng.choice(templates).strip()
         if not pick.endswith("."):
@@ -475,19 +511,25 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             lw = w.lower()
             if not swapped and lw in GENERIC_SWAPS:
                 repl = rng.choice(GENERIC_SWAPS[lw])
-                # Preserve capitalization if it looked like a proper noun
                 repl = repl.capitalize() if w[0].isupper() else repl
                 new_tokens.append(repl)
                 swapped = True
             else:
                 new_tokens.append(w)
 
-        if not swapped:
-            # inject a plausible year to guarantee a difference
-            year = rng.choice(range(1984, 2019))
-            new_tokens = ["In", str(year) + ","] + new_tokens
-
+        # shake verbs/nouns even if we already swapped once
         s = " ".join(new_tokens)
+        for pat, alts in PHRASE_SWAPS:
+            if pat.search(s):
+                s = pat.sub(rng.choice(alts), s, count=1)
+                swapped = True
+                break
+
+        if not swapped:
+            year = rng.choice(range(1984, 2019))
+            s = "In " + str(year) + ", " + s
+
+        s = s.strip()
         if not s.endswith("."):
             s += "."
         return s
@@ -800,19 +842,30 @@ def ensure_today_round(force: int = 0) -> bool:
     real_raw, month_name = _pick_real_event()
     real_soft = _soften_real_title(real_raw)
 
-    # ensure nice capitalization
-    real_soft = _sentence_case(real_soft)
+    # normalization helper for consistent style/length
+    def _normalize_choice(text: str) -> str:
+        return _sentence_case(_fit_length_for_game(text))
 
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
 
-    # ensure fakes are capitalized too
-    fake1 = _sentence_case(fake1)
-    fake2 = _sentence_case(fake2)
+    real_soft = _normalize_choice(real_soft)
+    fake1 = _normalize_choice(fake1)
+    fake2 = _normalize_choice(fake2)
 
-    # Clamp all three to a similar word window so length isn't a giveaway
-    real_soft = _fit_length_for_game(real_soft)
-    fake1 = _fit_length_for_game(fake1)
-    fake2 = _fit_length_for_game(fake2)
+    # final dedupe loop with salted regeneration to avoid near clones
+    salt = 1
+    while salt <= 4 and (
+        _too_similar(fake1, fake2) or _too_similar(fake1, real_soft) or _too_similar(fake2, real_soft)
+    ):
+        f1, f2 = _openai_fakes_from_real(real_soft, month_name, salt=salt)
+        fake1 = _normalize_choice(f1)
+        fake2 = _normalize_choice(f2)
+        salt += 1
+
+    if _too_similar(fake1, real_soft):
+        fake1 = _normalize_choice(f"Another account notes {fake1}")
+    if _too_similar(fake2, real_soft) or _too_similar(fake2, fake1):
+        fake2 = _normalize_choice(f"A different report says {fake2}")
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
