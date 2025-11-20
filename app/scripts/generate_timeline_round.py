@@ -73,6 +73,11 @@ NEGATIVE_TERMS = [
     "eruption", "eruptions", "erupts", "volcano", "volcanic",
 ]
 
+BANNED_JARGON = {
+    "prototype", "initiative", "specialized", "project", "institute",
+    "laboratory", "pioneers", "researchers", "data processing",
+}
+
 def _infer_domain(text: str) -> str:
     """Rough guess: tech / gaming / sports / etc."""
     if not text:
@@ -277,46 +282,54 @@ def _sentence_case(s: str) -> str:
 def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
     Create two fakes that:
-      • match the real event’s domain (space, tech, music, politics, sports, etc.)
+      • match the real event’s domain (space, tech, music, TV/game shows, sports, etc.)
       • stay within the same era (±10 years unless impossible)
+      • are 20–25 words, simple language
+      • no tragedies, no lab / research jargon
       • do NOT copy structure, nouns, or numbers from each other
-      • each contain 20–25 words
-      • are believable, safe, and non-tragic
-      • avoid product-launch tropes and avoid repeating the real event
     """
 
     target_len = 22  # sweet spot for all 3 options
     real_year = _extract_year(real_text)
     domain = _infer_domain(real_text)
+    lc = (real_text or "").lower()
+
+    # Extra hint for TV game shows / TV events
+    is_tv_quiz = any(p in lc for p in [
+        "game show", "quiz show", "television game show", "tv game show"
+    ])
 
     # -----------------------------------------------
-    # 1) OpenAI path — much stricter and safer
+    # 1) OpenAI path — now biased to simple, non-jargony fakes
     # -----------------------------------------------
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You generate highly believable but fictional 'On This Day' historical entries.\n"
-            "You will be given a real historical event. Create TWO different fake events.\n"
+            "You generate believable but fictional 'On This Day' history facts for a guessing game.\n"
+            "You will be given ONE real event. Create TWO different fake events.\n"
             "\n"
             "HARD RULES:\n"
-            "• Both fakes must be 20–25 words each.\n"
-            "• The two fakes must not resemble each other in structure, nouns, or numbers.\n"
+            "• Both fakes must be between 20 and 25 words.\n"
+            "• Language must be clear and simple, easy for a teenager to understand.\n"
             "• Keep the same general domain/topic as the real event.\n"
-            "• Year must be plausible for the topic, and never contradict real-world invention dates.\n"
-            "• Avoid tragedies, deaths, attacks, disasters, crashes, and anything violent.\n"
-            "• Avoid product launches, corporate marketing language, or feature announcements.\n"
-            "• Do NOT reuse the real event’s mission numbers, spacecraft names, or unique nouns.\n"
-            "• No repeated sentence pattern between the two fakes.\n"
-            "• Must include exactly one four-digit year.\n"
-            "• Tone should match Wikipedia’s 'On This Day' style.\n"
+            "  - If the real event is a TV game show, both fakes must also be TV or game-show events.\n"
+            "• Year must be plausible for the topic, with exactly one four-digit year in each fake.\n"
+            "• Avoid wars, disasters, deaths, attacks, crashes, or anything violent.\n"
+            "• Avoid lab or research jargon. Do NOT use any of these words:\n"
+            "  prototype, initiative, specialized, project, institute, laboratory,\n"
+            "  pioneers, researchers, data processing.\n"
+            "• Avoid corporate marketing or product-launch language.\n"
+            "• The two fakes must not reuse the same structure, names, or numbers.\n"
+            "• Do not reuse unique names or numbers from the real event.\n"
+            "• Tone should feel like a short 'On This Day' note, one sentence each.\n"
             "\n"
-            "Output STRICT JSON:\n"
-            "{\"fake1\": \"...\", \"fake2\": \"...\"}"
+            "Output STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
         )
 
         user = (
             f"Real event: {real_text}\n"
             f"Month: {month_name}\n"
-            f"Domain hint: {domain}\n"
+            f"Domain hint: {domain}\"\n"
+            f"Extra type hint: {'tv_game_show' if is_tv_quiz else 'none'}\n"
             f"Approx real year: {real_year}\n"
         )
 
@@ -326,16 +339,19 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.75,
+            "temperature": 0.7,
             "response_format": {"type": "json_object"},
         }
 
         try:
             r = requests.post(
                 OAI_URL,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}",
-                         "Content-Type": "application/json"},
-                json=payload, timeout=30
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=30,
             )
             r.raise_for_status()
             raw = r.json()["choices"][0]["message"]["content"]
@@ -344,92 +360,92 @@ def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
             except Exception:
                 obj = requests.utils.json.loads(raw.strip("` "))
 
-            f1 = obj.get("fake1", "").strip()
-            f2 = obj.get("fake2", "").strip()
+            f1 = (obj.get("fake1") or "").strip()
+            f2 = (obj.get("fake2") or "").strip()
 
-            # soft length enforcement
-            if 18 <= _wlen(f1) <= 28 and 18 <= _wlen(f2) <= 28:
+            # basic validation: length + no banned jargon
+            def _bad(s: str) -> bool:
+                low = s.lower()
+                return (
+                    _wlen(s) < 18
+                    or _wlen(s) > 28
+                    or any(w in low for w in BANNED_JARGON)
+                )
+
+            if f1 and f2 and not _bad(f1) and not _bad(f2):
                 return f1, f2
 
         except Exception:
-            pass  # fallback below
+            # fall through to deterministic path
+            pass
 
     # ---------------------------------------------------------
-    # 2) Deterministic fallback — now MUCH safer + bounded
+    # 2) Deterministic fallback — domain aware, teen-friendly language
     # ---------------------------------------------------------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^
         (hash(real_text) & 0xFFFFFFFF)
     )
 
-    # domains → vocab pools
-    domain_pool = {
-        "tech": ["engineers", "research team", "laboratory group", "software pioneers",
-                 "robotics division", "computing institute"],
-        "gaming": ["game studio", "developers", "arcade group", "console designers",
-                   "retro gaming team"],
-        "film_tv": ["film crew", "television network", "production studio", "cinema group"],
-        "music": ["band", "recording artists", "music collective", "touring group"],
-        "sports": ["national team", "club organization", "athletic board"],
-        "social_media": ["online community", "digital forum", "early internet group"],
-        "internet_culture": ["web enthusiasts", "open-source community", "online archivists"],
-        "general": ["organization", "committee", "historical group"],
-        "space": ["satellite team", "orbital research group", "aerospace division"],
-    }
-
-    pool = domain_pool.get(domain, domain_pool["general"])
-
-    def fallback_fake() -> str:
-        """
-        Youth-friendly, simple, modern language. ~22 words.
-        No jargon, no research-heavy phrasing, no 'specialized project'.
-        """
-        subjects = [
-            "a NASA team", "engineers at ESA", "a science group", "a university team",
-            "a tech organization", "a space agency crew"
+    # helper: TV quiz–style fake when the real thing is like Millionaire
+    def _tv_quiz_fake() -> str:
+        first_names = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Sam"]
+        last_names  = ["Reed", "Lopez", "Patel", "Nguyen", "Johnson", "Kim", "Garcia"]
+        shows = [
+            "Global Quiz Challenge", "Prime Time Questions",
+            "All-Star Trivia Night", "Lightning Round Live",
         ]
+        networks = ["NBC", "ABC", "CBS", "BBC", "ITV"]
 
-        actions = [
-            "tests a small prototype", 
-            "tries a new tool", 
-            "runs a quick experiment", 
-            "checks early equipment", 
-            "works on a simple demo", 
-            "shares an early concept",
-        ]
+        year = real_year or rng.randint(1995, 2023)
+        name = f"{rng.choice(first_names)} {rng.choice(last_names)}"
+        show = rng.choice(shows)
+        net  = rng.choice(networks)
 
-        extras = [
-            "to study radio signals", 
-            "to track satellites", 
-            "to measure sensors", 
-            "to improve communications", 
-            "for a space workshop", 
-            "for a training session",
-        ]
-
-        if real_year:
-            year = max(1980, min(2022, real_year + rng.choice([-4,-3,-1,1,2,3,4])))
-        else:
-            year = rng.randint(1980, 2020)
-
-        s = f"{rng.choice(subjects)} {rng.choice(actions)} {rng.choice(extras)} in {year}."
-
-        # enforce 20–25 words
-        words = _words(s)
-        if len(words) < 20:
-            s += " The team posts the results online."
-        elif len(words) > 25:
-            s = " ".join(words[:25]) + "."
-
+        s = (
+            f"{name} wins the top prize on the TV quiz show {show} after answering the final "
+            f"question correctly on {net} in {year}."
+        )
+        # tighten to 20–25 words
+        s = _fit_length_for_game(s, 20, 25)
         return _sentence_case(s)
 
-    f1 = fallback_fake()
-    f2 = fallback_fake()
-    # only avoid exact duplicates, and cap attempts to avoid loops
+    # If the real thing is a TV/game show, lean hard into that
+    if is_tv_quiz:
+        f1 = _tv_quiz_fake()
+        f2 = _tv_quiz_fake()
+        for _ in range(5):
+            if f2.lower() != f1.lower():
+                break
+            f2 = _tv_quiz_fake()
+        return f1, f2
+
+    # Generic, non-TV fallback: keep it simple but non-lab-y
+    def _generic_fake() -> str:
+        year = real_year or rng.randint(1960, 2020)
+        subject = rng.choice([
+            "a popular event", "a public festival", "a tech conference",
+            "a sports tournament", "a music show", "a fan convention",
+        ])
+        action = rng.choice([
+            "draws a record crowd", "sets a new attendance mark",
+            "introduces a new format", "features a surprise guest",
+            "becomes a big news story",
+        ])
+        place = rng.choice([
+            "in a major city", "in the host country", "at a downtown arena",
+            "at a large stadium", "at a busy convention center",
+        ])
+        s = f"{subject} {action} {place} in {year}, becoming one of the most talked about events of the year."
+        s = _fit_length_for_game(s, 20, 25)
+        return _sentence_case(s)
+
+    f1 = _generic_fake()
+    f2 = _generic_fake()
     for _ in range(5):
-        if f2.strip().lower() != f1.strip().lower():
+        if f2.lower() != f1.lower():
             break
-        f2 = fallback_fake()
+        f2 = _generic_fake()
 
     return f1, f2
 
@@ -487,6 +503,7 @@ def _paraphrase_real_event(text: str, target_min: int = 19, target_max: int = 25
             "• No embellishments, no added claims, no interpretation.\n"
             "• Maintain a neutral Wikipedia-like tone.\n"
             "• No tragedies may be softened; keep accuracy while maintaining safety.\n"
+            "• Use clear, simple language that a high-school student would understand.\n"
             "Return only the rewritten sentence."
         )
 
