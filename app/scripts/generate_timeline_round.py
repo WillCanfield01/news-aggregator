@@ -366,6 +366,24 @@ def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) ->
         s += "."
     return s
 
+def _sanitize_sentence(s: str) -> str:
+    """
+    Remove immediate word duplicates and tidy spaces; keeps case.
+    """
+    tokens = _words(s)
+    cleaned: list[str] = []
+    for w in tokens:
+        if cleaned and cleaned[-1].lower() == w.lower():
+            continue
+        cleaned.append(w)
+    if not cleaned:
+        return s
+    text = " ".join(cleaned)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    if not text.endswith("."):
+        text += "."
+    return text
+
 def _sentence_case(s: str) -> str:
     s = s.strip()
     if not s:
@@ -593,7 +611,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> T
         base = _mutate_event_like(real_text, rng)
         if _too_similar(base, real_text):
             for _ in range(4):
-                base = _force_variation(base)
+                base = _force_variation(real_text)
                 if not _too_similar(base, real_text):
                     break
         base = _reshape_structure(base)
@@ -850,6 +868,16 @@ FALLBACK_ICON_DATA_URL = (
     "IiNlYWM3YWQiIHN0cm9rZS13aWR0aD0iMiIvPgo8L3N2Zz4="
 )
 
+def _safe_url(u: Optional[str]) -> str:
+    """
+    DB columns are VARCHAR(600). Keep URLs short; fall back to the small static icon if too long/empty.
+    """
+    if not u:
+        return FALLBACK_ICON_URL
+    if len(u) > 580:
+        return FALLBACK_ICON_URL
+    return u
+
 # --- replace _image_for with this ---
 def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
     """
@@ -886,7 +914,7 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
             return u, "OpenAI generated"
 
     # 3) Guaranteed visible fallback (never blank)
-    fallback_url = FALLBACK_ICON_DATA_URL
+    fallback_url = FALLBACK_ICON_URL
     if fallback_url not in used:
         used.add(fallback_url)
     return fallback_url, ""
@@ -914,7 +942,7 @@ def ensure_today_round(force: int = 0) -> bool:
 
     # normalization helper for consistent style/length
     def _normalize_choice(text: str) -> str:
-        return _sentence_case(_fit_length_for_game(text))
+        return _sentence_case(_fit_length_for_game(_sanitize_sentence(text)))
 
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
 
@@ -938,14 +966,14 @@ def ensure_today_round(force: int = 0) -> bool:
 
     # If openings still match, prepend light differentiators
     if not _unique_front(fake1, real_soft):
-        fake1 = _normalize_choice(f"In another account, {fake1}")
+        fake1 = _normalize_choice(_force_variation(real_soft))
     if not _unique_front(fake2, real_soft) or not _unique_front(fake2, fake1):
-        fake2 = _normalize_choice(f"A different take says {fake2}")
+        fake2 = _normalize_choice(_force_variation(fake1))
 
     if _too_similar(fake1, real_soft):
-        fake1 = _normalize_choice(f"Another account notes {fake1}")
+        fake1 = _normalize_choice(_force_variation(real_soft))
     if _too_similar(fake2, real_soft) or _too_similar(fake2, fake1):
-        fake2 = _normalize_choice(f"A different report says {fake2}")
+        fake2 = _normalize_choice(_force_variation(fake1))
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
@@ -956,6 +984,11 @@ def ensure_today_round(force: int = 0) -> bool:
     f1_img,  f1_attr    = _image_for(fake1, used_urls)
     f2_img,  f2_attr    = _image_for(fake2, used_urls)
     img_attr = real_attr or f1_attr or f2_attr or ""
+
+    # enforce DB-safe URL lengths
+    real_img = _safe_url(real_img)
+    f1_img = _safe_url(f1_img)
+    f2_img = _safe_url(f2_img)
 
     try:
         if existing:
