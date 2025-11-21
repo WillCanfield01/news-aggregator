@@ -297,6 +297,40 @@ LENGTH_FILLERS = [
     "seen as a milestone for fans",
 ]
 
+def _force_variation(text: str, rng: random.Random) -> str:
+    """
+    Shuffle wording to break mirrors: swap common nouns/verbs, tweak year, and tidy punctuation.
+    """
+    tokens = _words(text)
+    swapped = False
+    new_tokens: list[str] = []
+
+    for w in tokens:
+        lw = w.lower()
+        if not swapped and lw in GENERIC_SWAPS:
+            repl = rng.choice(GENERIC_SWAPS[lw])
+            repl = repl.capitalize() if w[0].isupper() else repl
+            new_tokens.append(repl)
+            swapped = True
+        else:
+            new_tokens.append(w)
+
+    s = " ".join(new_tokens)
+    for pat, alts in PHRASE_SWAPS:
+        if pat.search(s):
+            s = pat.sub(rng.choice(alts), s, count=1)
+            swapped = True
+            break
+
+    if not swapped:
+        year = rng.choice(range(1984, 2019))
+        s = "In " + str(year) + ", " + s
+
+    s = s.strip()
+    if not s.endswith("."):
+        s += "."
+    return s
+
 def _mutate_event_like(real_text: str, rng: random.Random) -> str:
     """
     Create a fake that stays close to the real event:
@@ -574,44 +608,11 @@ def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> T
             pick += "."
         return pick
 
-    def _force_variation(src: str) -> str:
-        """If mutation didn't create distance, substitute a generic noun/verb or inject a year prefix."""
-        tokens = _words(src)
-        swapped = False
-        new_tokens: list[str] = []
-
-        for w in tokens:
-            lw = w.lower()
-            if not swapped and lw in GENERIC_SWAPS:
-                repl = rng.choice(GENERIC_SWAPS[lw])
-                repl = repl.capitalize() if w[0].isupper() else repl
-                new_tokens.append(repl)
-                swapped = True
-            else:
-                new_tokens.append(w)
-
-        # shake verbs/nouns even if we already swapped once
-        s = " ".join(new_tokens)
-        for pat, alts in PHRASE_SWAPS:
-            if pat.search(s):
-                s = pat.sub(rng.choice(alts), s, count=1)
-                swapped = True
-                break
-
-        if not swapped:
-            year = rng.choice(range(1984, 2019))
-            s = "In " + str(year) + ", " + s
-
-        s = s.strip()
-        if not s.endswith("."):
-            s += "."
-        return s
-
     def _fallback_fake() -> str:
         base = _mutate_event_like(real_text, rng)
         if _too_similar(base, real_text):
             for _ in range(4):
-                base = _force_variation(real_text)
+                base = _force_variation(real_text, rng)
                 if not _too_similar(base, real_text):
                     break
         base = _reshape_structure(base)
@@ -632,7 +633,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> T
 
     # pad out if we somehow didn't get two distinct ones
     while len(candidates) < 2:
-        candidates.append(_sentence_case(_fit_length_for_game(_force_variation(real_text), min_len, max_len)))
+        candidates.append(_sentence_case(_fit_length_for_game(_force_variation(real_text, rng), min_len, max_len)))
 
     return candidates[0], candidates[1]
 
@@ -964,16 +965,18 @@ def ensure_today_round(force: int = 0) -> bool:
         ta, tb = _normalize_tokens(a)[:4], _normalize_tokens(b)[:4]
         return ta != tb
 
+    rng_norm = random.Random(int(time.time()) ^ (hash(real_soft) & 0xFFFFFFFF))
+
     # If openings still match, prepend light differentiators
     if not _unique_front(fake1, real_soft):
-        fake1 = _normalize_choice(_force_variation(real_soft))
+        fake1 = _normalize_choice(_force_variation(real_soft, rng_norm))
     if not _unique_front(fake2, real_soft) or not _unique_front(fake2, fake1):
-        fake2 = _normalize_choice(_force_variation(fake1))
+        fake2 = _normalize_choice(_force_variation(fake1, rng_norm))
 
     if _too_similar(fake1, real_soft):
-        fake1 = _normalize_choice(_force_variation(real_soft))
+        fake1 = _normalize_choice(_force_variation(real_soft, rng_norm))
     if _too_similar(fake2, real_soft) or _too_similar(fake2, fake1):
-        fake2 = _normalize_choice(_force_variation(fake1))
+        fake2 = _normalize_choice(_force_variation(fake1, rng_norm))
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
