@@ -264,6 +264,12 @@ def _remix_structure(text: str, rng: random.Random) -> str:
         pick += "."
     return _sentence_case(pick)
 
+def _domain_ok(text: str, domain: str) -> bool:
+    inferred = _infer_domain(text)
+    if domain == "general":
+        return inferred not in {"tech", "gaming", "social_media"}
+    return inferred == domain
+
 def _domain_flair(domain: str) -> list[str]:
     return {
         "tech": [
@@ -363,8 +369,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             if f1 and f2:
                 if min_len <= _wlen(f1) <= max_len and min_len <= _wlen(f2) <= max_len:
                     if not _is_tragedy(f1) and not _is_tragedy(f2):
-                        if not _mostly_year_swap(f1, real_text) and not _mostly_year_swap(f2, real_text):
-                            return f1, f2
+                        if _domain_ok(f1, domain) and _domain_ok(f2, domain):
+                            if not _mostly_year_swap(f1, real_text) and not _mostly_year_swap(f2, real_text):
+                                return f1, f2
         except Exception:
             time.sleep(0.5)
 
@@ -376,52 +383,55 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     )
 
     domain_entities = {
-        "tech": ["a new streaming feature", "a viral phone update", "an AI-powered tool", "a cloud gaming service", "a sleek wearable"],
-        "social_media": ["a new hashtag challenge", "a short-form video trend", "a live stream format", "a creator funding push", "a viral filter drop"],
-        "gaming": ["a multiplayer update", "a surprise crossover event", "an esports finals upset", "a record-breaking launch", "a fan-favorite DLC"],
-        "music": ["a surprise album drop", "a festival headliner set", "a chart-topping single", "a viral remix", "an arena tour kickoff"],
-        "film_tv": ["a streaming series finale", "a breakout indie film", "a viral trailer release", "a hit animated episode", "a fan watch party"],
+        "tech": ["a new streaming feature", "a viral phone update", "an AI tool launch", "a cloud gaming rollout", "a sleek wearable"],
+        "social_media": ["a hashtag challenge", "a short video trend", "a live stream format", "a creator payout push", "a viral filter drop"],
+        "gaming": ["a multiplayer update", "an esports finals upset", "a crossover reveal", "a record launch", "a fan-favorite DLC"],
+        "music": ["a surprise album drop", "a festival headliner set", "a chart single", "a viral remix", "an arena tour kickoff"],
+        "film_tv": ["a streaming series finale", "a breakout indie film", "a viral trailer", "a hit animated episode", "a fan watch party"],
         "sports": ["a buzzer-beater playoff game", "a record marathon time", "a breakout rookie season", "a championship parade", "an underdog finals win"],
-        "internet_culture": ["a meme wave", "a viral gif moment", "a podcast crossover", "a fandom meetup", "a blog post that blew up"],
-        "general": ["a widely-covered milestone", "a headline-making launch", "a cultural moment", "a breakout announcement", "a story everywhere online"],
+        "internet_culture": ["a meme wave", "a viral gif moment", "a podcast crossover", "a fandom meetup", "a blog post that blows up"],
+        "general": ["a museum opening", "a landmark restoration", "a city festival", "a major exhibit", "a national celebration"],
     }
-    domain_details = {
-        "tech": ["rolls out globally", "ships to early adopters", "sparks huge online lines", "gets flooded signups", "lands big influencer reviews"],
-        "social_media": ["takes over timelines", "pulls in millions of views", "gets stitched nonstop", "leads to brand collabs", "pushes a new creator wave"],
-        "gaming": ["crashes servers briefly", "tops concurrent player charts", "spawns speedrun races", "fills esports brackets", "sparks lore debates"],
-        "music": ["sells out tour dates", "tops playlists instantly", "goes viral on clips", "drives dance challenges", "streams spike overnight"],
-        "film_tv": ["wins fan polls", "turns into reaction memes", "packs fan screenings", "lands binge-watch records", "becomes quote spam online"],
-        "sports": ["pulls massive viewership", "trends across sports apps", "fills highlight reels", "drives jersey sales", "sparks debate shows"],
-        "internet_culture": ["dominates forums", "turns into remix chains", "fills comment sections", "inspires parody accounts", "lands on front pages"],
-        "general": ["lands on homepage headlines", "shows up across blogs", "fills news alerts", "loops on nightly news", "tops weekly roundups"],
+    domain_verbs = {
+        "tech": ["rolls out", "debuts", "goes live", "launches", "expands"],
+        "social_media": ["takes over feeds", "gains millions of views", "drives stitches", "sparks collabs", "trends fast"],
+        "gaming": ["packs servers", "tops player charts", "shakes brackets", "fills arenas", "sparks lore debates"],
+        "music": ["tops playlists", "sells out dates", "goes viral", "gets heavy airplay", "streams spike"],
+        "film_tv": ["wins fan polls", "fills watch parties", "hits binge records", "gets meme’d", "scores strong reviews"],
+        "sports": ["draws massive viewers", "fills highlight reels", "sparks debates", "pushes jersey sales", "tops sports alerts"],
+        "internet_culture": ["dominates forums", "spreads through memes", "fills comments", "inspires parodies", "hits front pages"],
+        "general": ["draws wide coverage", "gets local buzz", "brings crowds", "lands headlines", "becomes a news favorite"],
     }
+    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town"]
 
     def build_fake() -> str:
         year = rng.choice(range(1986, 2019))
         subject = rng.choice(domain_entities.get(domain, domain_entities["general"]))
-        detail = rng.choice(domain_details.get(domain, domain_details["general"]))
-        template = rng.choice([
-            "{subject} makes headlines in {year} when it {detail}.",
-            "In {year}, {subject} takes off and {detail}.",
-            "{subject} becomes a big story in {year} as it {detail}.",
-            "A {subject} moment in {year} {detail}.",
-        ])
-        s = template.format(subject=subject, year=year, detail=detail)
-        s = _remix_structure(s, rng)
+        verb = rng.choice(domain_verbs.get(domain, domain_verbs["general"]))
+        place = rng.choice(locations)
         flair = rng.choice(_domain_flair(domain))
-        s = f"{s.rstrip('.')} {flair}."
+        template = rng.choice([
+            "In {year}, {subject} in {place} {verb}, and {flair}.",
+            "{subject} in {place} {verb} in {year}, and {flair}.",
+            "By {year}, {subject} in {place} {verb}; {flair}.",
+        ])
+        s = template.format(subject=subject, place=place, verb=verb, year=year, flair=flair)
+        s = _fit_length(s, min_len, max_len)
         return s
 
     candidates: list[str] = []
     attempts = 0
     while len(candidates) < 2 and attempts < 10:
         cand = build_fake()
-        if min_len <= _wlen(cand) <= max_len and not _mostly_year_swap(cand, real_text):
+        if min_len <= _wlen(cand) <= max_len and not _mostly_year_swap(cand, real_text) and _domain_ok(cand, domain):
             if all(not _mostly_year_swap(cand, c) for c in candidates):
                 candidates.append(cand)
         attempts += 1
     while len(candidates) < 2:
-        candidates.append(build_fake())
+        nxt = build_fake()
+        if not _domain_ok(nxt, domain):
+            continue
+        candidates.append(nxt)
     return candidates[0], candidates[1]
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -481,16 +491,27 @@ def _pick_real_event() -> Tuple[str, str]:
             year_val = int(year)
         except Exception:
             year_val = None
-        scored.append(( _score_for_youth(t, year_val), t, year_val))
+        domain = _infer_domain(t)
+        scored.append((_score_for_youth(t, year_val), t, year_val, domain))
 
     scored.sort(key=lambda x: x[0], reverse=True)
+    pop_domains = {"tech","social_media","gaming","music","film_tv","internet_culture","sports"}
 
     pick = None
-    for score, text, year in scored:
-        if year and year < 1985:
-            continue
-        pick = text
-        break
+    for score, text, year, dom in scored:
+        if dom in pop_domains and (year is None or year >= 1985):
+            pick = text
+            break
+    if not pick:
+        for score, text, year, dom in scored:
+            if dom in pop_domains:
+                pick = text
+                break
+    if not pick:
+        for score, text, year, dom in scored:
+            if year and year >= 1985:
+                pick = text
+                break
     if not pick and scored:
         pick = scored[0][1]
     if not pick:
@@ -619,6 +640,10 @@ def ensure_today_round(force: int = 0) -> bool:
         if _is_tragedy(normalized):
             safe_seed = f"A {domain} highlight that fans shared online"
             normalized = _normalize_choice(safe_seed, fake_min, fake_max)
+        # guard domain mismatch for general by regenerating a neutral phrasing
+        if domain == "general" and not _domain_ok(normalized, domain):
+            neutral = "A headline story covered widely that week with people sharing it online"
+            normalized = _normalize_choice(neutral, fake_min, fake_max)
         return normalized
 
     fake1 = _normalize_target(fake1)
