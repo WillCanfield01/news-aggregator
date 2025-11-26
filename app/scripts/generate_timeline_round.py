@@ -189,10 +189,10 @@ def _fit_length(text: str, min_words: int, max_words: int) -> str:
     if not words:
         return text or ""
     fillers = [
-        "widely covered that week",
-        "talked about online",
-        "remembered by fans",
-        "picked up by headlines",
+        "It draws wide coverage online",
+        "Fans share clips everywhere",
+        "Headlines pick it up",
+        "People talk about it that week",
     ]
     if len(words) < min_words:
         idx = len(words) % len(fillers)
@@ -221,6 +221,7 @@ def _normalize_choice(text: str, min_words: int, max_words: int) -> str:
     cleaned = _strip_jargon(text)
     cleaned = _sanitize_sentence(cleaned)
     cleaned = _fit_length(cleaned, min_words, max_words)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
     return _sentence_case(cleaned)
 
 def _strip_years(text: str) -> str:
@@ -244,10 +245,10 @@ def _remix_structure(text: str, rng: random.Random) -> str:
     core = s[0].lower() + s[1:] if s and s[0].isupper() else s
     templates = [
         "{core}",
-        "During that season, {core}",
-        "In the same week, {core}",
-        "{core}, drawing big attention",
-        "People everywhere were talking when {core}",
+        "Around that time, {core}",
+        "Later that week, {core}",
+        "{core}, drawing a lot of attention",
+        "People were talking everywhere when {core}",
     ]
     pick = rng.choice(templates).format(core=core)
     pick = pick.strip()
@@ -373,49 +374,49 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         (salt & 0xFFFF)
     )
 
-    domain_entities = {
-        "tech": ["a new streaming feature", "a viral phone update", "an AI tool launch", "a cloud gaming rollout", "a sleek wearable"],
-        "social_media": ["a hashtag challenge", "a short video trend", "a live stream format", "a creator payout push", "a viral filter drop"],
-        "gaming": ["a multiplayer update", "an esports finals upset", "a crossover reveal", "a record launch", "a fan-favorite DLC"],
-        "music": ["a surprise album drop", "a festival headliner set", "a chart single", "a viral remix", "an arena tour kickoff"],
-        "film_tv": ["a streaming series finale", "a breakout indie film", "a viral trailer", "a hit animated episode", "a fan watch party"],
-        "sports": ["a buzzer-beater playoff game", "a record marathon time", "a breakout rookie season", "a championship parade", "an underdog finals win"],
+    domain_subjects = {
+        "tech": ["a streaming feature", "a phone update", "an AI tool launch", "a cloud gaming rollout", "a wearable drop"],
+        "social_media": ["a hashtag challenge", "a video trend", "a live stream format", "a creator payout push", "a viral filter"],
+        "gaming": ["a multiplayer update", "an esports upset", "a crossover reveal", "a record game launch", "a fan-favorite DLC"],
+        "music": ["a surprise album", "a festival headliner set", "a chart single", "a viral remix", "a tour kickoff"],
+        "film_tv": ["a streaming finale", "a breakout indie film", "a viral trailer", "a hit animated episode", "a fan watch party"],
+        "sports": ["a buzzer-beater playoff game", "a record marathon", "a breakout rookie season", "a championship parade", "an underdog finals win"],
         "internet_culture": ["a meme wave", "a viral gif moment", "a podcast crossover", "a fandom meetup", "a blog post that blows up"],
         "general": ["a museum opening", "a landmark restoration", "a city festival", "a major exhibit", "a national celebration"],
     }
-    domain_verbs = {
-        "tech": ["rolls out", "debuts", "goes live", "launches", "expands"],
-        "social_media": ["takes over feeds", "gains traction", "sparks collabs", "trends fast", "drives reactions"],
-        "gaming": ["packs servers", "tops player charts", "shakes brackets", "fills arenas", "sparks lore debates"],
-        "music": ["tops playlists", "sells out dates", "goes viral", "gets heavy play", "streams spike"],
-        "film_tv": ["wins fan polls", "fills watch parties", "hits binge lists", "gets meme’d", "scores strong reviews"],
-        "sports": ["draws massive viewers", "fills highlight reels", "sparks debates", "pushes jersey sales", "tops sports alerts"],
-        "internet_culture": ["dominates forums", "spreads through memes", "fills comments", "inspires parodies", "hits front pages"],
-        "general": ["draws wide coverage", "gets local buzz", "brings crowds", "lands headlines", "becomes a news favorite"],
+    domain_actions = {
+        "tech": ["launches to the public", "rolls out broadly", "goes live for users", "debuts with a demo", "lands for early adopters"],
+        "social_media": ["takes over feeds", "picks up momentum", "spreads across platforms", "sparks quick reactions", "draws big creator posts"],
+        "gaming": ["fills servers fast", "tops player charts", "shakes up rankings", "packs esports streams", "sparks lore debates"],
+        "music": ["tops playlists", "sells out dates", "goes viral on clips", "gets heavy play", "trends on radio"],
+        "film_tv": ["wins fan polls", "drives binge nights", "gets quoted online", "lands strong reviews", "spawns memes"],
+        "sports": ["draws massive viewers", "fills highlight reels", "sparks debates on shows", "pushes merch sales", "trends on apps"],
+        "internet_culture": ["dominates forums", "spreads through memes", "fills comment sections", "inspires parody threads", "hits front pages"],
+        "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
     }
-    domain_vibes = {
-        "tech": ["tech blogs rave about it", "creators post quick reactions", "users share first impressions", "reviews flood in"],
-        "social_media": ["feeds fill with clips", "creators jump on it", "comment sections light up", "friends share it nonstop"],
-        "gaming": ["streams highlight it", "fans clip big moments", "forums light up", "players rush in"],
+    domain_reacts = {
+        "tech": ["tech blogs rave about it", "creators post first impressions", "users share clips", "reviews flood in"],
+        "social_media": ["friends send it around", "creators jump on it", "comment sections light up", "people remix it"],
+        "gaming": ["streams highlight it", "fans clip big plays", "forums explode with takes", "players rush in"],
         "music": ["fans share the hook", "radio spins climb", "clips go viral", "crowds sing along"],
         "film_tv": ["watch parties pop up", "quotes spread online", "reviews praise it", "memes appear overnight"],
-        "sports": ["replays loop everywhere", "fans argue about it", "stats trend on apps", "highlights go viral"],
+        "sports": ["replays loop everywhere", "fans argue about calls", "stats trend on apps", "highlights go viral"],
         "internet_culture": ["memes land fast", "blogs post breakdowns", "threads keep growing", "it hits front pages"],
         "general": ["people talk about it for days", "local news covers it", "crowds show up", "it trends for a bit"],
     }
     locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town"]
 
     def build_fake() -> str:
-        subject = rng.choice(domain_entities.get(domain, domain_entities["general"]))
-        verb = rng.choice(domain_verbs.get(domain, domain_verbs["general"]))
+        subject = rng.choice(domain_subjects.get(domain, domain_subjects["general"]))
+        action = rng.choice(domain_actions.get(domain, domain_actions["general"]))
+        reaction = rng.choice(domain_reacts.get(domain, domain_reacts["general"]))
         place = rng.choice(locations)
-        vibe = rng.choice(domain_vibes.get(domain, domain_vibes["general"]))
         template = rng.choice([
-            "{subject} in {place} {verb}, and {vibe}.",
-            "{subject} lands in {place} and {verb}, {vibe}.",
-            "In {place}, {subject} {verb} and {vibe}.",
+            "{subject} {action} in {place}; {reaction}.",
+            "In {place}, {subject} {action}, and {reaction}.",
+            "{subject} arrives in {place} and {action}, while {reaction}.",
         ])
-        s = template.format(subject=subject, place=place, verb=verb, vibe=vibe)
+        s = template.format(subject=subject, place=place, action=action, reaction=reaction)
         s = _fit_length(s, min_len, max_len)
         return s
 
