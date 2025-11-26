@@ -49,6 +49,7 @@ POP_KEYWORDS = {
     "tech": ["iphone","android","apple","google","microsoft","ai","openai","tesla","spacex","nvidia","samsung","internet","www"],
     "sports": ["nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl","lakers","yankees","patriots"],
     "internet_culture": ["meme","viral","hashtag","emoji","stream","podcast","blog","wiki","open source","linux","browser"],
+    "travel": ["ship","liner","cruise","harbor","harbour","port","airport","airline","flight","railway","train","metro","tram","bus","ferry","voyage"],
 }
 
 NEGATIVE_TERMS = [
@@ -257,9 +258,9 @@ def _remix_structure(text: str, rng: random.Random) -> str:
     return _sentence_case(pick)
 
 def _domain_ok(text: str, domain: str) -> bool:
-    inferred = _infer_domain(text)
     if domain == "general":
-        return inferred not in {"tech", "gaming", "social_media"}
+        return True
+    inferred = _infer_domain(text)
     return inferred == domain
 
 def _domain_flair(domain: str) -> list[str]:
@@ -382,7 +383,11 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "film_tv": ["a streaming finale", "a breakout indie film", "a viral trailer", "a hit animated episode", "a fan watch party"],
         "sports": ["a buzzer-beater playoff game", "a record marathon", "a breakout rookie season", "a championship parade", "an underdog finals win"],
         "internet_culture": ["a meme wave", "a viral gif moment", "a podcast crossover", "a fandom meetup", "a blog post that blows up"],
-        "general": ["a museum opening", "a landmark restoration", "a city festival", "a major exhibit", "a national celebration"],
+        "travel": ["a historic ship visit", "a new ferry route", "a busy harbor festival", "a landmark train run", "a city waterfront opening"],
+        "culture": ["a museum opening", "a public art show", "a city parade", "a landmark restoration", "a film festival night"],
+        "business": ["a flagship store launch", "a brand collaboration", "a startup milestone", "a major product drop", "a pop-up event"],
+        "science": ["a planetarium reveal", "a space exhibit", "a green tech demo", "a science fair highlight", "a new lab opening"],
+        "general": ["a city festival", "a major exhibit", "a national celebration", "a community milestone", "a public event"],
     }
     domain_actions = {
         "tech": ["launches to the public", "rolls out broadly", "goes live for users", "debuts with a demo", "lands for early adopters"],
@@ -392,6 +397,10 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "film_tv": ["wins fan polls", "drives binge nights", "gets quoted online", "lands strong reviews", "spawns memes"],
         "sports": ["draws massive viewers", "fills highlight reels", "sparks debates on shows", "pushes merch sales", "trends on apps"],
         "internet_culture": ["dominates forums", "spreads through memes", "fills comment sections", "inspires parody threads", "hits front pages"],
+        "travel": ["draws curious crowds", "sails into port", "opens to visitors", "hosts tours all day", "gets a warm welcome"],
+        "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz", "brings people together"],
+        "business": ["opens with fanfare", "hosts a packed launch", "pulls a long line", "draws coverage from blogs", "sells out early"],
+        "science": ["shows off new ideas", "welcomes students and families", "gets shared by educators", "draws local press", "debuts a demo"],
         "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
     }
     domain_reacts = {
@@ -402,14 +411,28 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "film_tv": ["watch parties pop up", "quotes spread online", "reviews praise it", "memes appear overnight"],
         "sports": ["replays loop everywhere", "fans argue about calls", "stats trend on apps", "highlights go viral"],
         "internet_culture": ["memes land fast", "blogs post breakdowns", "threads keep growing", "it hits front pages"],
+        "travel": ["photos flood socials", "locals share videos", "news crews cover it", "tourists post nonstop"],
+        "culture": ["photos spread online", "locals share videos", "critics cover it", "people post reactions"],
+        "business": ["customers post hauls", "blogs cover the drop", "people line up early", "social posts spike"],
+        "science": ["teachers share clips", "local news covers it", "families post photos", "forums discuss it"],
         "general": ["people talk about it for days", "local news covers it", "crowds show up", "it trends for a bit"],
     }
-    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town"]
+    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki"]
 
+    base_domains = [domain] if domain else ["general"]
+    if domain == "general":
+        base_domains += ["travel","culture","business","science","music","film_tv","sports","internet_culture","social_media"]
+    else:
+        base_domains.append("general")
+        if domain in {"tech","social_media","internet_culture"}:
+            base_domains.append("culture")
+        if domain == "general":
+            base_domains.append("travel")
     def build_fake() -> str:
-        subject = rng.choice(domain_subjects.get(domain, domain_subjects["general"]))
-        action = rng.choice(domain_actions.get(domain, domain_actions["general"]))
-        reaction = rng.choice(domain_reacts.get(domain, domain_reacts["general"]))
+        pick_domain = rng.choice(base_domains)
+        subject = rng.choice(domain_subjects.get(pick_domain, domain_subjects["general"]))
+        action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
+        reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
         template = rng.choice([
             "{subject} {action} in {place}; {reaction}.",
