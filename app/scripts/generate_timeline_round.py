@@ -189,10 +189,10 @@ def _fit_length(text: str, min_words: int, max_words: int) -> str:
     if not words:
         return text or ""
     fillers = [
-        "remembered by fans at the time",
-        "covered across news feeds",
-        "talked about online that week",
-        "noted in pop culture recaps",
+        "widely covered that week",
+        "talked about online",
+        "remembered by fans",
+        "picked up by headlines",
     ]
     if len(words) < min_words:
         idx = len(words) % len(fillers)
@@ -241,25 +241,16 @@ def _remix_structure(text: str, rng: random.Random) -> str:
     Lightly reorders the sentence to avoid cloned openings.
     """
     s = text.strip().rstrip(".")
-    templates = [
-        f"In {{year}}, {{core}}",
-        f"{{core}} — a highlight of {{year}}.",
-        f"{{core}} It happened in {{year}}.",
-        f"A snapshot from {{year}}: {{core}}",
-        f"By {{year}}, {{core}}",
-    ]
-    year = None
-    m = re.search(r"\b(19|20)\d{2}\b", s)
-    if m:
-        try:
-            year = int(m.group(0))
-        except Exception:
-            year = None
-        s = _strip_years(s).strip(",. ")
     core = s[0].lower() + s[1:] if s and s[0].isupper() else s
-    if year is None:
-        year = rng.choice(range(1986, 2019))
-    pick = rng.choice(templates).format(year=year, core=core)
+    templates = [
+        "{core}",
+        "During that season, {core}",
+        "In the same week, {core}",
+        "{core}, drawing big attention",
+        "People everywhere were talking when {core}",
+    ]
+    pick = rng.choice(templates).format(core=core)
+    pick = pick.strip()
     if not pick.endswith("."):
         pick += "."
     return _sentence_case(pick)
@@ -329,15 +320,15 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     real_len = _wlen(real_text)
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You write concise, believable 'On This Day' almanac entries for a guessing game.\n"
+            "You write concise, believable 'On This Day' style entries for a guessing game.\n"
             f"Create TWO different fake events that stay in the same domain: {domain}.\n"
             f"Each fake must be {min_len}-{max_len} words (within 5 words of the real entry, which is {real_len} words).\n"
             "Rules:\n"
-            "- Use simple, modern, youth-friendly wording (like a short wiki blurb).\n"
-            "- Include exactly one 4-digit year that fits the topic.\n"
-            "- Avoid wars, attacks, disasters, or deaths; avoid jargon words: prototype, initiative, specialized, project, institute, laboratory, pioneers, researchers, data processing.\n"
-            "- Each fake must have a different opening structure; do NOT mirror the real entry.\n"
-            "- Do not just change the year; change at least two concrete details (place, org, product, or outcome).\n"
+            "- Use clear, modern, youth-friendly wording (one sentence, neutral tone).\n"
+            "- No tragedies or violence; avoid jargon words: prototype, initiative, specialized, project, institute, laboratory, pioneers, researchers, data processing.\n"
+            "- Do NOT require a year; include one only if it flows naturally.\n"
+            "- Each fake must have a different opening; do not mirror the real entry.\n"
+            "- Change at least two concrete details (place, org, product, or outcome) from the real.\n"
             "- Keep them believable and in the same category as the real entry.\n"
             'Respond with STRICT JSON: {"fake1":"...","fake2":"..."}'
         )
@@ -394,28 +385,37 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
     domain_verbs = {
         "tech": ["rolls out", "debuts", "goes live", "launches", "expands"],
-        "social_media": ["takes over feeds", "gains millions of views", "drives stitches", "sparks collabs", "trends fast"],
+        "social_media": ["takes over feeds", "gains traction", "sparks collabs", "trends fast", "drives reactions"],
         "gaming": ["packs servers", "tops player charts", "shakes brackets", "fills arenas", "sparks lore debates"],
-        "music": ["tops playlists", "sells out dates", "goes viral", "gets heavy airplay", "streams spike"],
-        "film_tv": ["wins fan polls", "fills watch parties", "hits binge records", "gets meme’d", "scores strong reviews"],
+        "music": ["tops playlists", "sells out dates", "goes viral", "gets heavy play", "streams spike"],
+        "film_tv": ["wins fan polls", "fills watch parties", "hits binge lists", "gets meme’d", "scores strong reviews"],
         "sports": ["draws massive viewers", "fills highlight reels", "sparks debates", "pushes jersey sales", "tops sports alerts"],
         "internet_culture": ["dominates forums", "spreads through memes", "fills comments", "inspires parodies", "hits front pages"],
         "general": ["draws wide coverage", "gets local buzz", "brings crowds", "lands headlines", "becomes a news favorite"],
     }
+    domain_vibes = {
+        "tech": ["tech blogs rave about it", "creators post quick reactions", "users share first impressions", "reviews flood in"],
+        "social_media": ["feeds fill with clips", "creators jump on it", "comment sections light up", "friends share it nonstop"],
+        "gaming": ["streams highlight it", "fans clip big moments", "forums light up", "players rush in"],
+        "music": ["fans share the hook", "radio spins climb", "clips go viral", "crowds sing along"],
+        "film_tv": ["watch parties pop up", "quotes spread online", "reviews praise it", "memes appear overnight"],
+        "sports": ["replays loop everywhere", "fans argue about it", "stats trend on apps", "highlights go viral"],
+        "internet_culture": ["memes land fast", "blogs post breakdowns", "threads keep growing", "it hits front pages"],
+        "general": ["people talk about it for days", "local news covers it", "crowds show up", "it trends for a bit"],
+    }
     locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town"]
 
     def build_fake() -> str:
-        year = rng.choice(range(1986, 2019))
         subject = rng.choice(domain_entities.get(domain, domain_entities["general"]))
         verb = rng.choice(domain_verbs.get(domain, domain_verbs["general"]))
         place = rng.choice(locations)
-        flair = rng.choice(_domain_flair(domain))
+        vibe = rng.choice(domain_vibes.get(domain, domain_vibes["general"]))
         template = rng.choice([
-            "In {year}, {subject} in {place} {verb}, and {flair}.",
-            "{subject} in {place} {verb} in {year}, and {flair}.",
-            "By {year}, {subject} in {place} {verb}; {flair}.",
+            "{subject} in {place} {verb}, and {vibe}.",
+            "{subject} lands in {place} and {verb}, {vibe}.",
+            "In {place}, {subject} {verb} and {vibe}.",
         ])
-        s = template.format(subject=subject, place=place, verb=verb, year=year, flair=flair)
+        s = template.format(subject=subject, place=place, verb=verb, vibe=vibe)
         s = _fit_length(s, min_len, max_len)
         return s
 
