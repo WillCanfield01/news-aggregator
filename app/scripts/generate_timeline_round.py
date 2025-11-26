@@ -33,192 +33,6 @@ OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
 
-WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
-
-def _words(s: str) -> list[str]:
-    return [w for w in WORD_RE.findall(s or "")]
-
-def _wlen(s: str) -> int:
-    return len(_words(s))
-
-def _extract_year(text: str) -> Optional[int]:
-    m = re.search(r"\b(19|20)\d{2}\b", text or "")
-    if not m:
-        return None
-    try:
-        return int(m.group(0))
-    except ValueError:
-        return None
-
-# Domains and nostalgia signals for younger / TikTok crowd
-POP_KEYWORDS = {
-    "social_media": ["tiktok","instagram","facebook","twitter","x.com","snapchat","youtube","reddit","twitch","vine","myspace"],
-    "gaming": ["nintendo","playstation","xbox","pokemon","minecraft","fortnite","roblox","steam","esports","blizzard","sony"],
-    "music": ["spotify","itunes","mtv","grammy","billboard","taylor swift","drake","bts","k-pop","eminem","nirvana"],
-    "film_tv": ["netflix","disney","marvel","star wars","hbo","pixar","oscars","hulu","prime video","anime"],
-    "tech": ["iphone","android","apple","google","microsoft","ai","openai","tesla","spacex","nvidia","samsung","internet","www"],
-    "sports": ["nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl","lakers","yankees","patriots"],
-    "internet_culture": ["meme","viral","hashtag","emoji","stream","podcast","blog","wiki","open source","linux","browser"],
-}
-
-NEGATIVE_TERMS = [
-    "killed", "killing", "dead", "dies", "death", "fatal",
-    "massacre", "genocide", "famine",
-    "bomb", "bombing", "explosion", "blast",
-    "attack", "assault", "raid", "airstrike", "suicide bomber",
-    "war", "battle", "invasion", "occupation", "uprising", "coup",
-    "shooting", "gunman", "terrorist", "hostage",
-    "crash", "collides", "collision", "derailment",
-    "earthquake", "hurricane", "typhoon", "tsunami", "flood", "wildfire",
-    "eruption", "eruptions", "erupts", "volcano", "volcanic",
-]
-
-BANNED_JARGON = {
-    "prototype", "initiative", "specialized", "project", "institute",
-    "laboratory", "pioneers", "researchers", "data processing",
-}
-
-def _infer_domain(text: str) -> str:
-    """Rough guess: tech / gaming / sports / etc."""
-    if not text:
-        return "general"
-    lc = text.lower()
-
-    if any(k in lc for k in ("tiktok","instagram","youtube","snapchat","twitter","x.com","reddit","twitch")):
-        return "social_media"
-    if any(k in lc for k in ("nintendo","playstation","xbox","pokemon","fortnite","roblox","minecraft","steam","esports")):
-        return "gaming"
-    if any(k in lc for k in ("spotify","itunes","mtv","billboard","grammy","taylor swift","drake","bts","k-pop","eminem","nirvana")):
-        return "music"
-    if any(k in lc for k in ("netflix","disney","marvel","star wars","hbo","anime","pixar","oscars","prime video","hulu")):
-        return "film_tv"
-    if any(k in lc for k in ("iphone","android","apple","google","microsoft","ai","openai","tesla","spacex","nvidia","samsung")):
-        return "tech"
-    if any(k in lc for k in ("nba","nfl","mlb","nhl","fifa","world cup","olympics","super bowl","lakers","yankees")):
-        return "sports"
-    if any(k in lc for k in ("meme","viral","hashtag","emoji","podcast","blog","wiki","browser","internet")):
-        return "internet_culture"
-    return "general"
-
-def _domain_flair(domain: str, rng: random.Random) -> str:
-    """Add a short believable detail to change phrasing without leaving the domain."""
-    flair = {
-        "sports": [
-            "during a dramatic season finale",
-            "after a late surge in points",
-            "under rainy track conditions",
-            "in front of a huge TV audience",
-        ],
-        "tech": [
-            "at a packed press event",
-            "after months of speculation",
-            "marking a major milestone for the company",
-            "sparking wide coverage online",
-        ],
-        "social_media": [
-            "trending across platforms that week",
-            "drawing massive online reactions",
-            "shared widely by fans",
-            "picked up by creators everywhere",
-        ],
-        "gaming": [
-            "after a record-breaking tournament",
-            "as players flooded servers",
-            "during a big livestream reveal",
-            "becoming a fan-favorite moment",
-        ],
-        "music": [
-            "ahead of a sold-out tour",
-            "topping popular charts",
-            "getting heavy radio play",
-            "featured in viral clips",
-        ],
-        "film_tv": [
-            "during a buzzy premiere weekend",
-            "earning strong fan reviews",
-            "becoming a quotable moment",
-            "sparking watch parties",
-        ],
-        "internet_culture": [
-            "after memes spread quickly",
-            "landing on front pages",
-            "as forums lit up with posts",
-            "becoming a gif everyone shared",
-        ],
-        "general": [
-            "drawing wide news coverage",
-            "reported around the world",
-            "quickly picked up by headlines",
-            "highlighted in year-end recaps",
-        ],
-    }
-    options = flair.get(domain, flair["general"])
-    return rng.choice(options)
-
-def _is_tragedy(text: str) -> bool:
-    lc = (text or "").lower()
-    return any(w in lc for w in NEGATIVE_TERMS)
-
-def _score_for_youth(event_obj: dict) -> float:
-    """
-    Score a Wikipedia event for 'TikTok generation nostalgia'.
-
-    High score:
-      - tech / gaming / social / music / film / sports / internet culture
-      - year roughly 1985–2018 (extra sweet spot 1995–2012)
-      - short and readable
-      - includes modern pop keywords
-    Strong penalty:
-      - wars, disasters, mass deaths
-      - ancient or medieval history
-    """
-    t = (event_obj.get("text") or event_obj.get("displaytitle") or "").strip()
-    if not t:
-        return -1e9
-    if _is_tragedy(t):
-        return -1e9
-
-    lc = t.lower()
-    score = 0.0
-
-    domain = _infer_domain(t)
-    pop_domains = {"tech","social_media","gaming","music","film_tv","internet_culture","sports"}
-    if domain in pop_domains:
-        score += 4.0
-    elif domain != "general":
-        score += 0.5
-
-    # bonus if specific pop keywords appear
-    for cat, words in POP_KEYWORDS.items():
-        if any(w in lc for w in words):
-            score += 1.5
-
-    # nostalgia year curve
-    year = event_obj.get("year")
-    try:
-        y = int(year)
-        if 1995 <= y <= 2012:
-            score += 4.0
-        elif 1985 <= y <= 1994:
-            score += 3.0
-        elif 2013 <= y <= 2018:
-            score += 2.0
-        elif 1960 <= y < 1985:
-            score += 1.0
-        elif y < 1950:
-            score -= 2.5
-    except Exception:
-        pass
-
-    # concision
-    L = len(t)
-    if 60 <= L <= 160:
-        score += 1.0
-    elif L > 220:
-        score -= 0.5
-
-    return score
-
 # --------------------------- utilities ---------------------------
 
 def _today_local_date():
@@ -253,389 +67,93 @@ def _soften_real_title(title: str) -> str:
     t = re.sub(r"\s{2,}", " ", t).strip()
     return t
 
-# --- adjacency helpers -------------------------------------------------
-
-ENTITY_SWAPS: list[tuple[re.Pattern, list[str]]] = [
-    (re.compile(r"\bGoogle\b"), ["Microsoft", "Apple", "Yahoo", "Amazon"]),
-    (re.compile(r"\bMicrosoft\b"), ["Google", "Apple", "IBM"]),
-    (re.compile(r"\bApple\b"), ["Samsung", "Google", "Sony"]),
-    (re.compile(r"\bNASA\b"), ["ESA", "Roscosmos", "JAXA"]),
-    (re.compile(r"\bSpace Shuttle Columbia\b"), ["Space Shuttle Discovery", "Space Shuttle Atlantis", "Space Shuttle Endeavour"]),
-    (re.compile(r"\bSpace Shuttle Discovery\b"), ["Space Shuttle Columbia", "Space Shuttle Atlantis", "Space Shuttle Endeavour"]),
-    (re.compile(r"\bSpace Shuttle Atlantis\b"), ["Space Shuttle Columbia", "Space Shuttle Discovery", "Space Shuttle Endeavour"]),
-    (re.compile(r"\bSpace Shuttle Endeavour\b"), ["Space Shuttle Columbia", "Space Shuttle Discovery", "Space Shuttle Atlantis"]),
-    (re.compile(r"\bLos Angeles\b"), ["New York", "Seattle", "San Francisco", "Chicago"]),
-    (re.compile(r"\bNew York\b"), ["Los Angeles", "Chicago", "Boston"]),
-]
-
-GENERIC_SWAPS: dict[str, list[str]] = {
-    "committee": ["commission", "council", "panel"],
-    "ethics": ["conduct", "oversight", "accountability"],
-    "censured": ["reprimanded", "rebuked", "issued a warning to"],
-    "senator": ["representative", "governor", "mayor"],
-    "executive": ["financier", "lobbyist", "advisor"],
-    "hearing": ["session", "meeting", "review"],
-    "congress": ["parliament", "assembly", "legislature"],
-    "program": ["initiative", "campaign", "drive"],
-}
-
-PHRASE_SWAPS: list[tuple[re.Pattern, list[str]]] = [
-    (re.compile(r"\bwins\b", re.I), ["clinches", "secures", "captures", "takes"]),
-    (re.compile(r"\bequals\b", re.I), ["matches", "ties", "draws even with"]),
-    (re.compile(r"\bequaling\b", re.I), ["matching", "tying", "drawing even with"]),
-    (re.compile(r"\bchampionship\b", re.I), ["title", "crown", "season trophy"]),
-    (re.compile(r"\bseventh\b", re.I), ["record-tying seventh", "historic seventh", "another championship"]),
-    (re.compile(r"\bfirst\b", re.I), ["early", "initial", "debut"]),
-    (re.compile(r"\blaunch\b", re.I), ["liftoff", "mission start", "blastoff"]),
-    (re.compile(r"\brecord\b", re.I), ["milestone", "benchmark", "mark"]),
-]
-
-LENGTH_FILLERS = [
-    "widely covered at the time",
-    "noted across popular headlines",
-    "remembered as a cultural moment",
-    "seen as a milestone for fans",
-]
-
-def _force_variation(text: str, rng: random.Random) -> str:
+# --- replace _openai_fakes_from_real with this stronger version ---
+def _openai_fakes_from_real(real_text: str, month_name: str) -> Tuple[str, str]:
     """
-    Shuffle wording to break mirrors: swap common nouns/verbs, tweak year, and tidy punctuation.
+    Produce two plausible-but-false events similar in tone/length to the real item.
     """
-    tokens = _words(text)
-    swapped = False
-    new_tokens: list[str] = []
-
-    for w in tokens:
-        lw = w.lower()
-        if not swapped and lw in GENERIC_SWAPS:
-            repl = rng.choice(GENERIC_SWAPS[lw])
-            repl = repl.capitalize() if w[0].isupper() else repl
-            new_tokens.append(repl)
-            swapped = True
-        else:
-            new_tokens.append(w)
-
-    s = " ".join(new_tokens)
-    for pat, alts in PHRASE_SWAPS:
-        if pat.search(s):
-            s = pat.sub(rng.choice(alts), s, count=1)
-            swapped = True
-            break
-
-    if not swapped:
-        year = rng.choice(range(1984, 2019))
-        s = "In " + str(year) + ", " + s
-
-    s = s.strip()
-    if not s.endswith("."):
-        s += "."
-    return s
-
-def _mutate_event_like(real_text: str, rng: random.Random) -> str:
-    """
-    Create a fake that stays close to the real event:
-    - same general topic and sentence shape
-    - tweak org / vehicle / place / mission number / year
-    """
-    s = real_text.strip()
-
-    # 1) tweak an organization / place / vehicle if present
-    for pattern, alts in ENTITY_SWAPS:
-        if pattern.search(s):
-            replacement = rng.choice(alts)
-            s = pattern.sub(replacement, s)
-            break
-
-    # 2) tweak STS mission numbers like STS-87 -> STS-89
-    m = re.search(r"\bSTS-(\d+)\b", s)
-    if m:
-        try:
-            n = int(m.group(1))
-            delta = rng.choice([-3, -2, -1, 1, 2, 3])
-            new_n = max(1, n + delta)
-            s = s[:m.start(1)] + str(new_n) + s[m.end(1):]
-        except ValueError:
-            pass
-
-    # 3) tweak the year if present
-    y = _extract_year(s)
-    if y:
-        delta = rng.choice([-5, -3, -2, -1, 1, 2, 3, 5])
-        new_y = max(1900, y + delta)
-        s = re.sub(r"\b(19|20)\d{2}\b", str(new_y), s, count=1)
-
-    # clean up spacing and punctuation
-    s = s.strip()
-    if not s.endswith("."):
-        s += "."
-
-    return s
-
-def _fit_length_for_game(text: str, min_words: int = 20, max_words: int = 25) -> str:
-    """
-    Clamp an event description into a nice, game-friendly length window.
-    - Prefer 20–25 words.
-    - If longer, hard-trim to max_words.
-    - If shorter, gently pad with neutral filler.
-    """
-    words = _words(text)
-    if not words:
-        return text or ""
-
-    # pad if too short with rotating neutral phrases
-    if len(words) < min_words:
-        idx = len(words) % len(LENGTH_FILLERS)
-        while len(words) < min_words:
-            filler_tokens = _words(LENGTH_FILLERS[idx % len(LENGTH_FILLERS)])
-            take = min(min_words - len(words), len(filler_tokens))
-            words += filler_tokens[:take]
-            idx += 1
-
-    if len(words) > max_words:
-        words = words[:max_words]
-
-    s = " ".join(words)
-    s = s.rstrip(" .,;")
-    if not s.endswith("."):
-        s += "."
-    return s
-
-def _sanitize_sentence(s: str) -> str:
-    """
-    Remove immediate word duplicates and tidy spaces; keeps case.
-    """
-    tokens = _words(s)
-    cleaned: list[str] = []
-    for w in tokens:
-        if cleaned and cleaned[-1].lower() == w.lower():
-            continue
-        cleaned.append(w)
-    if not cleaned:
-        return s
-    text = " ".join(cleaned)
-    text = re.sub(r"\s{2,}", " ", text).strip()
-    if not text.endswith("."):
-        text += "."
-    return text
-
-def _sentence_case(s: str) -> str:
-    s = s.strip()
-    if not s:
-        return s
-    return s[0].upper() + s[1:]
-
-def _normalize_tokens(s: str) -> list[str]:
-    return [w.lower() for w in _words(s)]
-
-
-def _ngram_set(tokens: list[str], n: int) -> set[str]:
-    if len(tokens) < n:
-        return set()
-    return {" ".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)}
-
-def _has_banned_jargon(s: str) -> bool:
-    low = (s or "").lower()
-    return any(word in low for word in BANNED_JARGON)
-
-def _too_similar(a: str, b: str) -> bool:
-    """
-    Return True if two sentences look too similar for separate choices.
-    Checks for large phrase overlap and high word overlap.
-    """
-    ta = _normalize_tokens(a)
-    tb = _normalize_tokens(b)
-    if not ta or not tb:
-        return False
-
-    # identical starts/ends
-    if ta[:6] == tb[:6] or ta[-6:] == tb[-6:]:
-        return True
-
-    sa, sb = set(ta), set(tb)
-
-    # one mostly contained in the other
-    a_text = " ".join(ta)
-    b_text = " ".join(tb)
-    if a_text in b_text or b_text in a_text:
-        return True
-
-    # shared 3-grams
-    tri_a = _ngram_set(ta, 3)
-    tri_b = _ngram_set(tb, 3)
-    if tri_a and tri_b and tri_a.intersection(tri_b):
-        return True
-
-    # shared 2-grams, allow a few, block heavy overlap
-    bi_a = _ngram_set(ta, 2)
-    bi_b = _ngram_set(tb, 2)
-    if bi_a and bi_b:
-        overlap = len(bi_a & bi_b)
-        if overlap >= 3:
-            return True
-
-    # simple Jaccard on words
-    inter = len(sa & sb)
-    union = len(sa | sb) or 1
-    jacc = inter / union
-    return jacc > 0.5
-
-def _openai_fakes_from_real(real_text: str, month_name: str, salt: int = 0) -> Tuple[str, str]:
-    """
-    Create two fakes that:
-      • stay in the same loose domain / era as the real event
-      • feel like real 'on this day' facts
-      • are 20–25 words, simple language
-      • avoid tragedies and jargon
-      • are not close copies of each other or of the real event
-    """
-
-    real_year = _extract_year(real_text)
-    domain = _infer_domain(real_text)
-
-    # Hard game window for fakes
-    min_len = 20
-    max_len = 25
-
-    def _len_ok(s: str) -> bool:
-        n = _wlen(s)
-        return min_len <= n <= max_len
-
-    # -----------------------------------------------
-    # 1) OpenAI path
-    # -----------------------------------------------
+    # ---------- 1) Try OpenAI ----------
     if OPENAI_API_KEY:
         sys_prompt = (
-            "You create believable but fictional 'On This Day' history facts for a guessing game.\n"
-            "You receive one real event and must invent TWO fake events.\n"
-            "\n"
-            "Rules for both fakes:\n"
-            f"- Use simple, modern language. Each fake must be between {min_len} and {max_len} words.\n"
-            "- Keep the same general type of thing as the real event "
-            "(for example space flight, sports game, TV show, tech milestone, music event).\n"
-            "- Use exactly one four-digit year in each fake. Year must fit the topic.\n"
-            "- Avoid wars, disasters, deaths, attacks, crashes, or other violent events.\n"
-            "- Avoid lab or research jargon. Do NOT use these words:\n"
-            "  prototype, initiative, specialized, project, institute, laboratory,\n"
-            "  pioneers, researchers, data processing.\n"
-            "- Each fake is one sentence, like a short Wikipedia 'On this day' entry.\n"
-            "- The two fakes must feel different from each other; do not reuse long phrases or mirrored structure.\n"
-            "- Start each fake with a different opening. Do not start both with 'In <year>'.\n"
-            "- Do not copy unique names, titles, or numbers from the real event.\n"
-            "- Keep the same voice and length style as the real event: clear, youth-friendly, ~22 words.\n"
-            "\n"
-            "Output STRICT JSON: {\"fake1\": \"...\", \"fake2\": \"...\"}"
+            "You write concise, believable 'On This Day' almanac entries.\n"
+            "Given ONE real entry, return TWO different **plausible but false** entries that:\n"
+            f"• Occur in {month_name} (any year),\n"
+            "• Match the tone and length (within ±15%) of the real entry,\n"
+            "• Each include at least ONE proper noun (org/place/person) and ONE 4-digit year,\n"
+            "• Sound specific (a concrete action or outcome),\n"
+            "• DO NOT copy exact entities from the real entry,\n"
+            "• No meta-text. No hedging words like 'reportedly' or 'allegedly'.\n"
+            'Return STRICT JSON only: {\"fake1\":\"...\",\"fake2\":\"...\"}'
         )
-
-        user = (
-            f"Real event: {real_text}\n"
-            f"Month: {month_name}\n"
-            f"Domain hint: {domain}\n"
-            f"Approx real year: {real_year}\n"
-        )
-
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user},
+                {"role": "user", "content": f"real_entry={real_text}"},
             ],
             "temperature": 0.7,
             "response_format": {"type": "json_object"},
         }
-
-        try:
-            r = requests.post(
-                OAI_URL,
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=30,
-            )
-            r.raise_for_status()
-            raw = r.json()["choices"][0]["message"]["content"]
+        for _ in range(2):
             try:
-                obj = requests.utils.json.loads(raw)
+                r = requests.post(
+                    OAI_URL,
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=30,
+                )
+                r.raise_for_status()
+                content = r.json()["choices"][0]["message"]["content"]
+                try:
+                    obj = requests.utils.json.loads(content)
+                except Exception:
+                    obj = requests.utils.json.loads(content.strip("` \n"))
+                f1 = (obj.get("fake1") or "").strip()
+                f2 = (obj.get("fake2") or "").strip()
+                if f1 and f2 and f1.lower() != real_text.lower() and f2.lower() != real_text.lower():
+                    return f1, f2
             except Exception:
-                obj = requests.utils.json.loads(raw.strip("` "))
+                time.sleep(0.5)
 
-            f1 = (obj.get("fake1") or "").strip()
-            f2 = (obj.get("fake2") or "").strip()
+    # ---------- 2) Deterministic fallback (no API / API failed) ----------
+    # make fakes carry named entities + years to feel 'real'
+    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")) ^ (hash(real_text) & 0xFFFFFFFF))
+    regions = ["France", "Canada", "Brazil", "Japan", "India", "Italy", "Kenya", "Australia", "Spain", "Norway"]
+    cities  = ["Marseille", "Quebec City", "São Paulo", "Osaka", "Pune", "Milan", "Nairobi", "Perth", "Valencia", "Bergen"]
+    bodies  = ["National Assembly", "Supreme Court", "Railway Commission", "Postal Service", "Maritime Authority",
+               "Central Bank", "Broadcasting Corporation", "University Senate", "City Council", "Museum Board"]
+    verbs   = ["authorizes", "ratifies", "suspends", "standardizes", "opens", "formally adopts", "repeals", "announces"]
+    objects = ["a nationwide licensing scheme", "new safety codes", "a public broadcaster charter",
+               "provincial tax rules", "a national archive program", "interstate tariffs", "coastal fishing limits"]
+    years   = list(range(1860, 2022))
 
-            if f1 and f2:
-                # length, jargon, and similarity checks
-                if _len_ok(f1) and _len_ok(f2):
-                    if not _has_banned_jargon(f1) and not _has_banned_jargon(f2):
-                        if not _too_similar(f1, f2) and not _too_similar(f1, real_text) and not _too_similar(f2, real_text):
-                            return f1, f2
-
-        except Exception:
-            # fall through to fallback
-            pass
-
-    # ---------------------------------------------------------
-    # 2) Deterministic fallback (unchanged except word window)
-    # ---------------------------------------------------------
-    rng = random.Random(
-        int(datetime.now(TZ).strftime("%Y%m%d")) ^
-        (hash(real_text) & 0xFFFFFFFF) ^
-        (salt & 0xFFFF)
-    )
-
-    def _reshape_structure(src: str) -> str:
-        """
-        Change the sentence shape so we don't get three "In 20xx the first..." clones.
-        Keeps content, but moves the year and adds a light intro.
-        """
-        year = _extract_year(src) or rng.choice(range(1990, 2020))
-        stripped = re.sub(r"\b(19|20)\d{2}\b", "", src).strip()
-        stripped = re.sub(r"^(in|on)\b[:\s,]*", "", stripped, flags=re.I).strip()
-        # keep lowercase start so templates can control capitalization
-        if stripped and stripped[0].isupper():
-            stripped = stripped[0].lower() + stripped[1:]
-
-        templates = [
-            f"In {year}, {stripped}",
-            f"{stripped.capitalize()} It took place in {year}.",
-            f"A story from {year}: {stripped}",
-            f"{stripped.capitalize()} during {year}.",
-            f"By {year}, {stripped}",
-            f"{stripped.capitalize()} — headline moment in {year}.",
+    def one():
+        region = rng.choice(regions)
+        city   = rng.choice(cities)
+        body   = rng.choice(bodies)
+        verb   = rng.choice(verbs)
+        obj    = rng.choice(objects)
+        year   = rng.choice(years)
+        # target similar length
+        target_len = max(60, min(180, int(len(real_text)*rng.uniform(0.85, 1.15))))
+        s = f"{body} in {city}, {region}, {verb} {obj} in {year}."
+        # pad lightly with a motive/impact clause (but stay concise)
+        tails = [
+            "to streamline regional policy.",
+            "after months of debate.",
+            "citing budget pressures.",
+            "following a contested vote.",
+            "to align with international norms."
         ]
-        pick = rng.choice(templates).strip()
-        if not pick.endswith("."):
-            pick += "."
-        return pick
+        if len(s) < target_len and rng.random() < 0.8:
+            s = s[:-1] + " " + rng.choice(tails)
+        return s
 
-    def _fallback_fake() -> str:
-        base = _mutate_event_like(real_text, rng)
-        if _too_similar(base, real_text):
-            for _ in range(4):
-                base = _force_variation(real_text, rng)
-                if not _too_similar(base, real_text):
-                    break
-        base = _reshape_structure(base)
-        # add a short domain-specific flair to break phrasing sameness
-        flair = _domain_flair(domain, rng)
-        base = f"{base.rstrip('.')} {flair}."
-        base = _fit_length_for_game(base, min_len, max_len)
-        return _sentence_case(base)
-
-    candidates: list[str] = []
-    for _ in range(12):
-        cand = _fallback_fake()
-        if not _too_similar(cand, real_text):
-            if all(not _too_similar(cand, c) for c in candidates):
-                candidates.append(cand)
-        if len(candidates) >= 2:
-            break
-
-    # pad out if we somehow didn't get two distinct ones
-    while len(candidates) < 2:
-        candidates.append(_sentence_case(_fit_length_for_game(_force_variation(real_text, rng), min_len, max_len)))
-
-    return candidates[0], candidates[1]
+    f1 = one()
+    f2 = one()
+    if f2.lower() == f1.lower():
+        f2 = one()
+    return f1, f2
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -670,151 +188,31 @@ def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
         pass
     return None, None
 
-def _paraphrase_real_event(text: str, target_min: int = 19, target_max: int = 25) -> str:
-    """
-    Paraphrase the real Wikipedia event into a clean 19–25 word sentence.
-    Preserves factual meaning but ensures uniform choice lengths.
-    Falls back to trimmed/normalized version if API unavailable.
-    """
-    if not text:
-        return ""
-
-    # If we have OpenAI, do a controlled paraphrase
-    if OPENAI_API_KEY:
-        sys_prompt = (
-            "You rewrite historical event summaries.\n"
-            "You must create a factually accurate paraphrase of the given event.\n"
-            "Rules:\n"
-            f"• Length must be between {target_min} and {target_max} words.\n"
-            "• Keep all factual details true.\n"
-            "• Keep it one clean sentence.\n"
-            "• No embellishments, no added claims, no interpretation.\n"
-            "• Maintain a neutral Wikipedia-like tone.\n"
-            "• No tragedies may be softened; keep accuracy while maintaining safety.\n"
-            "• Use clear, simple language that a high-school student would understand.\n"
-            "Return only the rewritten sentence."
-        )
-
-        payload = {
-            "model": OAI_MODEL,
-            "messages": [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": text},
-            ],
-            "temperature": 0.3,
-        }
-
-        try:
-            r = requests.post(
-                OAI_URL,
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json=payload,
-                timeout=25
-            )
-            r.raise_for_status()
-            paraphrased = r.json()["choices"][0]["message"]["content"].strip()
-
-            # soft length validation
-            w = _wlen(paraphrased)
-            if target_min <= w <= target_max:
-                return paraphrased
-
-        except Exception:
-            pass
-
-    # If API unavailable or paraphrase fails, soft fallback
-    # Keep only essential elements + enforce target range by trimming/padding neutrally
-    base = text.strip()
-
-    # remove trailing long clauses but keep core meaning
-    base = re.sub(r",[^.]+", "", base)
-
-    words = _words(base)
-    if len(words) > target_max:
-        words = words[:target_max]
-    elif len(words) < target_min:
-        # gently expand with neutral, non-repeating filler
-        fillers = [
-            "in a notable historical context",
-            "recognized by contemporary reports",
-            "remembered for its cultural impact",
-            "noted in popular coverage",
-        ]
-        fi = 0
-        while len(words) < target_min:
-            add = _words(fillers[fi % len(fillers)])
-            take = min(target_min - len(words), len(add))
-            words += add[:take]
-            fi += 1
-
-    return " ".join(words).rstrip(".") + "."
 
 def _pick_real_event() -> Tuple[str, str]:
-    """
-    Fetches today's real event from Wikipedia.
-    Selects a youth-relevant, non-tragic item.
-    Then paraphrases it to ~22 words for consistency with fake entries.
-    Returns (paraphrased_real_event, month_name).
-    """
-
     today = _today_local_date()
     url = WIKI_URL.format(m=today.month, d=today.day)
-    j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.1"})
+    j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.0"})
     events = j.get("events", [])
+    if not events:
+        raise RuntimeError("No events returned from Wikipedia OTD")
 
-    def _text(e: dict) -> str:
-        return (e.get("text") or e.get("displaytitle") or "").strip()
-
-    # Filter tragedies
-    pool = [e for e in events if _text(e) and not _is_tragedy(_text(e))]
-    if not pool:
-        pool = [e for e in events if _text(e)]
-
-    # Score and pick youth-relevant events
-    scored = sorted(pool, key=_score_for_youth, reverse=True)
-
-    # Shuffle top picks so re-rolling gets variation
-    top = scored[:20]
-    random.shuffle(top)
-
-    picked_text = None
-
-    # Prefer post-1980, clean single-sentence events
-    for e in top:
-        t = _text(e)
-        year = e.get("year")
-        try:
-            y = int(year)
-        except Exception:
-            y = None
-
-        if y is not None and y < 1980:
+    # Pick a mid-specificity item (avoid extremely niche or multisentence)
+    random.shuffle(events)
+    candidates = []
+    for e in events:
+        t = e.get("text") or e.get("displaytitle") or ""
+        if not t:
             continue
+        if 40 <= len(t) <= 180 and t.count(".") <= 1:
+            candidates.append(t.strip())
+    if not candidates:
+        candidates = [e.get("text", "").strip() for e in events if e.get("text")]
 
-        if 20 <= len(t) <= 240 and t.count(".") <= 1:
-            picked_text = t
-            break
-
-    # fallback inside shuffled list
-    if not picked_text:
-        for e in top:
-            t = _text(e)
-            if 20 <= len(t) <= 240 and t.count(".") <= 1:
-                picked_text = t
-                break
-
-    # last fallback
-    if not picked_text:
-        picked_text = _text(scored[0]) or "A significant event is recorded."
-
-    # 🔥 NEW: produce 22±3 word paraphrase
-    real_paraphrased = _paraphrase_real_event(picked_text)
-
+    real = (candidates[0] if candidates else "A notable event is recorded by historians.")
+    # also return month name for hinting
     month_name = today.strftime("%B")
-    return real_paraphrased, month_name
+    return real, month_name
 
 # --- replace _openai_image with this ---
 def _openai_image(prompt: str) -> Optional[str]:
@@ -857,27 +255,6 @@ def _openai_image(prompt: str) -> Optional[str]:
 
 # keep this constant
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
-FALLBACK_ICON_DATA_URL = (
-    "data:image/svg+xml;base64,"
-    "PHN2ZyB3aWR0aD0iNzIiIGhlaWdodD0iNzIiIHZpZXdCb3g9IjAgMCA3MiA3MiIgZmlsbD0ibm9uZSIg"
-    "eG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjcyIiBoZWlnaHQ9"
-    "IjcyIiByeD0iMjQiIGZpbGw9IiNmMWYyZjUiIHN0cm9rZT0iI2Q5ZGE5YSIgc3Ryb2tlLXdpZHRoPSIy"
-    "Ii8+CjxjaXJjbGUgY3g9IjM2IiBjeT0iMzYiIHI9IjE2IiBmaWxsPSIjOWNhY2RmIiBzdHJva2U9IiM4"
-    "NmJiYmMiIHN0cm9rZS13aWR0aD0iMiIvPgo8cGF0aCBkPSJNMzYgMTQuN2w0LjYgOS4zIDEwLjMgMS41"
-    "LTcuNCA3LjIgMS43IDEwLjMtOS4yLTQuOC05LjIgNC44IDEuNy0xMC4zLTcuNC03LjItNy4zIDEuNy0x"
-    "MC4zLTEwLjMtMS41IDcuNC03LjItNC42LTkuMyA0LjYgOS4zIiBmaWxsPSIjZjRmOGZmIiBzdHJva2U9"
-    "IiNlYWM3YWQiIHN0cm9rZS13aWR0aD0iMiIvPgo8L3N2Zz4="
-)
-
-def _safe_url(u: Optional[str]) -> str:
-    """
-    DB columns are VARCHAR(600). Keep URLs short; fall back to the small static icon if too long/empty.
-    """
-    if not u:
-        return FALLBACK_ICON_URL
-    if len(u) > 580:
-        return FALLBACK_ICON_URL
-    return u
 
 # --- replace _image_for with this ---
 def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
@@ -895,7 +272,7 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
             j = _http_get_json(
                 "https://api.unsplash.com/search/photos",
                 params={"query": q, "orientation": "squarish", "per_page": 6, "content_filter": "high"},
-                headers={"Authorization": "Client-ID " + UNSPLASH_ACCESS_KEY},
+                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
             for r in j.get("results", []):
                 img = r.get("urls", {}).get("small")
@@ -915,10 +292,9 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
             return u, "OpenAI generated"
 
     # 3) Guaranteed visible fallback (never blank)
-    fallback_url = FALLBACK_ICON_URL
-    if fallback_url not in used:
-        used.add(fallback_url)
-    return fallback_url, ""
+    if FALLBACK_ICON_URL not in used:
+        used.add(FALLBACK_ICON_URL)
+    return FALLBACK_ICON_URL, ""
 
 def ensure_today_round(force: int = 0) -> bool:
     """
@@ -938,45 +314,10 @@ def ensure_today_round(force: int = 0) -> bool:
     if existing and force == 0:
         return True
 
+    # 1) pick a real event + generate fakes, icons, images
     real_raw, month_name = _pick_real_event()
     real_soft = _soften_real_title(real_raw)
-
-    # normalization helper for consistent style/length
-    def _normalize_choice(text: str) -> str:
-        return _sentence_case(_fit_length_for_game(_sanitize_sentence(text)))
-
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name)
-
-    real_soft = _normalize_choice(real_soft)
-    fake1 = _normalize_choice(fake1)
-    fake2 = _normalize_choice(fake2)
-
-    # final dedupe loop with salted regeneration to avoid near clones
-    salt = 1
-    while salt <= 4 and (
-        _too_similar(fake1, fake2) or _too_similar(fake1, real_soft) or _too_similar(fake2, real_soft)
-    ):
-        f1, f2 = _openai_fakes_from_real(real_soft, month_name, salt=salt)
-        fake1 = _normalize_choice(f1)
-        fake2 = _normalize_choice(f2)
-        salt += 1
-
-    def _unique_front(a: str, b: str) -> bool:
-        ta, tb = _normalize_tokens(a)[:4], _normalize_tokens(b)[:4]
-        return ta != tb
-
-    rng_norm = random.Random(int(time.time()) ^ (hash(real_soft) & 0xFFFFFFFF))
-
-    # If openings still match, prepend light differentiators
-    if not _unique_front(fake1, real_soft):
-        fake1 = _normalize_choice(_force_variation(real_soft, rng_norm))
-    if not _unique_front(fake2, real_soft) or not _unique_front(fake2, fake1):
-        fake2 = _normalize_choice(_force_variation(fake1, rng_norm))
-
-    if _too_similar(fake1, real_soft):
-        fake1 = _normalize_choice(_force_variation(real_soft, rng_norm))
-    if _too_similar(fake2, real_soft) or _too_similar(fake2, fake1):
-        fake2 = _normalize_choice(_force_variation(fake1, rng_norm))
 
     real_icon = pick_icon_for_text(real_soft)
     f1_icon   = pick_icon_for_text(fake1)
@@ -987,11 +328,6 @@ def ensure_today_round(force: int = 0) -> bool:
     f1_img,  f1_attr    = _image_for(fake1, used_urls)
     f2_img,  f2_attr    = _image_for(fake2, used_urls)
     img_attr = real_attr or f1_attr or f2_attr or ""
-
-    # enforce DB-safe URL lengths
-    real_img = _safe_url(real_img)
-    f1_img = _safe_url(f1_img)
-    f2_img = _safe_url(f2_img)
 
     try:
         if existing:
