@@ -655,23 +655,44 @@ def ensure_today_round(force: int = 0) -> bool:
 
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max)
 
-def _normalize_target(text: str) -> str:
-    normalized = _normalize_choice(text, fake_min, fake_max)
-    # keep in domain with a light flair if it drifted
-    if domain != "general" and _infer_domain(normalized) != domain:
-        normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain))}.", fake_min, fake_max)
-    if _is_tragedy(normalized):
-        safe_seed = f"A {domain} highlight that fans shared online"
-        normalized = _normalize_choice(safe_seed, fake_min, fake_max)
-    # guard domain mismatch for general by regenerating a neutral phrasing
-    if domain == "general" and not _domain_ok(normalized, domain):
-        fallback_domain = random.choice(["travel","culture","business","science","general"])
-        fallback_subject = random.choice(domain_subjects[fallback_domain])
-        fallback_action = random.choice(domain_actions[fallback_domain])
-        fallback_react = random.choice(domain_reacts[fallback_domain])
-        neutral = f"{fallback_subject} {fallback_action}; {fallback_react}."
-        normalized = _normalize_choice(neutral, fake_min, fake_max)
-    return normalized
+    def _normalize_target(text: str) -> str:
+        normalized = _normalize_choice(text, fake_min, fake_max)
+        # keep in domain with a light flair if it drifted
+        if domain != "general" and _infer_domain(normalized) != domain:
+            normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain))}.", fake_min, fake_max)
+        if _is_tragedy(normalized):
+            safe_seed = f"A {domain} highlight that fans shared online"
+            normalized = _normalize_choice(safe_seed, fake_min, fake_max)
+        # guard domain mismatch for general by regenerating a neutral phrasing
+        if domain == "general" and not _domain_ok(normalized, domain):
+            fallback_domain = random.choice(["travel","culture","business","science","general"])
+            fallback_subjects = {
+                "travel": ["A historic ship visit", "A new ferry route", "A busy harbor festival", "A landmark train run", "A waterfront opening"],
+                "culture": ["A museum opening", "A public art show", "A city parade", "A landmark restoration", "A film festival night"],
+                "business": ["A flagship store launch", "A brand collaboration", "A startup milestone", "A major product drop", "A pop-up event"],
+                "science": ["A planetarium reveal", "A space exhibit", "A green tech demo", "A science fair highlight", "A new lab opening"],
+                "general": ["A city festival", "A major exhibit", "A national celebration", "A community milestone", "A public event"],
+            }
+            fallback_actions = {
+                "travel": ["draws curious crowds", "sails into port", "opens to visitors", "hosts tours all day", "gets a warm welcome"],
+                "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz", "brings people together"],
+                "business": ["opens with fanfare", "hosts a packed launch", "pulls a long line", "draws coverage from blogs", "sells out early"],
+                "science": ["shows off new ideas", "welcomes students and families", "gets shared by educators", "draws local press", "debuts a demo"],
+                "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
+            }
+            fallback_reacts = {
+                "travel": ["photos flood socials", "locals share videos", "news crews cover it", "tourists post nonstop"],
+                "culture": ["photos spread online", "locals share videos", "critics cover it", "people post reactions"],
+                "business": ["customers post hauls", "blogs cover the drop", "people line up early", "social posts spike"],
+                "science": ["teachers share clips", "local news covers it", "families post photos", "forums discuss it"],
+                "general": ["people talk about it for days", "local news covers it", "crowds show up", "it trends for a bit"],
+            }
+            fs = fallback_subjects[fallback_domain]
+            fa = fallback_actions[fallback_domain]
+            fr = fallback_reacts[fallback_domain]
+            neutral = f"{random.choice(fs)} {random.choice(fa)}; {random.choice(fr)}."
+            normalized = _normalize_choice(neutral, fake_min, fake_max)
+        return normalized
 
     fake1 = _normalize_target(fake1)
     fake2 = _normalize_target(fake2)
