@@ -259,7 +259,8 @@ def _remix_structure(text: str, rng: random.Random) -> str:
 
 def _domain_ok(text: str, domain: str) -> bool:
     if domain == "general":
-        return True
+        inferred = _infer_domain(text)
+        return inferred not in {"tech", "gaming", "social_media", "internet_culture"}
     inferred = _infer_domain(text)
     return inferred == domain
 
@@ -421,13 +422,11 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
 
     base_domains = [domain] if domain else ["general"]
     if domain == "general":
-        base_domains += ["travel","culture","business","science","music","film_tv","sports","internet_culture","social_media"]
+        base_domains = ["travel","culture","business","science","music","film_tv","sports","general"]
     else:
         base_domains.append("general")
         if domain in {"tech","social_media","internet_culture"}:
             base_domains.append("culture")
-        if domain == "general":
-            base_domains.append("travel")
     def build_fake() -> str:
         pick_domain = rng.choice(base_domains)
         subject = rng.choice(domain_subjects.get(pick_domain, domain_subjects["general"]))
@@ -656,19 +655,23 @@ def ensure_today_round(force: int = 0) -> bool:
 
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max)
 
-    def _normalize_target(text: str) -> str:
-        normalized = _normalize_choice(text, fake_min, fake_max)
-        # keep in domain with a light flair if it drifted
-        if domain != "general" and _infer_domain(normalized) != domain:
-            normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain))}.", fake_min, fake_max)
-        if _is_tragedy(normalized):
-            safe_seed = f"A {domain} highlight that fans shared online"
-            normalized = _normalize_choice(safe_seed, fake_min, fake_max)
-        # guard domain mismatch for general by regenerating a neutral phrasing
-        if domain == "general" and not _domain_ok(normalized, domain):
-            neutral = "A headline story covered widely that week with people sharing it online"
-            normalized = _normalize_choice(neutral, fake_min, fake_max)
-        return normalized
+def _normalize_target(text: str) -> str:
+    normalized = _normalize_choice(text, fake_min, fake_max)
+    # keep in domain with a light flair if it drifted
+    if domain != "general" and _infer_domain(normalized) != domain:
+        normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain))}.", fake_min, fake_max)
+    if _is_tragedy(normalized):
+        safe_seed = f"A {domain} highlight that fans shared online"
+        normalized = _normalize_choice(safe_seed, fake_min, fake_max)
+    # guard domain mismatch for general by regenerating a neutral phrasing
+    if domain == "general" and not _domain_ok(normalized, domain):
+        fallback_domain = random.choice(["travel","culture","business","science","general"])
+        fallback_subject = random.choice(domain_subjects[fallback_domain])
+        fallback_action = random.choice(domain_actions[fallback_domain])
+        fallback_react = random.choice(domain_reacts[fallback_domain])
+        neutral = f"{fallback_subject} {fallback_action}; {fallback_react}."
+        normalized = _normalize_choice(neutral, fake_min, fake_max)
+    return normalized
 
     fake1 = _normalize_target(fake1)
     fake2 = _normalize_target(fake2)
