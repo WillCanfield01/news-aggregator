@@ -190,10 +190,10 @@ def _fit_length(text: str, min_words: int, max_words: int) -> str:
     if not words:
         return text or ""
     fillers = [
-        "It draws wide coverage online",
-        "Fans share clips everywhere",
-        "Headlines pick it up",
-        "People talk about it that week",
+        "and people keep talking about it",
+        "and headlines pick it up",
+        "while clips circulate online",
+        "and fans keep sharing it",
     ]
     if len(words) < min_words:
         idx = len(words) % len(fillers)
@@ -405,14 +405,14 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
     }
     domain_reacts = {
-        "tech": ["tech blogs rave about it", "creators post first impressions", "users share clips", "reviews flood in"],
+        "tech": ["tech blogs rave about it", "reviewers post quick takes", "users share clips", "creators react in short videos"],
         "social_media": ["friends send it around", "creators jump on it", "comment sections light up", "people remix it"],
         "gaming": ["streams highlight it", "fans clip big plays", "forums explode with takes", "players rush in"],
         "music": ["fans share the hook", "radio spins climb", "clips go viral", "crowds sing along"],
         "film_tv": ["watch parties pop up", "quotes spread online", "reviews praise it", "memes appear overnight"],
         "sports": ["replays loop everywhere", "fans argue about calls", "stats trend on apps", "highlights go viral"],
         "internet_culture": ["memes land fast", "blogs post breakdowns", "threads keep growing", "it hits front pages"],
-        "travel": ["photos flood socials", "locals share videos", "news crews cover it", "tourists post nonstop"],
+        "travel": ["photos flood social feeds", "locals share videos", "news crews cover it", "tourists post nonstop"],
         "culture": ["photos spread online", "locals share videos", "critics cover it", "people post reactions"],
         "business": ["customers post hauls", "blogs cover the drop", "people line up early", "social posts spike"],
         "science": ["teachers share clips", "local news covers it", "families post photos", "forums discuss it"],
@@ -434,9 +434,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
         template = rng.choice([
-            "{subject} {action} in {place}; {reaction}.",
             "In {place}, {subject} {action}, and {reaction}.",
-            "{subject} arrives in {place} and {action}, while {reaction}.",
+            "{subject} {action} in {place}, while {reaction}.",
+            "{subject} arrives in {place} and {action} as {reaction}.",
         ])
         s = template.format(subject=subject, place=place, action=action, reaction=reaction)
         s = _fit_length(s, min_len, max_len)
@@ -690,7 +690,10 @@ def ensure_today_round(force: int = 0) -> bool:
             fs = fallback_subjects[fallback_domain]
             fa = fallback_actions[fallback_domain]
             fr = fallback_reacts[fallback_domain]
-            neutral = f"{random.choice(fs)} {random.choice(fa)}; {random.choice(fr)}."
+            fallback_subject = random.choice(fs)
+            fallback_action = random.choice(fa)
+            fallback_react = random.choice(fr)
+            neutral = f"{fallback_subject} {fallback_action}, and {fallback_react}."
             normalized = _normalize_choice(neutral, fake_min, fake_max)
         return normalized
 
