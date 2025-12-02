@@ -238,6 +238,52 @@ def _mostly_year_swap(a: str, b: str) -> bool:
     union = len(sa | sb) or 1
     return inter / union > 0.75
 
+def _normalize_tokens(s: str) -> list[str]:
+    return [w.lower() for w in _words(s)]
+
+def _ngram_set(tokens: list[str], n: int) -> set[str]:
+    if len(tokens) < n:
+        return set()
+    return {" ".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)}
+
+def _too_similar(a: str, b: str) -> bool:
+    ta = _normalize_tokens(a)
+    tb = _normalize_tokens(b)
+    if not ta or not tb:
+        return False
+
+    # identical starts/ends
+    if ta[:6] == tb[:6] or ta[-6:] == tb[-6:]:
+        return True
+
+    sa, sb = set(ta), set(tb)
+
+    # one mostly contained in the other
+    a_text = " ".join(ta)
+    b_text = " ".join(tb)
+    if a_text in b_text or b_text in a_text:
+        return True
+
+    # shared 3-grams
+    tri_a = _ngram_set(ta, 3)
+    tri_b = _ngram_set(tb, 3)
+    if tri_a and tri_b and tri_a.intersection(tri_b):
+        return True
+
+    # shared 2-grams, allow a few, block heavy overlap
+    bi_a = _ngram_set(ta, 2)
+    bi_b = _ngram_set(tb, 2)
+    if bi_a and bi_b:
+        overlap = len(bi_a & bi_b)
+        if overlap >= 3:
+            return True
+
+    # simple Jaccard on words
+    inter = len(sa & sb)
+    union = len(sa | sb) or 1
+    jacc = inter / union
+    return jacc > 0.5
+
 def _remix_structure(text: str, rng: random.Random) -> str:
     """
     Lightly reorders the sentence to avoid cloned openings.
