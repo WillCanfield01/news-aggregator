@@ -258,11 +258,7 @@ def _remix_structure(text: str, rng: random.Random) -> str:
     return _sentence_case(pick)
 
 def _domain_ok(text: str, domain: str) -> bool:
-    if domain == "general":
-        inferred = _infer_domain(text)
-        return inferred not in {"tech", "gaming", "social_media", "internet_culture"}
-    inferred = _infer_domain(text)
-    return inferred == domain
+    return True  # loosened: allow variety for decoys
 
 def _domain_flair(domain: str) -> list[str]:
     return {
@@ -324,15 +320,14 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     if OPENAI_API_KEY:
         sys_prompt = (
             "You write concise, believable 'On This Day' style entries for a guessing game.\n"
-            f"Create TWO different fake events that stay in the same domain: {domain}.\n"
-            f"Each fake must be {min_len}-{max_len} words (within 5 words of the real entry, which is {real_len} words).\n"
+            f"Create TWO different fake events. They should feel like short Wikipedia 'On this day' blurbs, {min_len}-{max_len} words (the real is {real_len}).\n"
             "Rules:\n"
-            "- Use clear, modern, youth-friendly wording (one sentence, neutral tone).\n"
+            "- One clean sentence each, with proper punctuation and no dangling clauses.\n"
             "- No tragedies or violence; avoid jargon words: prototype, initiative, specialized, project, institute, laboratory, pioneers, researchers, data processing.\n"
-            "- Do NOT require a year; include one only if it flows naturally.\n"
-            "- Each fake must have a different opening; do not mirror the real entry.\n"
-            "- Change at least two concrete details (place, org, product, or outcome) from the real.\n"
-            "- Keep them believable and in the same category as the real entry.\n"
+            "- Do NOT reuse the same structure or topic; the two fakes must be clearly different topics.\n"
+            "- They can be only loosely related to the real event (similar era or vibe), but should not copy its subject.\n"
+            "- Do not require a year; include one only if it flows naturally.\n"
+            "- Start each fake with a different opening.\n"
             'Respond with STRICT JSON: {"fake1":"...","fake2":"..."}'
         )
         user = f"Real entry: {real_text}\nMonth: {month_name}\nDomain: {domain}\n"
@@ -363,9 +358,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             if f1 and f2:
                 if min_len <= _wlen(f1) <= max_len and min_len <= _wlen(f2) <= max_len:
                     if not _is_tragedy(f1) and not _is_tragedy(f2):
-                        if _domain_ok(f1, domain) and _domain_ok(f2, domain):
-                            if not _mostly_year_swap(f1, real_text) and not _mostly_year_swap(f2, real_text):
-                                return f1, f2
+                        if not _too_similar(f1, f2) and not _too_similar(f1, real_text) and not _too_similar(f2, real_text):
+                            return f1, f2
         except Exception:
             time.sleep(0.5)
 
@@ -420,15 +414,11 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
     locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki"]
 
-    base_domains = [domain] if domain else ["general"]
-    if domain == "general":
-        base_domains = ["travel","culture","business","science","music","film_tv","sports","general"]
-    else:
-        base_domains.append("general")
-        if domain in {"tech","social_media","internet_culture"}:
-            base_domains.append("culture")
-    def build_fake() -> str:
-        pick_domain = rng.choice(base_domains)
+    base_domains = ["travel","culture","business","science","music","film_tv","sports","general","tech","social_media","internet_culture","gaming"]
+    # ensure two different domains for variety
+    def build_fake(exclude_domain: str | None = None) -> str:
+        pick_pool = [d for d in base_domains if d != exclude_domain] or base_domains
+        pick_domain = rng.choice(pick_pool)
         subject = rng.choice(domain_subjects.get(pick_domain, domain_subjects["general"]))
         action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
@@ -445,10 +435,15 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     candidates: list[str] = []
     attempts = 0
     while len(candidates) < 2 and attempts < 10:
-        cand = build_fake()
-        if min_len <= _wlen(cand) <= max_len and not _mostly_year_swap(cand, real_text) and _domain_ok(cand, domain):
+        exclude = None
+        if candidates:
+            # try to pick a different domain than the previous fake for variety
+            exclude = rng.choice(base_domains) if base_domains else None
+        cand = build_fake(exclude_domain=exclude)
+        if min_len <= _wlen(cand) <= max_len and not _mostly_year_swap(cand, real_text):
             if all(not _mostly_year_swap(cand, c) for c in candidates):
-                candidates.append(cand)
+                if not any(_too_similar(cand, c) for c in candidates):
+                    candidates.append(cand)
         attempts += 1
     while len(candidates) < 2:
         nxt = build_fake()
