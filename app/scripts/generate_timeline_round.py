@@ -450,7 +450,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
     }
     domain_reacts = {
-        "tech": ["tech blogs rave about it", "reviewers post quick takes", "users share clips", "creators react in short videos"],
+        "tech": ["tech blogs rave about it", "reviewers post quick takes", "users share clips online", "creators share reactions"],
         "social_media": ["friends send it around", "creators jump on it", "comment sections light up", "people remix it"],
         "gaming": ["streams highlight it", "fans clip big plays", "forums explode with takes", "players rush in"],
         "music": ["fans share the hook", "radio spins climb", "clips go viral", "crowds sing along"],
@@ -476,11 +476,13 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         place = rng.choice(locations)
         # structured single sentence: clause + connector + outcome
         template = rng.choice([
-            "In {place}, {subject} {action}, and {reaction}.",
-            "{subject} {action} in {place}, and {reaction}.",
-            "{subject} arrives in {place}, {action}, and {reaction}.",
+            "In {place}, {subject} {action} and {reaction}.",
+            "{subject} {action} in {place} and {reaction}.",
+            "During a busy week in {place}, {subject} {action} and {reaction}.",
         ])
         s = template.format(subject=subject, place=place, action=action, reaction=reaction)
+        # ensure only one 'and' connector by stripping extra 'and ' at start of reaction
+        s = re.sub(r"\band\s+(and\s+)?", " ", s, count=1).strip()
         s = _normalize_choice(s, min_len, max_len)
         return s
 
