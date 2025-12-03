@@ -221,8 +221,7 @@ def _strip_jargon(s: str) -> str:
 def _normalize_choice(text: str, min_words: int, max_words: int) -> str:
     def _one_sentence(s: str) -> str:
         parts = [p.strip() for p in re.split(r"[.!?]+", s) if p.strip()]
-        pick = parts[0] if parts else s
-        return pick
+        return parts[0] if parts else s
 
     cleaned = _strip_jargon(text)
     cleaned = _one_sentence(cleaned)
@@ -475,14 +474,15 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
+        # structured single sentence: clause + connector + outcome
         template = rng.choice([
-            "In {place}, {subject} {action}, while {reaction}.",
+            "In {place}, {subject} {action}, and {reaction}.",
             "{subject} {action} in {place}, and {reaction}.",
-            "During a busy week in {place}, {subject} {action} and {reaction}.",
+            "{subject} arrives in {place}, {action}, and {reaction}.",
         ])
         s = template.format(subject=subject, place=place, action=action, reaction=reaction)
-        s = _fit_length(s, min_len, max_len)
-        return _normalize_choice(s, min_len, max_len)
+        s = _normalize_choice(s, min_len, max_len)
+        return s
 
     candidates: list[str] = []
     attempts = 0
