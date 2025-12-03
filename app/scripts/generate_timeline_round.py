@@ -397,7 +397,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
                 OAI_URL,
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
                 json=payload,
-                timeout=30,
+                timeout=12,
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
@@ -413,7 +413,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
                         if not _too_similar(f1, f2) and not _too_similar(f1, real_text) and not _too_similar(f2, real_text):
                             return f1, f2
         except Exception:
-            time.sleep(0.5)
+            pass
 
     # ---------- deterministic fallback ----------
     rng = random.Random(
@@ -476,9 +476,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
         template = rng.choice([
-            "In {place}, {subject} {action} and {reaction}.",
-            "{subject} {action} in {place} and {reaction}.",
-            "{subject} arrives in {place}, {action}, and {reaction}.",
+            "In {place}, {subject} {action}, while {reaction}.",
+            "{subject} {action} in {place}, and {reaction}.",
+            "During a busy week in {place}, {subject} {action} and {reaction}.",
         ])
         s = template.format(subject=subject, place=place, action=action, reaction=reaction)
         s = _fit_length(s, min_len, max_len)
