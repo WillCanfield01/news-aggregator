@@ -219,7 +219,13 @@ def _strip_jargon(s: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 def _normalize_choice(text: str, min_words: int, max_words: int) -> str:
+    def _one_sentence(s: str) -> str:
+        parts = [p.strip() for p in re.split(r"[.!?]+", s) if p.strip()]
+        pick = parts[0] if parts else s
+        return pick
+
     cleaned = _strip_jargon(text)
+    cleaned = _one_sentence(cleaned)
     cleaned = _sanitize_sentence(cleaned)
     cleaned = _fit_length(cleaned, min_words, max_words)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
@@ -470,21 +476,18 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
         template = rng.choice([
-            "In {place}, {subject} {action}, and {reaction}.",
-            "{subject} {action} in {place}, while {reaction}.",
-            "{subject} arrives in {place} and {action} as {reaction}.",
+            "In {place}, {subject} {action} and {reaction}.",
+            "{subject} {action} in {place} and {reaction}.",
+            "{subject} arrives in {place}, {action}, and {reaction}.",
         ])
         s = template.format(subject=subject, place=place, action=action, reaction=reaction)
         s = _fit_length(s, min_len, max_len)
-        return s
+        return _normalize_choice(s, min_len, max_len)
 
     candidates: list[str] = []
     attempts = 0
-    while len(candidates) < 2 and attempts < 10:
-        exclude = None
-        if candidates:
-            # try to pick a different domain than the previous fake for variety
-            exclude = rng.choice(base_domains) if base_domains else None
+    while len(candidates) < 2 and attempts < 12:
+        exclude = candidates and _infer_domain(candidates[-1]) or None
         cand = build_fake(exclude_domain=exclude)
         if min_len <= _wlen(cand) <= max_len and not _mostly_year_swap(cand, real_text):
             if all(not _mostly_year_swap(cand, c) for c in candidates):
@@ -492,10 +495,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
                     candidates.append(cand)
         attempts += 1
     while len(candidates) < 2:
-        nxt = build_fake()
-        if not _domain_ok(nxt, domain):
-            continue
-        candidates.append(nxt)
+        candidates.append(build_fake())
     return candidates[0], candidates[1]
 
 def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
