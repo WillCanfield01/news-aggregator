@@ -170,6 +170,19 @@ def _new_session(today: date, user_id: int | None = None) -> RouletteSession:
 def _clear_session_cookie(resp):
     resp.delete_cookie(_SESSION_COOKIE)
 
+
+@roulette_bp.post("/roulette/session/reset")
+def reset_session():
+    sid = _get_session_id()
+    if sid:
+        sess = RouletteSession.query.filter_by(id=sid).first()
+        if sess:
+            db.session.delete(sess)
+            db.session.commit()
+    resp = make_response(jsonify({"ok": True}))
+    _clear_session_cookie(resp)
+    return resp
+
 # -------------------------------------------------------------------------
 # Round builders
 # -------------------------------------------------------------------------
@@ -605,6 +618,8 @@ def get_session():
 def session_guess():
     today_round = _today_round_or_404()
     sess = _get_or_create_session()
+    if sess.current_step > 3:
+        return jsonify({"ok": False, "error": "session_finished"}), 400
     payload = request.get_json(force=True) or {}
     try:
         choice = int(payload.get("choice", -1))
@@ -647,6 +662,9 @@ def session_next():
             "quote": {"payload": sess.quote_payload, "guess": sess.quote_guess},
         },
     }
+    # mark finished to prevent further guessing on this session
+    sess.current_step = 4
+    db.session.commit()
     return jsonify(recap)
 
 
