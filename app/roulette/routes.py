@@ -203,13 +203,46 @@ def _build_text_round(today_round: TimelineRound) -> dict:
 def _build_image_round(today_round: TimelineRound) -> dict:
     real_caption = today_round.real_title
     real_img = getattr(today_round, "real_img_url", None)
+    if not real_img and UNSPLASH_ACCESS_KEY:
+        try:
+            j = _http_get_json(
+                "https://api.unsplash.com/search/photos",
+                params={"query": real_caption, "orientation": "landscape", "per_page": 1},
+                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+            )
+            if j.get("results"):
+                real_img = j["results"][0]["urls"]["small"]
+        except Exception:
+            real_img = None
 
     ai_cards = []
-    for _ in range(2):
-        caption = f"An archival news photo related to: {today_round.real_title}"
+    for i in range(2):
+        caption = ""
+        if OPENAI_API_KEY:
+            try:
+                resp = requests.post(
+                    OAI_URL,
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": OAI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": "Write one concise news photo caption, 14-18 words, one sentence, neutral tone."},
+                            {"role": "user", "content": f"Create a fictional but believable news photo caption unrelated to this real event: {today_round.real_title}. Do not reuse its subject."},
+                        ],
+                        "temperature": 0.9,
+                    },
+                    timeout=12,
+                )
+                resp.raise_for_status()
+                caption = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            except Exception:
+                caption = ""
+        if not caption:
+            caption = f"A news photo shows crowds during a city event {i+1}."
+
         img_url = None
         if OPENAI_API_KEY:
-            img_url = _openai_image(caption)
+            img_url = _openai_image(f"news photo: {caption}")
         if not img_url and UNSPLASH_ACCESS_KEY:
             try:
                 j = _http_get_json(
@@ -221,10 +254,7 @@ def _build_image_round(today_round: TimelineRound) -> dict:
                     img_url = j["results"][0]["urls"]["small"]
             except Exception:
                 img_url = None
-        ai_cards.append({
-            "text": caption if caption else "A historical news photo.",
-            "img": img_url or "",
-        })
+        ai_cards.append({"text": caption, "img": img_url or ""})
 
     cards, correct_idx = _shuffle_cards(
         real_caption,
@@ -275,7 +305,7 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
         try:
             prompt = (
                 "Provide one verifiable historical quote that occurred on today's date. "
-                "Include the quote and the speaker/attribution in one sentence. Do not include sources."
+                "Return one sentence containing the quote and the speaker/attribution. No sources or commentary."
             )
             r = requests.post(
                 OAI_URL,
@@ -303,8 +333,8 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
                     json={
                         "model": OAI_MODEL,
                         "messages": [
-                            {"role": "system", "content": "Invent a concise, believable quote with attribution, 12-18 words, one sentence."},
-                            {"role": "user", "content": f"Context: {today_round.real_title} (do not copy subject)."},
+                            {"role": "system", "content": "Invent a concise, believable quote with attribution, 12-18 words, one sentence, neutral tone."},
+                            {"role": "user", "content": f"Do NOT mention the real event. Make it feel like historical or cultural commentary. Real event: {today_round.real_title}."},
                         ],
                         "temperature": 0.9,
                     },
@@ -525,7 +555,7 @@ def _get_or_create_session():
     sess = None
     if sid:
         sess = RouletteSession.query.filter_by(id=sid).first()
-        if sess and sess.round_date != today:
+        if sess and (sess.round_date != today or sess.current_step > 3):
             db.session.delete(sess)
             db.session.commit()
             sess = None
@@ -610,7 +640,7 @@ def session_next():
     recap = {
         "ok": True,
         "step": sess.current_step,
-        "score": sess.score,
+        "score": min(sess.score, 3),
         "rounds": {
             "text": {"payload": sess.text_payload, "guess": sess.text_guess},
             "image": {"payload": sess.image_payload, "guess": sess.image_guess},

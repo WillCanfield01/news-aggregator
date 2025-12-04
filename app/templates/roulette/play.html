@@ -83,7 +83,7 @@
             state.step = data.step;
             state.score = data.score;
             state.payload = data.payload;
-            sessionScore.textContent = `Score: ${state.score}/${state.step - 1}`;
+            sessionScore.textContent = `Score: ${state.score}/${Math.min(state.step - 1, 3)}`;
             promptEl.textContent = data.payload.prompt || "Pick the real one.";
             resultEl.style.display = "none";
             nextBtn.style.display = "none";
@@ -108,7 +108,7 @@
                     resultEl.textContent = msg;
                     resultEl.style.display = "block";
                     state.score = data.score;
-                    sessionScore.textContent = `Score: ${state.score}/${state.step}`;
+                    sessionScore.textContent = `Score: ${state.score}/${Math.min(state.step, 3)}`;
                     nextBtn.style.display = "inline-block";
                 }
             } catch (e) { }
@@ -126,7 +126,7 @@
             state.step = data.step;
             state.score = data.score;
             state.payload = data.payload;
-            sessionScore.textContent = `Score: ${state.score}/${state.step - 1}`;
+            sessionScore.textContent = `Score: ${state.score}/${Math.min(state.step - 1, 3)}`;
             promptEl.textContent = data.payload.prompt || "Pick the real one.";
             resultEl.style.display = "none";
             nextBtn.style.display = "none";
