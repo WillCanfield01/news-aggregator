@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Timeline Roulette — {{ round_date.strftime("%b %d, %Y") }}{% endblock %}
+{% block title %}Timeline Roulette{% endblock %}
 {% block content %}
 <section class="container" style="max-width:900px;margin:2rem auto;padding:0 1rem;">
     <p class="mt-2">
@@ -7,97 +7,168 @@
     </p>
 
     <h1 class="mb-2">Timeline Roulette</h1>
-    <p class="text-muted" style="margin-bottom:1rem;">
-        Two are fakes. One really happened on {{ round_date.strftime("%B %d") }}. Pick the real one.
-    </p>
+    <p class="text-muted" style="margin-bottom:1rem;" id="prompt">Loading...</p>
 
-    <div id="cardsWrap" data-correct="{{ correct_index }}">
-        <div id="cards" style="display:grid;grid-template-columns:1fr;gap:14px;">
-            {% for c in cards %}
-            <button class="card" data-ui-idx="{{ loop.index0 }}"
-                style="padding:12px 16px;border-radius:14px;border:1px solid #e5e7eb;background:#fff;text-align:left;cursor:pointer;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    {% if c['img'] %}
-                    <img src="{{ c['img'] }}" alt="" width="60" height="60"
-                        style="width:60px;height:60px;border-radius:9999px;object-fit:cover;background:#f3f4f6;">
-                    {% endif %}
-                    <div>
-                        <div style="font-weight:600;color:#374151;">Event {{ loop.index }}</div>
-                        <div style="color:#111827;">{{ c['text'] }}</div>
-                    </div>
-                </div>
-            </button>
-            {% endfor %}
-        </div>
+    <div id="cardsWrap">
+        <div id="cards" style="display:grid;grid-template-columns:1fr;gap:14px;"></div>
     </div>
 
     <div id="result" class="mt-3" style="display:none;margin-top:14px;font-weight:600;"></div>
     <div class="mt-2" style="margin-top:10px;">
-        <a href="{{ source_url }}" target="_blank" rel="noopener" style="display:none;" id="sourceLink">Read the real
-            event →</a>
+        <a href="#" target="_blank" rel="noopener" style="display:none;" id="sourceLink">Read the real event →</a>
+    </div>
+
+    <div id="controls" style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+        <button id="nextBtn" style="display:none;padding:10px 16px;border:1px solid #6b46c1;color:#fff;background:#6b46c1;border-radius:8px;cursor:pointer;">Next question</button>
+        <button id="restartBtn" style="display:none;padding:10px 16px;border:1px solid #6b7280;color:#374151;background:#e5e7eb;border-radius:8px;cursor:pointer;">Start over</button>
     </div>
 
     <div id="stats" style="margin-top:10px;color:#6b7280;font-size:0.95rem;">
-        Today: <span id="statPlays">{{ day_total }}</span> plays,
-        <span id="statCorrect">{{ day_correct }}</span> correct.
-        • Your streak: <span id="streak">{{ guest_streak or 0 }}</span> days
-        • <a href="/roulette/leaderboard">Leaderboard</a>
+        <span id="sessionScore">Score: 0/0</span> • <a href="/roulette/leaderboard">Leaderboard</a>
     </div>
 
-    {% if img_attr %}
-    <div style="margin-top:6px;color:#9ca3af;font-size:0.8rem;">
-        Images via Unsplash — {{ img_attr }}
-    </div>
-    {% endif %}
+    <div id="recap" style="display:none;margin-top:16px;"></div>
 </section>
 
 {% raw %}
 <script>
     (function () {
-        const wrap = document.getElementById("cardsWrap");
-        const correctIndex = parseInt(wrap.dataset.correct, 10);
-        const cards = Array.from(document.querySelectorAll("#cards .card"));
+        const cardsEl = document.getElementById("cards");
+        const promptEl = document.getElementById("prompt");
+        const resultEl = document.getElementById("result");
         const sourceLink = document.getElementById("sourceLink");
-        const resultBox = document.getElementById("result");
-        const statPlays = document.getElementById("statPlays");
-        const statCorrect = document.getElementById("statCorrect");
-        const streakEl = document.getElementById("streak");
-        let clicked = false;
+        const nextBtn = document.getElementById("nextBtn");
+        const restartBtn = document.getElementById("restartBtn");
+        const sessionScore = document.getElementById("sessionScore");
+        const recapEl = document.getElementById("recap");
 
-        function reveal(pick) {
-            cards.forEach((btn, i) => {
-                btn.style.border = (i === correctIndex) ? "2px solid #10b981" : "1px solid #ef4444";
-                btn.style.background = (i === correctIndex) ? "#ecfdf5" : "#fff";
+        let state = { step: 1, score: 0, payload: null, locked: false };
+
+        function renderCards(payload) {
+            cardsEl.innerHTML = "";
+            sourceLink.style.display = payload.source_url ? "inline-block" : "none";
+            if (payload.source_url) sourceLink.href = payload.source_url;
+            payload.cards.forEach((card, idx) => {
+                const btn = document.createElement("button");
+                btn.className = "card";
+                btn.dataset.idx = idx;
+                btn.style.cssText = "padding:12px 16px;border-radius:14px;border:1px solid #e5e7eb;background:#fff;text-align:left;cursor:pointer;";
+                btn.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        ${card.img ? `<img src="${card.img}" alt="" width="60" height="60" style="width:60px;height:60px;border-radius:9999px;object-fit:cover;background:#f3f4f6;">` : ""}
+                        <div>
+                            <div style="font-weight:600;color:#374151;">Choice ${idx + 1}</div>
+                            <div style="color:#111827;">${card.text}</div>
+                        </div>
+                    </div>
+                `;
+                btn.addEventListener("click", () => handleGuess(idx, payload.correct_index));
+                cardsEl.appendChild(btn);
             });
-            sourceLink.style.display = "inline-block";
-            resultBox.style.display = "block";
-            resultBox.textContent = (pick === correctIndex)
-                ? "✅ Correct! You spotted the real one."
-                : "❌ Not quite. That one was an AI fake.";
         }
 
-        cards.forEach((btn, i) => {
-            btn.addEventListener("click", async () => {
-                if (clicked) return;
-                clicked = true;
-                const pick = i;
-                reveal(pick);
-                try {
-                    const res = await fetch("/roulette/guess", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ choice: pick, correct_index: correctIndex })
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        statPlays.textContent = data.totals.plays;
-                        statCorrect.textContent = data.totals.correct;
-                        if (data.streak !== undefined && data.streak !== null) {
-                            streakEl.textContent = data.streak;
-                        }
-                    }
-                } catch (e) { }
+        function lockButtons(correctIdx, pickedIdx) {
+            const buttons = cardsEl.querySelectorAll("button");
+            buttons.forEach((btn, i) => {
+                btn.disabled = true;
+                btn.style.border = (i === correctIdx) ? "2px solid #10b981" : "1px solid #ef4444";
+                btn.style.background = (i === correctIdx) ? "#ecfdf5" : "#fff";
             });
+        }
+
+        async function fetchSession() {
+            const res = await fetch("/roulette/session");
+            if (!res.ok) throw new Error("session fetch failed");
+            const data = await res.json();
+            state.step = data.step;
+            state.score = data.score;
+            state.payload = data.payload;
+            sessionScore.textContent = `Score: ${state.score}/${state.step - 1}`;
+            promptEl.textContent = data.payload.prompt || "Pick the real one.";
+            resultEl.style.display = "none";
+            nextBtn.style.display = "none";
+            restartBtn.style.display = "none";
+            recapEl.style.display = "none";
+            renderCards(data.payload);
+        }
+
+        async function handleGuess(idx, correctIdx) {
+            if (state.locked) return;
+            state.locked = true;
+            lockButtons(correctIdx, idx);
+            try {
+                const res = await fetch("/roulette/session/guess", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ choice: idx })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    const msg = data.is_correct ? "✅ Correct!" : "❌ Not quite.";
+                    resultEl.textContent = msg;
+                    resultEl.style.display = "block";
+                    state.score = data.score;
+                    sessionScore.textContent = `Score: ${state.score}/${state.step}`;
+                    nextBtn.style.display = "inline-block";
+                }
+            } catch (e) { }
+        }
+
+        async function nextStep() {
+            const res = await fetch("/roulette/session/next", { method: "POST" });
+            const data = await res.json();
+            if (!data.ok) return;
+            if (data.rounds) {
+                // recap
+                showRecap(data);
+                return;
+            }
+            state.step = data.step;
+            state.score = data.score;
+            state.payload = data.payload;
+            sessionScore.textContent = `Score: ${state.score}/${state.step - 1}`;
+            promptEl.textContent = data.payload.prompt || "Pick the real one.";
+            resultEl.style.display = "none";
+            nextBtn.style.display = "none";
+            renderCards(data.payload);
+            state.locked = false;
+        }
+
+        function showRecap(data) {
+            const rounds = data.rounds;
+            recapEl.innerHTML = `<h3 style="margin-top:12px;">Recap (Score: ${data.score}/3)</h3>`;
+            ["text", "image", "quote"].forEach((key) => {
+                const r = rounds[key];
+                if (!r || !r.payload) return;
+                const guess = r.guess;
+                const correct = r.payload.correct_index;
+                const heading = key === "text" ? "Events" : key === "image" ? "Images" : "Quotes";
+                const block = document.createElement("div");
+                block.style.marginTop = "10px";
+                block.innerHTML = `<div style="font-weight:600;">${heading}</div>`;
+                r.payload.cards.forEach((c, i) => {
+                    const line = document.createElement("div");
+                    line.style.marginLeft = "8px";
+                    const mark = (i === correct) ? "✅" : (i === guess ? "❌" : "•");
+                    line.textContent = `${mark} ${c.text}`;
+                    block.appendChild(line);
+                });
+                recapEl.appendChild(block);
+            });
+            recapEl.style.display = "block";
+            nextBtn.style.display = "none";
+            restartBtn.style.display = "inline-block";
+        }
+
+        restartBtn.addEventListener("click", async () => {
+            document.cookie = "tr_session_id=; Max-Age=0; path=/; samesite=Lax";
+            state.locked = false;
+            await fetchSession();
+        });
+        nextBtn.addEventListener("click", () => { state.locked = false; nextStep(); });
+
+        fetchSession().catch(() => {
+            promptEl.textContent = "Unable to start game right now.";
         });
     })();
 </script>

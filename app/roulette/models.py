@@ -1,5 +1,6 @@
 from datetime import datetime, date
 from app.extensions import db
+import uuid
 
 class TimelineRound(db.Model):
     __tablename__ = "timeline_rounds"
@@ -49,3 +50,25 @@ class TimelineStreak(db.Model):
     current_streak = db.Column(db.Integer, default=0, nullable=False)
     last_play_date = db.Column(db.Date, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RouletteSession(db.Model):
+    __tablename__ = "roulette_sessions"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.String(64), primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    round_date = db.Column(db.Date, nullable=False)
+    current_step = db.Column(db.Integer, default=1, nullable=False)  # 1=text, 2=image, 3=quote
+    score = db.Column(db.Integer, default=0, nullable=False)
+    text_payload = db.Column(db.JSON, nullable=True)
+    image_payload = db.Column(db.JSON, nullable=True)
+    quote_payload = db.Column(db.JSON, nullable=True)
+    text_guess = db.Column(db.Integer, nullable=True)
+    image_guess = db.Column(db.Integer, nullable=True)
+    quote_guess = db.Column(db.Integer, nullable=True)
+    user_id = db.Column(db.Integer, nullable=True)
+
+    @staticmethod
+    def new_id() -> str:
+        return uuid.uuid4().hex

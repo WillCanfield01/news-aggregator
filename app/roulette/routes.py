@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+import uuid
+import json
+import requests
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
@@ -31,7 +34,17 @@ except Exception:  # pragma: no cover
     current_user = _Anon()  # type: ignore
 
 from . import roulette_bp
-from .models import TimelineGuess, TimelineRound, TimelineStreak
+from .models import TimelineGuess, TimelineRound, TimelineStreak, RouletteSession
+
+# reuse generators
+from app.scripts.generate_timeline_round import (
+    OPENAI_API_KEY,
+    OAI_MODEL,
+    OAI_URL,
+    UNSPLASH_ACCESS_KEY,
+    _openai_image,
+    _http_get_json,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -122,6 +135,205 @@ def _update_server_streak_if_logged_in() -> int | None:
     streak.last_play_date = today
     db.session.commit()
     return streak.current_streak
+
+# -------------------------------------------------------------------------
+# Session helpers (multi-step game)
+# -------------------------------------------------------------------------
+_SESSION_COOKIE = "tr_session_id"
+
+def _set_session_cookie(resp, sid: str):
+    resp.set_cookie(
+        _SESSION_COOKIE,
+        sid,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=60 * 60 * 12,
+    )
+
+def _get_session_id() -> str | None:
+    return request.cookies.get(_SESSION_COOKIE)
+
+def _new_session(today: date, user_id: int | None = None) -> RouletteSession:
+    sid = RouletteSession.new_id()
+    sess = RouletteSession(
+        id=sid,
+        round_date=today,
+        current_step=1,
+        score=0,
+        user_id=user_id,
+    )
+    db.session.add(sess)
+    db.session.commit()
+    return sess
+
+def _clear_session_cookie(resp):
+    resp.delete_cookie(_SESSION_COOKIE)
+
+# -------------------------------------------------------------------------
+# Round builders
+# -------------------------------------------------------------------------
+def _shuffle_cards(real_text: str, fake1: str, fake2: str, real_img: str | None, fake1_img: str | None, fake2_img: str | None) -> tuple[list[dict], int]:
+    cards = [
+        {"orig_idx": 0, "text": real_text, "img": real_img},
+        {"orig_idx": 1, "text": fake1, "img": fake1_img},
+        {"orig_idx": 2, "text": fake2, "img": fake2_img},
+    ]
+    random.shuffle(cards)
+    correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
+    return cards, correct_shuffled_idx
+
+def _build_text_round(today_round: TimelineRound) -> dict:
+    cards, correct_idx = _shuffle_cards(
+        today_round.real_title,
+        today_round.fake1_title,
+        today_round.fake2_title,
+        getattr(today_round, "real_img_url", None),
+        getattr(today_round, "fake1_img_url", None),
+        getattr(today_round, "fake2_img_url", None),
+    )
+    return {
+        "type": "text",
+        "prompt": f"Two are fakes. One really happened on {today_round.round_date.strftime('%B %d')}. Pick the real one.",
+        "cards": cards,
+        "correct_index": correct_idx,
+        "source_url": today_round.real_source_url,
+    }
+
+def _build_image_round(today_round: TimelineRound) -> dict:
+    real_caption = today_round.real_title
+    real_img = getattr(today_round, "real_img_url", None)
+
+    ai_cards = []
+    for _ in range(2):
+        caption = f"An archival news photo related to: {today_round.real_title}"
+        img_url = None
+        if OPENAI_API_KEY:
+            img_url = _openai_image(caption)
+        if not img_url and UNSPLASH_ACCESS_KEY:
+            try:
+                j = _http_get_json(
+                    "https://api.unsplash.com/search/photos",
+                    params={"query": caption, "orientation": "landscape", "per_page": 1},
+                    headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+                )
+                if j.get("results"):
+                    img_url = j["results"][0]["urls"]["small"]
+            except Exception:
+                img_url = None
+        ai_cards.append({
+            "text": caption if caption else "A historical news photo.",
+            "img": img_url or "",
+        })
+
+    cards, correct_idx = _shuffle_cards(
+        real_caption,
+        ai_cards[0]["text"],
+        ai_cards[1]["text"],
+        real_img,
+        ai_cards[0]["img"],
+        ai_cards[1]["img"],
+    )
+    return {
+        "type": "image",
+        "prompt": "One photo + caption is real. Two are AI. Pick the real one.",
+        "cards": cards,
+        "correct_index": correct_idx,
+        "source_url": today_round.real_source_url,
+    }
+
+def _fetch_today_quote() -> tuple[str, str]:
+    """
+    Return (quote_text, attribution) for today via Wikiquote; fallback to empty strings.
+    """
+    try:
+        j = _http_get_json(
+            "https://en.wikiquote.org/w/api.php",
+            params={
+                "action": "parse",
+                "page": "Template:Today/Quotes",
+                "prop": "wikitext",
+                "format": "json",
+            },
+        )
+        wikitext = j.get("parse", {}).get("wikitext", {}).get("*", "")
+        # naive parse: split bullet lines
+        lines = [ln.strip("* ").strip() for ln in wikitext.splitlines() if ln.strip().startswith("*")]
+        if lines:
+            first = lines[0]
+            if " - " in first:
+                quote, author = first.split(" - ", 1)
+                return quote.strip(), author.strip()
+            return first, ""
+    except Exception:
+        pass
+    return "", ""
+
+def _build_quote_round(today_round: TimelineRound) -> dict:
+    real_quote, real_attr = _fetch_today_quote()
+    if not real_quote and OPENAI_API_KEY:
+        try:
+            prompt = (
+                "Provide one verifiable historical quote that occurred on today's date. "
+                "Include the quote and the speaker/attribution in one sentence. Do not include sources."
+            )
+            r = requests.post(
+                OAI_URL,
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": OAI_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.6,
+                },
+                timeout=12,
+            )
+            r.raise_for_status()
+            real_quote = (r.json()["choices"][0]["message"]["content"] or "").strip()
+            real_attr = ""
+        except Exception:
+            real_quote = ""
+            real_attr = ""
+
+    def _ai_quote() -> str:
+        if OPENAI_API_KEY:
+            try:
+                r = requests.post(
+                    OAI_URL,
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": OAI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": "Invent a concise, believable quote with attribution, 12-18 words, one sentence."},
+                            {"role": "user", "content": f"Context: {today_round.real_title} (do not copy subject)."},
+                        ],
+                        "temperature": 0.9,
+                    },
+                    timeout=12,
+                )
+                r.raise_for_status()
+                return (r.json()["choices"][0]["message"]["content"] or "").strip()
+            except Exception:
+                return ""
+        return ""
+
+    fake1 = _ai_quote() or "A noted figure reflects on change in a short remark."
+    fake2 = _ai_quote() or "An artist speaks on creativity in a brief line."
+
+    cards, correct_idx = _shuffle_cards(
+        real_quote or "A historical quote recorded for this date.",
+        fake1,
+        fake2,
+        None,
+        None,
+        None,
+    )
+    return {
+        "type": "quote",
+        "prompt": "One quote is real. Two are AI. Pick the real one.",
+        "cards": cards,
+        "correct_index": correct_idx,
+        "source_url": today_round.real_source_url,
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -302,6 +514,110 @@ def leaderboard():
         week_total=week_total,
         week_correct=week_correct,
     )
+
+
+# -----------------------------------------------------------------------------
+# Multi-round session API (3-step: text, image, quote)
+# -----------------------------------------------------------------------------
+def _get_or_create_session():
+    today = _local_today()
+    sid = _get_session_id()
+    sess = None
+    if sid:
+        sess = RouletteSession.query.filter_by(id=sid).first()
+        if sess and sess.round_date != today:
+            db.session.delete(sess)
+            db.session.commit()
+            sess = None
+    if not sess:
+        sess = _new_session(today, getattr(current_user, "id", None) if getattr(current_user, "is_authenticated", False) else None)
+    return sess
+
+def _payload_for_step(sess: RouletteSession, today_round: TimelineRound) -> dict:
+    if sess.current_step == 1:
+        if not sess.text_payload:
+            sess.text_payload = _build_text_round(today_round)
+            db.session.commit()
+        return sess.text_payload
+    if sess.current_step == 2:
+        if not sess.image_payload:
+            sess.image_payload = _build_image_round(today_round)
+            db.session.commit()
+        return sess.image_payload
+    if sess.current_step == 3:
+        if not sess.quote_payload:
+            sess.quote_payload = _build_quote_round(today_round)
+            db.session.commit()
+        return sess.quote_payload
+    return {}
+
+@roulette_bp.get("/roulette/session")
+def get_session():
+    today_round = _today_round_or_404()
+    sess = _get_or_create_session()
+    payload = _payload_for_step(sess, today_round)
+    resp = make_response(jsonify({
+        "ok": True,
+        "session_id": sess.id,
+        "step": sess.current_step,
+        "score": sess.score,
+        "payload": payload,
+        "guesses": {
+            "text": sess.text_guess,
+            "image": sess.image_guess,
+            "quote": sess.quote_guess,
+        },
+    }))
+    _set_session_cookie(resp, sess.id)
+    return resp
+
+@roulette_bp.post("/roulette/session/guess")
+def session_guess():
+    today_round = _today_round_or_404()
+    sess = _get_or_create_session()
+    payload = request.get_json(force=True) or {}
+    try:
+        choice = int(payload.get("choice", -1))
+    except Exception:
+        return jsonify({"ok": False, "error": "bad_input"}), 400
+    cur_payload = _payload_for_step(sess, today_round)
+    correct = cur_payload.get("correct_index", -1)
+    if choice not in (0, 1, 2) or correct not in (0, 1, 2):
+        return jsonify({"ok": False, "error": "bad_input"}), 400
+
+    is_correct = (choice == correct)
+    if sess.current_step == 1:
+        sess.text_guess = choice
+    elif sess.current_step == 2:
+        sess.image_guess = choice
+    elif sess.current_step == 3:
+        sess.quote_guess = choice
+    if is_correct:
+        sess.score += 1
+    db.session.commit()
+
+    return jsonify({"ok": True, "correct_index": correct, "is_correct": is_correct, "score": sess.score})
+
+@roulette_bp.post("/roulette/session/next")
+def session_next():
+    today_round = _today_round_or_404()
+    sess = _get_or_create_session()
+    if sess.current_step < 3:
+        sess.current_step += 1
+        db.session.commit()
+        payload = _payload_for_step(sess, today_round)
+        return jsonify({"ok": True, "step": sess.current_step, "payload": payload, "score": sess.score})
+    recap = {
+        "ok": True,
+        "step": sess.current_step,
+        "score": sess.score,
+        "rounds": {
+            "text": {"payload": sess.text_payload, "guess": sess.text_guess},
+            "image": {"payload": sess.image_payload, "guess": sess.image_guess},
+            "quote": {"payload": sess.quote_payload, "guess": sess.quote_guess},
+        },
+    }
+    return jsonify(recap)
 
 
 # -----------------------------------------------------------------------------
