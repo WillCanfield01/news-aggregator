@@ -450,18 +450,18 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
     }
     domain_reacts = {
-        "tech": ["tech blogs rave about it", "reviewers post quick takes", "users share clips online", "creators share reactions"],
-        "social_media": ["friends send it around", "creators jump on it", "comment sections light up", "people remix it"],
-        "gaming": ["streams highlight it", "fans clip big plays", "forums explode with takes", "players rush in"],
-        "music": ["fans share the hook", "radio spins climb", "clips go viral", "crowds sing along"],
-        "film_tv": ["watch parties pop up", "quotes spread online", "reviews praise it", "memes appear overnight"],
-        "sports": ["replays loop everywhere", "fans argue about calls", "stats trend on apps", "highlights go viral"],
-        "internet_culture": ["memes land fast", "blogs post breakdowns", "threads keep growing", "it hits front pages"],
-        "travel": ["photos flood social feeds", "locals share videos", "news crews cover it", "tourists post nonstop"],
-        "culture": ["photos spread online", "locals share videos", "critics cover it", "people post reactions"],
-        "business": ["customers post hauls", "blogs cover the drop", "people line up early", "social posts spike"],
-        "science": ["teachers share clips", "local news covers it", "families post photos", "forums discuss it"],
-        "general": ["people talk about it for days", "local news covers it", "crowds show up", "it trends for a bit"],
+        "tech": ["drawing wide press coverage", "prompting a rush of reviews", "earning headlines that week", "sparking coverage in major outlets"],
+        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "becoming a common headline", "highlighted in news recaps"],
+        "gaming": ["earning coverage from major sites", "becoming a news highlight", "noted as a standout moment", "reported widely at the time"],
+        "music": ["topping entertainment news", "earning strong media attention", "covered by music outlets", "remembered in year-end recaps"],
+        "film_tv": ["covered across entertainment news", "earning notable reviews", "picked up by major outlets", "featured in weekly roundups"],
+        "sports": ["leading sports coverage that week", "picked up by national sports desks", "highlighted across sports news", "remembered as a season moment"],
+        "internet_culture": ["covered by major blogs", "highlighted in online roundups", "becoming a noted moment online", "landing in weekly recaps"],
+        "travel": ["covered by local media", "drawing attention from visitors", "making regional news", "mentioned in travel roundups"],
+        "culture": ["earning local headlines", "drawing coverage from arts press", "featured in cultural news", "noted in community reports"],
+        "business": ["covered by business press", "reported across outlets", "featured in market news", "highlighted in industry reports"],
+        "science": ["reported by science desks", "covered in academic news", "earning coverage in journals", "featured in education reports"],
+        "general": ["covered by major outlets", "drawing wide news attention", "highlighted in reports that week", "remembered in news summaries"],
     }
     locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki"]
 
@@ -474,17 +474,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
-        # structured single sentence: clause + connector + outcome
-        template = rng.choice([
-            "In {place}, {subject} {action} and {reaction}.",
-            "{subject} {action} in {place} and {reaction}.",
-            "During a busy week in {place}, {subject} {action} and {reaction}.",
-        ])
-        s = template.format(subject=subject, place=place, action=action, reaction=reaction)
-        # ensure only one 'and' connector by stripping extra 'and ' at start of reaction
-        s = re.sub(r"\band\s+(and\s+)?", " ", s, count=1).strip()
-        s = _normalize_choice(s, min_len, max_len)
-        return s
+        year = rng.choice(range(1985, 2024))
+        sentence = f"{year} — {subject} {action} in {place}, {reaction}."
+        return _normalize_choice(sentence, min_len, max_len)
 
     candidates: list[str] = []
     attempts = 0
