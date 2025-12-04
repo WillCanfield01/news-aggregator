@@ -214,13 +214,13 @@ def _build_text_round(today_round: TimelineRound) -> dict:
     }
 
 def _build_image_round(today_round: TimelineRound) -> dict:
-    real_caption = today_round.real_title
+    # Real image strictly from Unsplash (if not already present)
     real_img = getattr(today_round, "real_img_url", None)
     if not real_img and UNSPLASH_ACCESS_KEY:
         try:
             j = _http_get_json(
                 "https://api.unsplash.com/search/photos",
-                params={"query": real_caption, "orientation": "landscape", "per_page": 1},
+                params={"query": today_round.real_title, "orientation": "landscape", "per_page": 1},
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
             if j.get("results"):
@@ -228,28 +228,29 @@ def _build_image_round(today_round: TimelineRound) -> dict:
         except Exception:
             real_img = None
 
+    # AI decoys: generate images with OpenAI; minimal/blank captions
     ai_cards = []
+    topics = ["city skyline at night", "festival crowd", "historical archive photo", "sports arena", "museum interior", "harbor at sunset"]
     for i in range(2):
-        # image-only AI decoy, simple fallback caption if needed
-        caption = f"AI-generated photo {i+1}"
+        prompt_topic = random.choice(topics)
         img_url = None
         if OPENAI_API_KEY:
-            img_url = _openai_image(f"high quality photo; realistic; topic unrelated to: {today_round.real_title}")
+            img_url = _openai_image(f"photograph, realistic, {prompt_topic}, unrelated to: {today_round.real_title}")
         if not img_url and UNSPLASH_ACCESS_KEY:
             try:
                 j = _http_get_json(
                     "https://api.unsplash.com/search/photos",
-                    params={"query": "history archive", "orientation": "landscape", "per_page": 1},
+                    params={"query": prompt_topic, "orientation": "landscape", "per_page": 1},
                     headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
                 )
                 if j.get("results"):
                     img_url = j["results"][0]["urls"]["small"]
             except Exception:
                 img_url = None
-        ai_cards.append({"text": caption, "img": img_url or ""})
+        ai_cards.append({"text": "", "img": img_url or ""})
 
     cards, correct_idx = _shuffle_cards(
-        real_caption,
+        "",  # no caption for real
         ai_cards[0]["text"],
         ai_cards[1]["text"],
         real_img,
