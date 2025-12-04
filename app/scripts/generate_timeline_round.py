@@ -580,7 +580,7 @@ def _openai_image(prompt: str) -> Optional[str]:
                 # IMPORTANT: most responses are base64 now
                 "response_format": "b64_json",
             },
-            timeout=30,
+            timeout=10,
         )
         r.raise_for_status()
         data = r.json()
