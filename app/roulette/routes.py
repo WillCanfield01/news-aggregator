@@ -230,37 +230,16 @@ def _build_image_round(today_round: TimelineRound) -> dict:
 
     ai_cards = []
     for i in range(2):
-        caption = ""
-        if OPENAI_API_KEY:
-            try:
-                resp = requests.post(
-                    OAI_URL,
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                    json={
-                        "model": OAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": "Write one concise news photo caption, 14-18 words, one sentence, neutral tone."},
-                            {"role": "user", "content": f"Create a fictional but believable news photo caption unrelated to this real event: {today_round.real_title}. Do not reuse its subject."},
-                        ],
-                        "temperature": 0.9,
-                    },
-                    timeout=12,
-                )
-                resp.raise_for_status()
-                caption = (resp.json()["choices"][0]["message"]["content"] or "").strip()
-            except Exception:
-                caption = ""
-        if not caption:
-            caption = f"A news photo shows crowds during a city event {i+1}."
-
+        # image-only AI decoy, simple fallback caption if needed
+        caption = f"AI-generated photo {i+1}"
         img_url = None
         if OPENAI_API_KEY:
-            img_url = _openai_image(f"news photo: {caption}")
+            img_url = _openai_image(f"high quality photo; realistic; topic unrelated to: {today_round.real_title}")
         if not img_url and UNSPLASH_ACCESS_KEY:
             try:
                 j = _http_get_json(
                     "https://api.unsplash.com/search/photos",
-                    params={"query": caption, "orientation": "landscape", "per_page": 1},
+                    params={"query": "history archive", "orientation": "landscape", "per_page": 1},
                     headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
                 )
                 if j.get("results"):
@@ -279,7 +258,7 @@ def _build_image_round(today_round: TimelineRound) -> dict:
     )
     return {
         "type": "image",
-        "prompt": "One photo + caption is real. Two are AI. Pick the real one.",
+        "prompt": "One photo is real. Two are AI. Pick the real one.",
         "cards": cards,
         "correct_index": correct_idx,
         "source_url": today_round.real_source_url,
