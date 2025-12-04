@@ -220,13 +220,16 @@ def _build_image_round(today_round: TimelineRound) -> dict:
         try:
             j = _http_get_json(
                 "https://api.unsplash.com/search/photos",
-                params={"query": today_round.real_title, "orientation": "landscape", "per_page": 1},
+                params={"query": today_round.real_title, "orientation": "landscape", "per_page": 3},
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
             if j.get("results"):
                 real_img = j["results"][0]["urls"]["small"]
         except Exception:
             real_img = None
+    # Fallback real image via OpenAI if Unsplash missing/failed
+    if not real_img and OPENAI_API_KEY:
+        real_img = _openai_image(f"photograph, realistic, news photo about: {today_round.real_title}")
 
     # AI decoys: generate images with OpenAI; minimal/blank captions
     ai_cards = []
