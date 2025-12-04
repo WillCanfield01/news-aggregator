@@ -189,19 +189,7 @@ def _fit_length(text: str, min_words: int, max_words: int) -> str:
     words = _words(text)
     if not words:
         return text or ""
-    fillers = [
-        "and people keep talking about it",
-        "and headlines pick it up",
-        "while clips circulate online",
-        "and fans keep sharing it",
-    ]
-    if len(words) < min_words:
-        idx = len(words) % len(fillers)
-        while len(words) < min_words:
-            extra = _words(fillers[idx % len(fillers)])
-            take = min(min_words - len(words), len(extra))
-            words += extra[:take]
-            idx += 1
+    # Do not pad with stock fillers; rely on generator to meet the range
     if len(words) > max_words:
         words = words[:max_words]
         awkward = {"for","of","and","to","in","as","was","were","by","with","at"}
@@ -368,28 +356,21 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     Produce two plausible-but-false events similar in tone/length to the real item.
     """
     real_len = _wlen(real_text)
-    if OPENAI_API_KEY:
+
+    def _ask_openai() -> Optional[str]:
         sys_prompt = (
-            "You write concise, believable 'On This Day' style entries for a guessing game.\n"
-            f"Create TWO different fake events. They should feel like short Wikipedia 'On this day' blurbs, {min_len}-{max_len} words (the real is {real_len}).\n"
-            "Rules:\n"
-            "- One clean sentence each, with proper punctuation and no dangling clauses.\n"
-            "- No tragedies or violence; avoid jargon words: prototype, initiative, specialized, project, institute, laboratory, pioneers, researchers, data processing.\n"
-            "- Do NOT reuse the same structure or topic; the two fakes must be clearly different topics.\n"
-            "- They can be only loosely related to the real event (similar era or vibe), but should not copy its subject.\n"
-            "- Do not require a year; include one only if it flows naturally.\n"
-            "- Start each fake with a different opening.\n"
-            'Respond with STRICT JSON: {"fake1":"...","fake2":"..."}'
+            "Write one believable 'On this day' style sentence (no bullet). "
+            f"Length {min_len}-{max_len} words. One sentence only. No trailing fragments. "
+            "No tragedies/violence. Avoid jargon. Do not copy the real event. "
+            "Keep tone like a concise Wikipedia entry. Do not prepend a year dash."
         )
-        user = f"Real entry: {real_text}\nMonth: {month_name}\nDomain: {domain}\n"
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user},
+                {"role": "user", "content": f"Real event for context (do not copy): {real_text}\nMonth: {month_name}\n"},
             ],
-            "temperature": 0.7,
-            "response_format": {"type": "json_object"},
+            "temperature": 0.9,
         }
         try:
             r = requests.post(
@@ -399,20 +380,19 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
                 timeout=12,
             )
             r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"]
-            try:
-                obj = requests.utils.json.loads(content)
-            except Exception:
-                obj = requests.utils.json.loads(content.strip("` \n"))
-            f1 = (obj.get("fake1") or "").strip()
-            f2 = (obj.get("fake2") or "").strip()
-            if f1 and f2:
-                if min_len <= _wlen(f1) <= max_len and min_len <= _wlen(f2) <= max_len:
-                    if not _is_tragedy(f1) and not _is_tragedy(f2):
-                        if not _too_similar(f1, f2) and not _too_similar(f1, real_text) and not _too_similar(f2, real_text):
-                            return f1, f2
+            return (r.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
-            pass
+            return None
+
+    if OPENAI_API_KEY:
+        fakes: list[str] = []
+        for _ in range(3):
+            out = _ask_openai()
+            if out and min_len <= _wlen(out) <= max_len and not _is_tragedy(out):
+                if all(not _too_similar(out, f) for f in fakes) and not _too_similar(out, real_text):
+                    fakes.append(out)
+            if len(fakes) >= 2:
+                return fakes[0], fakes[1]
 
     # ---------- deterministic fallback ----------
     rng = random.Random(
@@ -450,9 +430,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
     }
     domain_reacts = {
-        "tech": ["drawing wide press coverage", "prompting a rush of reviews", "earning headlines that week", "sparking coverage in major outlets"],
-        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "becoming a common headline", "highlighted in news recaps"],
-        "gaming": ["earning coverage from major sites", "becoming a news highlight", "noted as a standout moment", "reported widely at the time"],
+        "tech": ["drawing wide press coverage", "earning headlines that week", "reported across tech outlets", "covered in major news"],
+        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "covered by news outlets", "noted in weekly recaps"],
+        "gaming": ["earning coverage from major sites", "reported as a standout moment", "featured in gaming news", "covered widely that week"],
         "music": ["topping entertainment news", "earning strong media attention", "covered by music outlets", "remembered in year-end recaps"],
         "film_tv": ["covered across entertainment news", "earning notable reviews", "picked up by major outlets", "featured in weekly roundups"],
         "sports": ["leading sports coverage that week", "picked up by national sports desks", "highlighted across sports news", "remembered as a season moment"],
@@ -474,8 +454,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
-        year = rng.choice(range(1985, 2024))
-        sentence = f"{year} — {subject} {action} in {place}, {reaction}."
+        sentence = f"{subject} {action} in {place}, {reaction}."
         return _normalize_choice(sentence, min_len, max_len)
 
     candidates: list[str] = []
