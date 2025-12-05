@@ -223,8 +223,12 @@ def _build_image_round(today_round: TimelineRound) -> dict:
                 params={"query": today_round.real_title, "orientation": "landscape", "per_page": 3},
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
-            if j.get("results"):
-                real_img = j["results"][0]["urls"]["small"]
+            # Prefer a result with a valid URL
+            for r in j.get("results", []):
+                url = r.get("urls", {}).get("regular") or r.get("urls", {}).get("small")
+                if url:
+                    real_img = url
+                    break
         except Exception:
             real_img = None
     # Fallback real image via OpenAI if Unsplash missing/failed
@@ -301,7 +305,7 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
         try:
             prompt = (
                 "Provide one verifiable historical quote that occurred on today's date. "
-                "Return one sentence containing the quote and the speaker/attribution. No sources or commentary."
+                "Return one sentence containing the quote and the speaker/attribution. No sources or commentary. Do not include the date."
             )
             r = requests.post(
                 OAI_URL,
