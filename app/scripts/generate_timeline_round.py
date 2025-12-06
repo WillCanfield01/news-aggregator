@@ -299,8 +299,35 @@ def _remix_structure(text: str, rng: random.Random) -> str:
 def _domain_ok(text: str, domain: str) -> bool:
     return True  # loosened: allow variety for decoys
 
-def _domain_flair(domain: str) -> list[str]:
-    return {
+def _domain_flair(domain: str, year_hint: Optional[int] = None) -> list[str]:
+    classic = {
+        "tech": [
+            "after coverage in trade papers",
+            "as radio shows explained the breakthrough",
+            "with newspapers highlighting the debut",
+        ],
+        "film_tv": [
+            "after a packed theater premiere",
+            "as viewers tuned in on broadcast",
+            "with critics discussing the release",
+        ],
+        "music": [
+            "after the record climbed radio charts",
+            "as fans lined up for the album",
+            "with magazine write-ups",
+        ],
+        "sports": [
+            "during a headline season",
+            "as crowds filled the stands",
+            "with highlight reels on nightly news",
+        ],
+        "general": [
+            "covered by major papers",
+            "picked up by radio bulletins",
+            "noted in news roundups",
+        ],
+    }
+    modern = {
         "tech": [
             "after hype on launch week",
             "as fans queued online",
@@ -349,13 +376,36 @@ def _domain_flair(domain: str) -> list[str]:
             "noted in news recaps",
             "remembered in year-end lists",
         ],
-    }.get(domain, ["covered by major outlets"])
+    }
+    is_modern = year_hint is None or year_hint >= 1995
+    table = modern if is_modern else classic
+    return table.get(domain, table.get("general", ["covered by major outlets"]))
 
-def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_len: int, max_len: int, salt: int = 0) -> Tuple[str, str]:
+def _extract_year_hint(text: str) -> Optional[int]:
+    """
+    Try to pull a 4-digit year from the real event to guide fake era.
+    """
+    if not text:
+        return None
+    years = re.findall(r"\b(1[5-9]\d{2}|20\d{2})\b", text)
+    for y in years:
+        try:
+            val = int(y)
+            if 1500 <= val <= 2099:
+                return val
+        except Exception:
+            continue
+    return None
+
+def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_len: int, max_len: int, year_hint: Optional[int] = None, salt: int = 0) -> Tuple[str, str]:
     """
     Produce two plausible-but-false events similar in tone/length to the real item.
     """
     real_len = _wlen(real_text)
+    era_note = ""
+    if year_hint:
+        decade = (year_hint // 10) * 10
+        era_note = f"Match the tone and era near the {decade}s."
 
     def _ask_openai() -> Optional[str]:
         sys_prompt = (
@@ -364,11 +414,13 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             "No tragedies/violence. Avoid jargon. Do not copy the real event. "
             "Keep tone like a concise Wikipedia entry. Do not prepend a year dash."
         )
+        if era_note:
+            sys_prompt += f" {era_note}"
         payload = {
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Real event for context (do not copy): {real_text}\nMonth: {month_name}\n"},
+                {"role": "user", "content": f"Real event for context (do not copy): {real_text}\nMonth: {month_name}\nEra: {year_hint or 'any'}\n"},
             ],
             "temperature": 0.9,
         }
@@ -401,7 +453,22 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         (salt & 0xFFFF)
     )
 
-    domain_subjects = {
+    classic_domains = ["travel","culture","business","science","music","film_tv","sports","general"]
+    modern_domains = classic_domains + ["tech","social_media","internet_culture","gaming"]
+    use_modern = year_hint is None or year_hint >= 1995
+    base_domains = modern_domains if use_modern else classic_domains
+
+    classic_subjects = {
+        "music": ["a chart single gains momentum", "a festival lineup draws fans", "a celebrated conductor debuts a work", "a radio hit sweeps playlists", "a celebrated tour stop draws crowds"],
+        "film_tv": ["a new series premiere", "a film festival screening", "a broadcast special", "a documentary debut", "a cinema release"],
+        "sports": ["a championship game", "a record-setting match", "a landmark win streak", "a headline rivalry", "a marathon milestone"],
+        "travel": ["a historic ship visit", "a new ferry route", "a busy harbor festival", "a landmark train run", "a city waterfront opening"],
+        "culture": ["a museum opening", "a public art show", "a city parade", "a landmark restoration", "a film festival night"],
+        "business": ["a flagship store opening", "a brand collaboration", "a company milestone", "a major product unveiling", "a regional expo"],
+        "science": ["a planetarium reveal", "a space exhibit", "a research announcement", "a science fair highlight", "a new laboratory wing"],
+        "general": ["a national celebration", "a civic ceremony", "a community milestone", "a public event", "a major exhibit"],
+    }
+    modern_subjects = {
         "tech": ["a streaming feature", "a phone update", "an AI tool launch", "a cloud gaming rollout", "a wearable drop"],
         "social_media": ["a hashtag challenge", "a video trend", "a live stream format", "a creator payout push", "a viral filter"],
         "gaming": ["a multiplayer update", "an esports upset", "a crossover reveal", "a record game launch", "a fan-favorite DLC"],
@@ -409,43 +476,69 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "film_tv": ["a streaming finale", "a breakout indie film", "a viral trailer", "a hit animated episode", "a fan watch party"],
         "sports": ["a buzzer-beater playoff game", "a record marathon", "a breakout rookie season", "a championship parade", "an underdog finals win"],
         "internet_culture": ["a meme wave", "a viral gif moment", "a podcast crossover", "a fandom meetup", "a blog post that blows up"],
-        "travel": ["a historic ship visit", "a new ferry route", "a busy harbor festival", "a landmark train run", "a city waterfront opening"],
-        "culture": ["a museum opening", "a public art show", "a city parade", "a landmark restoration", "a film festival night"],
-        "business": ["a flagship store launch", "a brand collaboration", "a startup milestone", "a major product drop", "a pop-up event"],
-        "science": ["a planetarium reveal", "a space exhibit", "a green tech demo", "a science fair highlight", "a new lab opening"],
-        "general": ["a city festival", "a major exhibit", "a national celebration", "a community milestone", "a public event"],
+        "travel": classic_subjects["travel"],
+        "culture": classic_subjects["culture"],
+        "business": classic_subjects["business"],
+        "science": classic_subjects["science"],
+        "general": classic_subjects["general"],
     }
-    domain_actions = {
+
+    classic_actions = {
+        "music": ["tops radio charts", "draws crowds to venues", "receives strong newspaper reviews", "stays on playlists", "leads entertainment pages"],
+        "film_tv": ["draws theater crowds", "earns strong newspaper reviews", "airs to solid ratings", "gets noted by critics", "runs in packed cinemas"],
+        "sports": ["draws national attention", "fills sports pages", "is replayed on nightly news", "sparks debates on radio shows", "keeps fans talking"],
+        "travel": ["draws curious crowds", "sails into port", "opens to visitors", "hosts tours all day", "gets a warm welcome"],
+        "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz", "brings people together"],
+        "business": ["opens with fanfare", "hosts a packed launch", "fills the floor with guests", "draws coverage from papers", "sells out early"],
+        "science": ["shows off new ideas", "welcomes students and families", "gets shared by educators", "draws local press", "debuts a demonstration"],
+        "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
+    }
+    modern_actions = {
         "tech": ["launches to the public", "rolls out broadly", "goes live for users", "debuts with a demo", "lands for early adopters"],
         "social_media": ["takes over feeds", "picks up momentum", "spreads across platforms", "sparks quick reactions", "draws big creator posts"],
         "gaming": ["fills servers fast", "tops player charts", "shakes up rankings", "packs esports streams", "sparks lore debates"],
         "music": ["tops playlists", "sells out dates", "goes viral on clips", "gets heavy play", "trends on radio"],
         "film_tv": ["wins fan polls", "drives binge nights", "gets quoted online", "lands strong reviews", "spawns memes"],
-        "sports": ["draws massive viewers", "fills highlight reels", "sparks debates on shows", "pushes merch sales", "trends on apps"],
+        "sports": classic_actions["sports"],
         "internet_culture": ["dominates forums", "spreads through memes", "fills comment sections", "inspires parody threads", "hits front pages"],
-        "travel": ["draws curious crowds", "sails into port", "opens to visitors", "hosts tours all day", "gets a warm welcome"],
-        "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz", "brings people together"],
-        "business": ["opens with fanfare", "hosts a packed launch", "pulls a long line", "draws coverage from blogs", "sells out early"],
-        "science": ["shows off new ideas", "welcomes students and families", "gets shared by educators", "draws local press", "debuts a demo"],
-        "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
+        "travel": classic_actions["travel"],
+        "culture": classic_actions["culture"],
+        "business": classic_actions["business"],
+        "science": classic_actions["science"],
+        "general": classic_actions["general"],
     }
-    domain_reacts = {
+
+    classic_reacts = {
+        "music": ["covered by music press", "remembered in entertainment columns", "discussed by radio hosts", "featured in year-end lists", "mentioned by critics"],
+        "film_tv": ["covered by entertainment reporters", "earning notable reviews", "picked up by major outlets", "featured in weekly roundups", "discussed on radio"],
+        "sports": ["leading sports coverage that week", "picked up by national sports desks", "highlighted across sports news", "remembered as a season moment", "recapped on television"],
+        "travel": ["covered by local media", "drawing attention from visitors", "making regional news", "mentioned in travel roundups", "written up in papers"],
+        "culture": ["earning local headlines", "drawing coverage from arts press", "featured in cultural news", "noted in community reports", "written up in magazines"],
+        "business": ["covered by business press", "reported across outlets", "featured in market news", "highlighted in industry reports", "covered by newspapers"],
+        "science": ["reported by science desks", "covered in academic news", "earning coverage in journals", "featured in education reports", "discussed by researchers"],
+        "general": ["covered by major outlets", "drawing wide news attention", "highlighted in reports that week", "remembered in news summaries", "discussed on radio shows"],
+    }
+    modern_reacts = {
         "tech": ["drawing wide press coverage", "earning headlines that week", "reported across tech outlets", "covered in major news"],
         "social_media": ["spreading quickly across platforms", "drawing widespread attention", "covered by news outlets", "noted in weekly recaps"],
         "gaming": ["earning coverage from major sites", "reported as a standout moment", "featured in gaming news", "covered widely that week"],
-        "music": ["topping entertainment news", "earning strong media attention", "covered by music outlets", "remembered in year-end recaps"],
-        "film_tv": ["covered across entertainment news", "earning notable reviews", "picked up by major outlets", "featured in weekly roundups"],
-        "sports": ["leading sports coverage that week", "picked up by national sports desks", "highlighted across sports news", "remembered as a season moment"],
+        "music": classic_reacts["music"],
+        "film_tv": classic_reacts["film_tv"],
+        "sports": classic_reacts["sports"],
         "internet_culture": ["covered by major blogs", "highlighted in online roundups", "becoming a noted moment online", "landing in weekly recaps"],
-        "travel": ["covered by local media", "drawing attention from visitors", "making regional news", "mentioned in travel roundups"],
-        "culture": ["earning local headlines", "drawing coverage from arts press", "featured in cultural news", "noted in community reports"],
-        "business": ["covered by business press", "reported across outlets", "featured in market news", "highlighted in industry reports"],
-        "science": ["reported by science desks", "covered in academic news", "earning coverage in journals", "featured in education reports"],
-        "general": ["covered by major outlets", "drawing wide news attention", "highlighted in reports that week", "remembered in news summaries"],
+        "travel": classic_reacts["travel"],
+        "culture": classic_reacts["culture"],
+        "business": classic_reacts["business"],
+        "science": classic_reacts["science"],
+        "general": classic_reacts["general"],
     }
-    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki"]
 
-    base_domains = ["travel","culture","business","science","music","film_tv","sports","general","tech","social_media","internet_culture","gaming"]
+    domain_subjects = modern_subjects if use_modern else classic_subjects
+    domain_actions = modern_actions if use_modern else classic_actions
+    domain_reacts = modern_reacts if use_modern else classic_reacts
+
+    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki", "Madrid", "Valencia", "Bilbao", "Geneva"]
+
     # ensure two different domains for variety
     def build_fake(exclude_domain: str | None = None) -> str:
         pick_pool = [d for d in base_domains if d != exclude_domain] or base_domains
@@ -505,7 +598,7 @@ def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 
-def _pick_real_event() -> Tuple[str, str]:
+def _pick_real_event() -> Tuple[str, str, Optional[int]]:
     today = _today_local_date()
     url = WIKI_URL.format(m=today.month, d=today.day)
     j = _http_get_json(url, headers={"User-Agent": "TimelineRoulette/1.1"})
@@ -535,27 +628,33 @@ def _pick_real_event() -> Tuple[str, str]:
     pop_domains = {"tech","social_media","gaming","music","film_tv","internet_culture","sports"}
 
     pick = None
+    pick_year: Optional[int] = None
     for score, text, year, dom in scored:
         if dom in pop_domains and (year is None or year >= 1985):
             pick = text
+            pick_year = year
             break
     if not pick:
         for score, text, year, dom in scored:
             if dom in pop_domains:
                 pick = text
+                pick_year = year
                 break
     if not pick:
         for score, text, year, dom in scored:
             if year and year >= 1985:
                 pick = text
+                pick_year = year
                 break
     if not pick and scored:
         pick = scored[0][1]
+        pick_year = scored[0][2]
     if not pick:
         pick = "A notable event is recorded by historians."
+        pick_year = None
 
     month_name = today.strftime("%B")
-    return pick, month_name
+    return pick, month_name, pick_year
 
 # --- replace _openai_image with this ---
 def _openai_image(prompt: str) -> Optional[str]:
@@ -598,6 +697,30 @@ def _openai_image(prompt: str) -> Optional[str]:
 
 # keep this constant
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
+
+def _recent_image_urls(limit: int = 5) -> set[str]:
+    """
+    Pull a small window of recent images so we don't repeat yesterday's picks.
+    """
+    try:
+        rows = (
+            db.session.query(
+                TimelineRound.real_img_url,
+                TimelineRound.fake1_img_url,
+                TimelineRound.fake2_img_url,
+            )
+            .order_by(TimelineRound.round_date.desc())
+            .limit(limit)
+            .all()
+        )
+        urls: set[str] = set()
+        for row in rows:
+            for url in row:
+                if url:
+                    urls.add(url)
+        return urls
+    except Exception:
+        return set()
 
 # --- replace _image_for with this ---
 def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
@@ -658,7 +781,7 @@ def ensure_today_round(force: int = 0) -> bool:
         return True
 
     # 1) pick a real event + generate fakes, icons, images
-    real_raw, month_name = _pick_real_event()
+    real_raw, month_name, real_year = _pick_real_event()
     real_soft = _soften_real_title(real_raw)
     domain = _infer_domain(real_soft)
 
@@ -667,15 +790,16 @@ def ensure_today_round(force: int = 0) -> bool:
     fake_min = max(20, real_len - 5)
     fake_max = min(25, real_len + 5)
 
-    fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max)
+    year_hint = real_year or _extract_year_hint(real_raw) or _extract_year_hint(real_soft)
+    fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max, year_hint=year_hint)
 
     def _normalize_target(text: str) -> str:
         normalized = _normalize_choice(text, fake_min, fake_max)
         # keep in domain with a light flair if it drifted
         if domain != "general" and _infer_domain(normalized) != domain:
-            normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain))}.", fake_min, fake_max)
+            normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain, year_hint))}.", fake_min, fake_max)
         if _is_tragedy(normalized):
-            safe_seed = f"A {domain} highlight that fans shared online"
+            safe_seed = f"A {domain} highlight covered by news outlets"
             normalized = _normalize_choice(safe_seed, fake_min, fake_max)
         # guard domain mismatch for general by regenerating a neutral phrasing
         if domain == "general" and not _domain_ok(normalized, domain):
@@ -690,16 +814,16 @@ def ensure_today_round(force: int = 0) -> bool:
             fallback_actions = {
                 "travel": ["draws curious crowds", "sails into port", "opens to visitors", "hosts tours all day", "gets a warm welcome"],
                 "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz", "brings people together"],
-                "business": ["opens with fanfare", "hosts a packed launch", "pulls a long line", "draws coverage from blogs", "sells out early"],
+                "business": ["opens with fanfare", "hosts a packed launch", "pulls a long line", "draws coverage from papers", "sells out early"],
                 "science": ["shows off new ideas", "welcomes students and families", "gets shared by educators", "draws local press", "debuts a demo"],
                 "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
             }
             fallback_reacts = {
-                "travel": ["photos flood socials", "locals share videos", "news crews cover it", "tourists post nonstop"],
-                "culture": ["photos spread online", "locals share videos", "critics cover it", "people post reactions"],
-                "business": ["customers post hauls", "blogs cover the drop", "people line up early", "social posts spike"],
-                "science": ["teachers share clips", "local news covers it", "families post photos", "forums discuss it"],
-                "general": ["people talk about it for days", "local news covers it", "crowds show up", "it trends for a bit"],
+                "travel": ["covered by local news crews", "locals share stories", "radio mentions follow", "tourists talk about it"],
+                "culture": ["covered by critics", "locals share stories", "press photos circulate", "people discuss it"],
+                "business": ["customers line up early", "newspapers cover the drop", "people talk about purchases", "radio segments highlight it"],
+                "science": ["teachers discuss it", "local news covers it", "families talk about it", "bulletins mention the debut"],
+                "general": ["people talk about it for days", "local news covers it", "crowds show up", "it lands in recaps"],
             }
             fs = fallback_subjects[fallback_domain]
             fa = fallback_actions[fallback_domain]
@@ -709,6 +833,9 @@ def ensure_today_round(force: int = 0) -> bool:
             fallback_react = random.choice(fr)
             neutral = f"{fallback_subject} {fallback_action}, and {fallback_react}."
             normalized = _normalize_choice(neutral, fake_min, fake_max)
+        if year_hint and year_hint < 1995:
+            normalized = re.sub(r"\b(online|internet|viral|streaming|platforms?)\b", "", normalized, flags=re.I)
+            normalized = _normalize_choice(normalized, fake_min, fake_max)
         return normalized
 
     fake1 = _normalize_target(fake1)
@@ -730,10 +857,14 @@ def ensure_today_round(force: int = 0) -> bool:
     f1_icon   = pick_icon_for_text(fake1)
     f2_icon   = pick_icon_for_text(fake2)
 
-    used_urls: set[str] = set()
+    # seed with recent picks to avoid showing yesterday's photos again
+    used_urls: set[str] = _recent_image_urls(limit=5)
     real_img, real_attr = _image_for(real_soft, used_urls)
     f1_img,  f1_attr    = _image_for(fake1, used_urls)
     f2_img,  f2_attr    = _image_for(fake2, used_urls)
+    real_img = real_img or FALLBACK_ICON_URL
+    f1_img = f1_img or FALLBACK_ICON_URL
+    f2_img = f2_img or FALLBACK_ICON_URL
     img_attr = real_attr or f1_attr or f2_attr or ""
 
     try:
