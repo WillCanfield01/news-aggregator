@@ -459,10 +459,10 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     base_domains = modern_domains if use_modern else classic_domains
 
     classic_subjects = {
-        "music": ["a chart single gains momentum", "a festival lineup draws fans", "a celebrated conductor debuts a work", "a radio hit sweeps playlists", "a celebrated tour stop draws crowds"],
+        "music": ["a chart single gains momentum", "a festival lineup draws fans", "a celebrated conductor debuts a work", "a radio hit sweeps playlists", "a tour stop draws crowds"],
         "film_tv": ["a new series premiere", "a film festival screening", "a broadcast special", "a documentary debut", "a cinema release"],
         "sports": ["a championship game", "a record-setting match", "a landmark win streak", "a headline rivalry", "a marathon milestone"],
-        "travel": ["a historic ship visit", "a new ferry route", "a busy harbor festival", "a landmark train run", "a city waterfront opening"],
+        "travel": ["a historic ship visit", "a new ferry route", "a harbor festival", "a landmark train run", "a waterfront opening"],
         "culture": ["a museum opening", "a public art show", "a city parade", "a landmark restoration", "a film festival night"],
         "business": ["a flagship store opening", "a brand collaboration", "a company milestone", "a major product unveiling", "a regional expo"],
         "science": ["a planetarium reveal", "a space exhibit", "a research announcement", "a science fair highlight", "a new laboratory wing"],
@@ -509,14 +509,14 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
 
     classic_reacts = {
-        "music": ["covered by music press", "remembered in entertainment columns", "discussed by radio hosts", "featured in year-end lists", "mentioned by critics"],
-        "film_tv": ["covered by entertainment reporters", "earning notable reviews", "picked up by major outlets", "featured in weekly roundups", "discussed on radio"],
-        "sports": ["leading sports coverage that week", "picked up by national sports desks", "highlighted across sports news", "remembered as a season moment", "recapped on television"],
+        "music": ["drawing press mentions", "earning radio chatter", "covered by critics", "landing in entertainment pages", "noted by reviewers"],
+        "film_tv": ["covered by entertainment reporters", "earning notable reviews", "picked up by major outlets", "featured in roundups", "discussed on radio"],
+        "sports": ["leading sports coverage", "picked up by national desks", "highlighted across sports news", "remembered that season", "replayed on broadcasts"],
         "travel": ["covered by local media", "drawing attention from visitors", "making regional news", "mentioned in travel roundups", "written up in papers"],
         "culture": ["earning local headlines", "drawing coverage from arts press", "featured in cultural news", "noted in community reports", "written up in magazines"],
         "business": ["covered by business press", "reported across outlets", "featured in market news", "highlighted in industry reports", "covered by newspapers"],
         "science": ["reported by science desks", "covered in academic news", "earning coverage in journals", "featured in education reports", "discussed by researchers"],
-        "general": ["covered by major outlets", "drawing wide news attention", "highlighted in reports that week", "remembered in news summaries", "discussed on radio shows"],
+        "general": ["covered by major outlets", "drawing wide news attention", "highlighted in reports that week", "remembered in summaries", "discussed on radio shows"],
     }
     modern_reacts = {
         "tech": ["drawing wide press coverage", "earning headlines that week", "reported across tech outlets", "covered in major news"],
@@ -547,7 +547,12 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
-        sentence = f"{subject} {action} in {place}, {reaction}."
+        templates = [
+            f"{subject} {action} in {place}, {reaction}.",
+            f"In {place}, {subject} {action}, {reaction}.",
+            f"{subject.capitalize()} in {place} {action} and {reaction}.",
+        ]
+        sentence = rng.choice(templates)
         return _normalize_choice(sentence, min_len, max_len)
 
     candidates: list[str] = []
@@ -673,7 +678,7 @@ def _openai_image(prompt: str) -> Optional[str]:
             },
             json={
                 "model": "gpt-image-1",
-                "prompt": prompt,
+                "prompt": f"highly realistic photograph, natural lighting, no text or logos, {prompt}",
                 "size": "256x256",
                 "n": 1,
                 # IMPORTANT: most responses are base64 now
@@ -698,7 +703,7 @@ def _openai_image(prompt: str) -> Optional[str]:
 # keep this constant
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
 
-def _recent_image_urls(limit: int = 5) -> set[str]:
+def _recent_image_urls(limit: int = 15) -> set[str]:
     """
     Pull a small window of recent images so we don't repeat yesterday's picks.
     """
@@ -737,7 +742,14 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
         try:
             j = _http_get_json(
                 "https://api.unsplash.com/search/photos",
-                params={"query": q, "orientation": "squarish", "per_page": 6, "content_filter": "high"},
+                params={
+                    "query": q,
+                    "orientation": "squarish",
+                    "per_page": 6,
+                    "page": random.randint(1, 3),
+                    "content_filter": "high",
+                    "order_by": "relevant",
+                },
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
             for r in j.get("results", []):
@@ -752,7 +764,7 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
 
     # 2) OpenAI image (now base64 data-url capable)
     if OPENAI_API_KEY:
-        u = _openai_image(f"flat minimal illustration; muted colors; historical vibe; about: {text}")
+        u = _openai_image(f"realistic photograph, natural lighting, photojournalism feel, about: {text}")
         if u and u not in used:
             used.add(u)
             return u, "OpenAI generated"

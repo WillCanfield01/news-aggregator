@@ -237,24 +237,49 @@ def _build_image_round(today_round: TimelineRound) -> dict:
 
     # AI decoys: generate images with OpenAI; minimal/blank captions
     ai_cards = []
-    topics = ["city skyline at night", "festival crowd", "historical archive photo", "sports arena", "museum interior", "harbor at sunset"]
+    topics = [
+        "city street scene mid-2000s",
+        "concert crowd at night",
+        "museum interior with arches",
+        "harbor sunrise with ships",
+        "soccer stadium stands",
+        "busy train platform",
+        "civic building facade",
+        "evening skyline with water",
+    ]
+    used_imgs: set[str] = set([real_img] if real_img else [])
     for i in range(2):
         prompt_topic = random.choice(topics)
         img_url = None
         if OPENAI_API_KEY:
-            img_url = _openai_image(f"photograph, realistic, {prompt_topic}, unrelated to: {today_round.real_title}")
-        if not img_url and UNSPLASH_ACCESS_KEY:
+            img_url = _openai_image(
+                f"photojournalism style, realistic photo, natural lighting, no text, {prompt_topic}, different from: {today_round.real_title}"
+            )
+        if (not img_url or img_url in used_imgs) and UNSPLASH_ACCESS_KEY:
             try:
                 j = _http_get_json(
                     "https://api.unsplash.com/search/photos",
-                    params={"query": prompt_topic, "orientation": "landscape", "per_page": 1},
+                    params={
+                        "query": prompt_topic,
+                        "orientation": "landscape",
+                        "per_page": 3,
+                        "page": random.randint(1, 3),
+                        "order_by": "relevant",
+                        "content_filter": "high",
+                    },
                     headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
                 )
                 if j.get("results"):
-                    img_url = j["results"][0]["urls"]["small"]
+                    for res in j["results"]:
+                        cand = res["urls"]["small"]
+                        if cand and cand not in used_imgs:
+                            img_url = cand
+                            break
             except Exception:
                 img_url = None
-        ai_cards.append({"text": "", "img": img_url or ""})
+        img_url = img_url or ""
+        used_imgs.add(img_url)
+        ai_cards.append({"text": "", "img": img_url})
 
     cards, correct_idx = _shuffle_cards(
         "",  # no caption for real
@@ -299,6 +324,17 @@ def _fetch_today_quote() -> tuple[str, str]:
         pass
     return "", ""
 
+def _quote_tokens(q: str) -> set[str]:
+    return {w.lower().strip(".,;:!?\"'") for w in (q or "").split() if w}
+
+def _quote_too_similar(a: str, b: str) -> bool:
+    ta, tb = _quote_tokens(a), _quote_tokens(b)
+    if not ta or not tb:
+        return False
+    inter = len(ta & tb)
+    union = len(ta | tb) or 1
+    return inter / union > 0.55
+
 def _build_quote_round(today_round: TimelineRound) -> dict:
     real_quote, real_attr = _fetch_today_quote()
     if not real_quote and OPENAI_API_KEY:
@@ -324,30 +360,38 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
             real_quote = ""
             real_attr = ""
 
-    def _ai_quote() -> str:
+    def _ai_quote(existing: list[str]) -> str:
         if OPENAI_API_KEY:
-            try:
-                r = requests.post(
-                    OAI_URL,
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                    json={
-                        "model": OAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": "Invent a concise, believable quote with attribution, 12-18 words, one sentence, neutral tone."},
-                            {"role": "user", "content": f"Do NOT mention the real event. Make it feel like historical or cultural commentary. Real event: {today_round.real_title}."},
-                        ],
-                        "temperature": 0.9,
-                    },
-                    timeout=12,
-                )
-                r.raise_for_status()
-                return (r.json()["choices"][0]["message"]["content"] or "").strip()
-            except Exception:
-                return ""
+            for _ in range(5):
+                try:
+                    r = requests.post(
+                        OAI_URL,
+                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                        json={
+                            "model": OAI_MODEL,
+                            "messages": [
+                                {"role": "system", "content": "Invent a concise, believable quote with attribution, 12-18 words, one sentence, neutral tone, no cliches."},
+                                {"role": "user", "content": f"Do NOT mention the real event. Use a different speaker each time. Avoid sounding like other quotes: {existing}. Real event: {today_round.real_title}."},
+                            ],
+                            "temperature": 0.85,
+                        },
+                        timeout=12,
+                    )
+                    r.raise_for_status()
+                    q = (r.json()["choices"][0]["message"]["content"] or "").strip()
+                    if len(q.split()) < 9:
+                        continue
+                    if any(_quote_too_similar(q, ex) for ex in existing if ex):
+                        continue
+                    return q
+                except Exception:
+                    continue
         return ""
 
-    fake1 = _ai_quote() or "A noted figure reflects on change in a short remark."
-    fake2 = _ai_quote() or "An artist speaks on creativity in a brief line."
+    fakes: list[str] = []
+    fake1 = _ai_quote([real_quote]) or "A noted figure reflects on change in a short remark."
+    fakes.append(fake1)
+    fake2 = _ai_quote([real_quote, fake1]) or "An artist speaks on creativity in a brief line."
 
     cards, correct_idx = _shuffle_cards(
         real_quote or "A historical quote recorded for this date.",
