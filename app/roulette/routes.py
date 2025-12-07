@@ -215,7 +215,7 @@ def _build_text_round(today_round: TimelineRound) -> dict:
 
 def _build_image_round(today_round: TimelineRound) -> dict:
     # Real image strictly from Unsplash (if not already present)
-    real_img = getattr(today_round, "real_img_url", None)
+    real_img = getattr(today_round, "real_img_url", None) or _icon_url_or_fallback(getattr(today_round, "real_icon", None))
     if not real_img and UNSPLASH_ACCESS_KEY:
         try:
             j = _http_get_json(
@@ -277,7 +277,7 @@ def _build_image_round(today_round: TimelineRound) -> dict:
                             break
             except Exception:
                 img_url = None
-        img_url = img_url or ""
+        img_url = img_url or _icon_url_or_fallback("star.svg")
         used_imgs.add(img_url)
         ai_cards.append({"text": "", "img": img_url})
 
@@ -335,8 +335,14 @@ def _quote_too_similar(a: str, b: str) -> bool:
     union = len(ta | tb) or 1
     return inter / union > 0.55
 
+def _clean_quote_text(text: str) -> str:
+    t = (text or "").strip()
+    t = t.strip("\"'“”‘’ ")
+    return t
+
 def _build_quote_round(today_round: TimelineRound) -> dict:
     real_quote, real_attr = _fetch_today_quote()
+    real_quote = _clean_quote_text(real_quote)
     if not real_quote and OPENAI_API_KEY:
         try:
             prompt = (
@@ -354,7 +360,7 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
                 timeout=12,
             )
             r.raise_for_status()
-            real_quote = (r.json()["choices"][0]["message"]["content"] or "").strip()
+            real_quote = _clean_quote_text(r.json()["choices"][0]["message"]["content"] or "")
             real_attr = ""
         except Exception:
             real_quote = ""
@@ -389,9 +395,9 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
         return ""
 
     fakes: list[str] = []
-    fake1 = _ai_quote([real_quote]) or "A noted figure reflects on change in a short remark."
+    fake1 = _clean_quote_text(_ai_quote([real_quote])) or "A noted figure reflects on change in a short remark."
     fakes.append(fake1)
-    fake2 = _ai_quote([real_quote, fake1]) or "An artist speaks on creativity in a brief line."
+    fake2 = _clean_quote_text(_ai_quote([real_quote, fake1])) or "An artist speaks on creativity in a brief line."
 
     cards, correct_idx = _shuffle_cards(
         real_quote or "A historical quote recorded for this date.",

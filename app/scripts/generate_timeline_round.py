@@ -509,23 +509,23 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
 
     classic_reacts = {
-        "music": ["drawing press mentions", "earning radio chatter", "covered by critics", "landing in entertainment pages", "noted by reviewers"],
-        "film_tv": ["covered by entertainment reporters", "earning notable reviews", "picked up by major outlets", "featured in roundups", "discussed on radio"],
-        "sports": ["leading sports coverage", "picked up by national desks", "highlighted across sports news", "remembered that season", "replayed on broadcasts"],
-        "travel": ["covered by local media", "drawing attention from visitors", "making regional news", "mentioned in travel roundups", "written up in papers"],
-        "culture": ["earning local headlines", "drawing coverage from arts press", "featured in cultural news", "noted in community reports", "written up in magazines"],
-        "business": ["covered by business press", "reported across outlets", "featured in market news", "highlighted in industry reports", "covered by newspapers"],
-        "science": ["reported by science desks", "covered in academic news", "earning coverage in journals", "featured in education reports", "discussed by researchers"],
-        "general": ["covered by major outlets", "drawing wide news attention", "highlighted in reports that week", "remembered in summaries", "discussed on radio shows"],
+        "music": ["drawing press mentions", "earning radio chatter", "covered by critics"],
+        "film_tv": ["covered by entertainment reporters", "earning notable reviews", "picked up by major outlets"],
+        "sports": ["leading sports coverage", "highlighted across sports news", "remembered that season"],
+        "travel": ["covered by local media", "making regional news", "mentioned in travel roundups"],
+        "culture": ["earning local headlines", "featured in cultural news", "noted in community reports"],
+        "business": ["covered by business press", "reported across outlets", "featured in market news"],
+        "science": ["reported by science desks", "covered in academic news", "earning coverage in journals"],
+        "general": ["covered by major outlets", "drawing wide news attention", "remembered in summaries"],
     }
     modern_reacts = {
-        "tech": ["drawing wide press coverage", "earning headlines that week", "reported across tech outlets", "covered in major news"],
-        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "covered by news outlets", "noted in weekly recaps"],
-        "gaming": ["earning coverage from major sites", "reported as a standout moment", "featured in gaming news", "covered widely that week"],
+        "tech": ["drawing wide press coverage", "earning headlines that week", "reported across tech outlets"],
+        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "covered by news outlets"],
+        "gaming": ["earning coverage from major sites", "reported as a standout moment", "featured in gaming news"],
         "music": classic_reacts["music"],
         "film_tv": classic_reacts["film_tv"],
         "sports": classic_reacts["sports"],
-        "internet_culture": ["covered by major blogs", "highlighted in online roundups", "becoming a noted moment online", "landing in weekly recaps"],
+        "internet_culture": ["covered by major blogs", "highlighted in online roundups", "landing in weekly recaps"],
         "travel": classic_reacts["travel"],
         "culture": classic_reacts["culture"],
         "business": classic_reacts["business"],
@@ -551,6 +551,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             f"{subject} {action} in {place}, {reaction}.",
             f"In {place}, {subject} {action}, {reaction}.",
             f"{subject.capitalize()} in {place} {action} and {reaction}.",
+            f"{subject.capitalize()} {action} in {place}.",
+            f"In {place}, {subject} {action}.",
         ]
         sentence = rng.choice(templates)
         return _normalize_choice(sentence, min_len, max_len)
@@ -754,11 +756,14 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
             )
             for r in j.get("results", []):
                 img = r.get("urls", {}).get("small")
-                if img and img not in used:
-                    used.add(img)
-                    u = r.get("user", {}) or {}
-                    attr = f"{u.get('name','Unsplash')} — https://unsplash.com/@{u.get('username','unsplash')}"
-                    return img, attr
+                if not img:
+                    continue
+                if img in used:
+                    continue
+                used.add(img)
+                u = r.get("user", {}) or {}
+                attr = f"{u.get('name','Unsplash')} — https://unsplash.com/@{u.get('username','unsplash')}"
+                return img, attr
         except Exception:
             pass
 
@@ -809,7 +814,8 @@ def ensure_today_round(force: int = 0) -> bool:
         normalized = _normalize_choice(text, fake_min, fake_max)
         # keep in domain with a light flair if it drifted
         if domain != "general" and _infer_domain(normalized) != domain:
-            normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain, year_hint))}.", fake_min, fake_max)
+            if random.random() < 0.4:
+                normalized = _normalize_choice(f"{normalized.rstrip('.')} {random.choice(_domain_flair(domain, year_hint))}.", fake_min, fake_max)
         if _is_tragedy(normalized):
             safe_seed = f"A {domain} highlight covered by news outlets"
             normalized = _normalize_choice(safe_seed, fake_min, fake_max)
