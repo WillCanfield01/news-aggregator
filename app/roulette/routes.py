@@ -223,16 +223,17 @@ def _build_image_round(today_round: TimelineRound) -> dict:
                 params={
                     "query": today_round.real_title,
                     "orientation": "landscape",
-                    "per_page": 6,
-                    "page": random.randint(1, 3),
+                    "per_page": 8,
+                    "page": random.randint(1, 4),
                     "order_by": "relevant",
                     "content_filter": "high",
                 },
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
-            # Prefer a result with a valid URL
+            # Prefer a higher-res URL
             for r in j.get("results", []):
-                url = r.get("urls", {}).get("regular") or r.get("urls", {}).get("small")
+                urls = r.get("urls", {}) or {}
+                url = urls.get("full") or urls.get("regular") or urls.get("small")
                 if url:
                     real_img = url
                     break
@@ -280,7 +281,8 @@ def _build_image_round(today_round: TimelineRound) -> dict:
                 )
                 if j.get("results"):
                     for res in j["results"]:
-                        cand = res["urls"]["small"]
+                        urls = res.get("urls", {}) or {}
+                        cand = urls.get("full") or urls.get("regular") or urls.get("small")
                         if cand and cand not in used_imgs:
                             img_url = cand
                             break

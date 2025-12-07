@@ -399,20 +399,19 @@ def _extract_year_hint(text: str) -> Optional[int]:
 
 def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_len: int, max_len: int, year_hint: Optional[int] = None, salt: int = 0) -> Tuple[str, str]:
     """
-    Produce two plausible-but-false events similar in tone/length to the real item. Make sure that it is one consecutive and realistic thought that references one sole thing and does three fragments thrown together.
+    Produce two plausible-but-false events similar in tone/length to the real item, with a single coherent action.
     """
-    real_len = _wlen(real_text)
     era_note = ""
     if year_hint:
         decade = (year_hint // 10) * 10
-        era_note = f"Match the tone and era near the {decade}s."
+        era_note = f"Keep the era around the {decade}s."
 
     def _ask_openai() -> Optional[str]:
         sys_prompt = (
-            "Write one believable 'On this day' style sentence (no bullet). "
+            "Write one believable 'On this day' news-style sentence (no bullet). "
             f"Length {min_len}-{max_len} words. One sentence only. No trailing fragments. "
-            "No tragedies/violence. Avoid jargon. Do not copy the real event. "
-            "Keep tone like a concise Wikipedia entry. Do not prepend a year dash."
+            "No tragedies/violence. Avoid jargon. Use concrete nouns and a single clear action. "
+            "Do not copy the real event. Do not prepend a year dash."
         )
         if era_note:
             sys_prompt += f" {era_note}"
@@ -420,9 +419,12 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Real event for context (do not copy): {real_text}\nMonth: {month_name}\nEra: {year_hint or 'any'}\n"},
+                {"role": "user", "content": f"Real event for context (do not copy): {real_text}
+Month: {month_name}
+Era: {year_hint or 'any'}
+"},
             ],
-            "temperature": 0.9,
+            "temperature": 0.8,
         }
         try:
             r = requests.post(
@@ -438,7 +440,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
 
     if OPENAI_API_KEY:
         fakes: list[str] = []
-        for _ in range(3):
+        for _ in range(4):
             out = _ask_openai()
             if out and min_len <= _wlen(out) <= max_len and not _is_tragedy(out):
                 if all(not _too_similar(out, f) for f in fakes) and not _too_similar(out, real_text):
@@ -446,7 +448,6 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             if len(fakes) >= 2:
                 return fakes[0], fakes[1]
 
-    # ---------- deterministic fallback ----------
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^
         (hash(real_text) & 0xFFFFFFFF) ^
@@ -459,17 +460,17 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     base_domains = modern_domains if use_modern else classic_domains
 
     classic_subjects = {
-        "music": ["a chart single gains momentum", "a festival lineup draws fans", "a celebrated conductor debuts a work", "a radio hit sweeps playlists", "a tour stop draws crowds"],
-        "film_tv": ["a new series premiere", "a film festival screening", "a broadcast special", "a documentary debut", "a cinema release"],
-        "sports": ["a championship game", "a record-setting match", "a landmark win streak", "a headline rivalry", "a marathon milestone"],
+        "music": ["a concert series", "a chart single", "a touring symphony", "a headline recital", "a festival night"],
+        "film_tv": ["a film premiere", "a broadcast special", "a documentary debut", "a cinema release", "a celebrated screening"],
+        "sports": ["a title match", "a record-setting game", "a heated rivalry", "a marathon milestone", "a playoff upset"],
         "travel": ["a historic ship visit", "a new ferry route", "a harbor festival", "a landmark train run", "a waterfront opening"],
-        "culture": ["a museum opening", "a public art show", "a city parade", "a landmark restoration", "a film festival night"],
+        "culture": ["a museum opening", "a public art show", "a city parade", "a landmark restoration", "a film festival gala"],
         "business": ["a flagship store opening", "a brand collaboration", "a company milestone", "a major product unveiling", "a regional expo"],
         "science": ["a planetarium reveal", "a space exhibit", "a research announcement", "a science fair highlight", "a new laboratory wing"],
         "general": ["a national celebration", "a civic ceremony", "a community milestone", "a public event", "a major exhibit"],
     }
     modern_subjects = {
-        "tech": ["a streaming feature", "a phone update", "an AI tool launch", "a cloud gaming rollout", "a wearable drop"],
+        "tech": ["an app launch", "a device update", "an AI feature", "a cloud rollout", "a streaming upgrade"],
         "social_media": ["a hashtag challenge", "a video trend", "a live stream format", "a creator payout push", "a viral filter"],
         "gaming": ["a multiplayer update", "an esports upset", "a crossover reveal", "a record game launch", "a fan-favorite DLC"],
         "music": ["a surprise album", "a festival headliner set", "a chart single", "a viral remix", "a tour kickoff"],
@@ -484,17 +485,17 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
 
     classic_actions = {
-        "music": ["tops radio charts", "draws crowds to venues", "receives strong newspaper reviews", "stays on playlists", "leads entertainment pages"],
-        "film_tv": ["draws theater crowds", "earns strong newspaper reviews", "airs to solid ratings", "gets noted by critics", "runs in packed cinemas"],
-        "sports": ["draws national attention", "fills sports pages", "is replayed on nightly news", "sparks debates on radio shows", "keeps fans talking"],
-        "travel": ["draws curious crowds", "sails into port", "opens to visitors", "hosts tours all day", "gets a warm welcome"],
-        "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz", "brings people together"],
-        "business": ["opens with fanfare", "hosts a packed launch", "fills the floor with guests", "draws coverage from papers", "sells out early"],
-        "science": ["shows off new ideas", "welcomes students and families", "gets shared by educators", "draws local press", "debuts a demonstration"],
-        "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines", "becomes a news favorite"],
+        "music": ["draws crowds", "lands on radio charts", "gets strong reviews", "sells out quickly"],
+        "film_tv": ["earns solid reviews", "packs theaters", "airs to strong ratings", "wins a festival slot"],
+        "sports": ["fills the arena", "leads sports pages", "is replayed on nightly news", "sparks debate shows"],
+        "travel": ["welcomes visitors", "fills the docks", "hosts public tours", "draws curious locals"],
+        "culture": ["draws long lines", "lights up downtown", "fills the venue", "gets strong local buzz"],
+        "business": ["opens with fanfare", "fills the floor with guests", "draws coverage from papers", "sells out early"],
+        "science": ["shows new work", "welcomes students", "draws local press", "features demonstrations"],
+        "general": ["draws wide coverage", "gets local buzz", "brings crowds downtown", "lands headlines"],
     }
     modern_actions = {
-        "tech": ["launches to the public", "rolls out broadly", "goes live for users", "debuts with a demo", "lands for early adopters"],
+        "tech": ["launches to the public", "rolls out broadly", "goes live for users", "debuts with demos"],
         "social_media": ["takes over feeds", "picks up momentum", "spreads across platforms", "sparks quick reactions", "draws big creator posts"],
         "gaming": ["fills servers fast", "tops player charts", "shakes up rankings", "packs esports streams", "sparks lore debates"],
         "music": ["tops playlists", "sells out dates", "goes viral on clips", "gets heavy play", "trends on radio"],
@@ -509,8 +510,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
 
     classic_reacts = {
-        "music": ["drawing press mentions", "earning radio chatter", "covered by critics"],
-        "film_tv": ["covered by entertainment reporters", "earning notable reviews", "picked up by major outlets"],
+        "music": ["covered by critics", "remembered in entertainment pages", "noted on radio"],
+        "film_tv": ["covered by entertainment reporters", "picked up by major outlets", "featured in reviews"],
         "sports": ["leading sports coverage", "highlighted across sports news", "remembered that season"],
         "travel": ["covered by local media", "making regional news", "mentioned in travel roundups"],
         "culture": ["earning local headlines", "featured in cultural news", "noted in community reports"],
@@ -520,8 +521,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     }
     modern_reacts = {
         "tech": ["drawing wide press coverage", "earning headlines that week", "reported across tech outlets"],
-        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "covered by news outlets"],
-        "gaming": ["earning coverage from major sites", "reported as a standout moment", "featured in gaming news"],
+        "social_media": ["spreading quickly across platforms", "drawing widespread attention", "covered by news outlets", "noted in weekly recaps"],
+        "gaming": ["earning coverage from major sites", "reported as a standout moment", "featured in gaming news", "covered widely that week"],
         "music": classic_reacts["music"],
         "film_tv": classic_reacts["film_tv"],
         "sports": classic_reacts["sports"],
@@ -537,9 +538,8 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     domain_actions = modern_actions if use_modern else classic_actions
     domain_reacts = modern_reacts if use_modern else classic_reacts
 
-    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki", "Madrid", "Valencia", "Bilbao", "Geneva"]
+    locations = ["Chicago", "Seattle", "Toronto", "Melbourne", "Oslo", "Lisbon", "Seoul", "Austin", "Dublin", "Vancouver", "Cape Town", "Barcelona", "Reykjavik", "Mexico City", "Bangkok", "Helsinki", "Madrid", "Valencia", "Bilbao", "Geneva", "Monaco", "Vienna", "Prague"]
 
-    # ensure two different domains for variety
     def build_fake(exclude_domain: str | None = None) -> str:
         pick_pool = [d for d in base_domains if d != exclude_domain] or base_domains
         pick_domain = rng.choice(pick_pool)
@@ -547,19 +547,12 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         action = rng.choice(domain_actions.get(pick_domain, domain_actions["general"]))
         reaction = rng.choice(domain_reacts.get(pick_domain, domain_reacts["general"]))
         place = rng.choice(locations)
-        templates = [
-            f"{subject} {action} in {place}, {reaction}.",
-            f"In {place}, {subject} {action}, {reaction}.",
-            f"{subject.capitalize()} in {place} {action} and {reaction}.",
-            f"{subject.capitalize()} {action} in {place}.",
-            f"In {place}, {subject} {action}.",
-        ]
-        sentence = rng.choice(templates)
+        sentence = f"{subject} {action} in {place}, {reaction}."
         return _normalize_choice(sentence, min_len, max_len)
 
     candidates: list[str] = []
     attempts = 0
-    while len(candidates) < 2 and attempts < 12:
+    while len(candidates) < 2 and attempts < 16:
         exclude = candidates and _infer_domain(candidates[-1]) or None
         cand = build_fake(exclude_domain=exclude)
         if min_len <= _wlen(cand) <= max_len and not _mostly_year_swap(cand, real_text):
@@ -681,7 +674,7 @@ def _openai_image(prompt: str) -> Optional[str]:
             json={
                 "model": "gpt-image-1",
                 "prompt": f"highly realistic wide-angle photograph, full scene in frame, natural lighting, no text or logos, {prompt}",
-                "size": "512x512",
+                "size": "1024x1024",
                 "n": 1,
                 # IMPORTANT: most responses are base64 now
                 "response_format": "b64_json",
@@ -704,6 +697,8 @@ def _openai_image(prompt: str) -> Optional[str]:
 
 # keep this constant
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
+# 1x1 transparent pixel to avoid broken imgs if static path fails
+PLACEHOLDER_IMG = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
 
 def _recent_image_urls(limit: int = 15) -> set[str]:
     """
@@ -755,7 +750,8 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
             )
             for r in j.get("results", []):
-                img = r.get("urls", {}).get("small")
+                urls = r.get("urls", {}) or {}
+                img = urls.get("regular") or urls.get("full") or urls.get("small")
                 if not img:
                     continue
                 if img in used:
@@ -769,7 +765,7 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
 
     # 2) OpenAI image (now base64 data-url capable)
     if OPENAI_API_KEY:
-        u = _openai_image(f"realistic photograph, natural lighting, photojournalism feel, about: {text}")
+        u = _openai_image(f"wide-angle realistic photograph, full subject visible, natural lighting, photojournalism feel, about: {text}")
         if u and u not in used:
             used.add(u)
             return u, "OpenAI generated"
@@ -777,7 +773,7 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
     # 3) Guaranteed visible fallback (never blank)
     if FALLBACK_ICON_URL not in used:
         used.add(FALLBACK_ICON_URL)
-    return FALLBACK_ICON_URL, ""
+    return FALLBACK_ICON_URL or PLACEHOLDER_IMG, ""
 
 def ensure_today_round(force: int = 0) -> bool:
     """
@@ -880,9 +876,9 @@ def ensure_today_round(force: int = 0) -> bool:
     real_img, real_attr = _image_for(real_soft, used_urls)
     f1_img,  f1_attr    = _image_for(fake1, used_urls)
     f2_img,  f2_attr    = _image_for(fake2, used_urls)
-    real_img = real_img or FALLBACK_ICON_URL
-    f1_img = f1_img or FALLBACK_ICON_URL
-    f2_img = f2_img or FALLBACK_ICON_URL
+    real_img = real_img or FALLBACK_ICON_URL or PLACEHOLDER_IMG
+    f1_img = f1_img or FALLBACK_ICON_URL or PLACEHOLDER_IMG
+    f2_img = f2_img or FALLBACK_ICON_URL or PLACEHOLDER_IMG
     img_attr = real_attr or f1_attr or f2_attr or ""
 
     try:
