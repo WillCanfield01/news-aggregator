@@ -399,7 +399,7 @@ def _extract_year_hint(text: str) -> Optional[int]:
 
 def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_len: int, max_len: int, year_hint: Optional[int] = None, salt: int = 0) -> Tuple[str, str]:
     """
-    Produce two plausible-but-false events similar in tone/length to the real item.
+    Produce two plausible-but-false events similar in tone/length to the real item. Make sure that it is one consecutive and realistic thought that references one sole thing and does three fragments thrown together.
     """
     real_len = _wlen(real_text)
     era_note = ""
@@ -680,8 +680,8 @@ def _openai_image(prompt: str) -> Optional[str]:
             },
             json={
                 "model": "gpt-image-1",
-                "prompt": f"highly realistic photograph, natural lighting, no text or logos, {prompt}",
-                "size": "256x256",
+                "prompt": f"highly realistic wide-angle photograph, full scene in frame, natural lighting, no text or logos, {prompt}",
+                "size": "512x512",
                 "n": 1,
                 # IMPORTANT: most responses are base64 now
                 "response_format": "b64_json",
@@ -746,9 +746,9 @@ def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
                 "https://api.unsplash.com/search/photos",
                 params={
                     "query": q,
-                    "orientation": "squarish",
-                    "per_page": 6,
-                    "page": random.randint(1, 3),
+                    "orientation": "landscape",
+                    "per_page": 8,
+                    "page": random.randint(1, 4),
                     "content_filter": "high",
                     "order_by": "relevant",
                 },
