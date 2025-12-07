@@ -419,10 +419,14 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
             "model": OAI_MODEL,
             "messages": [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Real event for context (do not copy): {real_text}
-Month: {month_name}
-Era: {year_hint or 'any'}
-"},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Real event for context (do not copy): {real_text}\\n"
+                        f"Month: {month_name}\\n"
+                        f"Era: {year_hint or 'any'}"
+                    ),
+                },
             ],
             "temperature": 0.8,
         }
