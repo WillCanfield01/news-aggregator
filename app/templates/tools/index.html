@@ -9,18 +9,31 @@
 
 {% block content %}
 <section class="tools-shell">
+    <a class="tools-back" href="{{ url_for('landing') }}">← Back to Homepage</a>
     <div class="tools-hero">
         <p class="eyebrow">Tools Hub</p>
-        <h1>Workflow helpers, coming soon</h1>
-        <p class="lead">We’re preparing a curated set of utility tools to speed up investigations, writing, and reporting.
-            Check back soon for the first batch.</p>
+        <h1>Workflow helpers to speed up your day</h1>
+        <p class="lead">Pick a tool to improve your writing and research. New utilities will appear here as they launch.</p>
     </div>
 
+    {% if tools %}
+    <div class="tools-grid" role="list" aria-label="Available tools">
+        {% for tool in tools %}
+        <a class="tool-card" role="listitem" href="{{ url_for('tools.tool_page', slug=tool.slug) }}">
+            <div class="tool-card-category">{{ tool.category }}</div>
+            <h2 class="tool-card-title">{{ tool.title }}</h2>
+            <p class="tool-card-desc">{{ tool.description }}</p>
+            <span class="tool-card-link">Open tool →</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
     <div class="tools-grid" role="list" aria-label="Tools coming soon">
         <div class="tools-empty" role="listitem">
             <p class="placeholder-title">No tools are live yet</p>
             <p class="placeholder-copy">This space will house cards for each tool once they’re enabled.</p>
         </div>
     </div>
+    {% endif %}
 </section>
 {% endblock %}

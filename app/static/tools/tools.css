@@ -14,6 +14,18 @@
     color: var(--tools-ink);
 }
 
+.tools-back {
+    display: inline-block;
+    margin-bottom: 12px;
+    color: #6b46c1;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.tools-back:hover {
+    text-decoration: underline;
+}
+
 .tools-hero {
     background: var(--tools-card);
     border: 1px solid var(--tools-border);
@@ -50,6 +62,49 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 16px;
+}
+
+.tool-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--tools-card);
+    border: 1px solid var(--tools-border);
+    border-radius: 16px;
+    padding: 18px 18px 16px;
+    text-decoration: none;
+    color: var(--tools-ink);
+    box-shadow: 0 8px 18px rgba(17, 24, 39, 0.05);
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+
+.tool-card:hover,
+.tool-card:focus-visible {
+    transform: translateY(-2px);
+    border-color: #cbd5e1;
+    box-shadow: 0 12px 28px rgba(17, 24, 39, 0.09);
+}
+
+.tool-card-category {
+    color: #1a73e8;
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+}
+
+.tool-card-title {
+    margin: 0 0 8px;
+    font-size: 1.25rem;
+}
+
+.tool-card-desc {
+    margin: 0 0 14px;
+    color: var(--tools-muted);
+    line-height: 1.5;
+}
+
+.tool-card-link {
+    color: #6b46c1;
+    font-weight: 700;
 }
 
 .tools-empty {
@@ -131,27 +186,39 @@
     gap: 10px;
 }
 
-.tool-form label {
+.tool-field label {
+    display: block;
     font-weight: 600;
     color: #111827;
+    margin-bottom: 6px;
 }
 
-.tool-form textarea {
+.tool-field input,
+.tool-field textarea,
+.tool-field select {
     width: 100%;
-    min-height: 140px;
     padding: 12px;
     border: 1px solid #d1d5db;
     border-radius: 10px;
     font-family: inherit;
     font-size: 1rem;
-    color: #4b5563;
-    background: #f9fafb;
+    color: #1f2937;
+    background: #fff;
+}
+
+.tool-field textarea {
+    min-height: 140px;
     resize: vertical;
 }
 
-.tool-form textarea:disabled {
+.tool-field textarea:disabled {
     cursor: not-allowed;
     background: #f3f4f6;
+}
+
+.char-limit {
+    color: #6b7280;
+    font-size: 0.9rem;
 }
 
 .tool-form button {
@@ -164,8 +231,48 @@
     color: #fff;
     font-weight: 700;
     letter-spacing: 0.01em;
+    cursor: pointer;
+    opacity: 1;
+}
+
+.tool-run-btn[disabled] {
     cursor: not-allowed;
-    opacity: 0.55;
+    opacity: 0.6;
+}
+
+.tool-status {
+    margin-top: 8px;
+    color: #374151;
+    min-height: 18px;
+}
+
+.tool-status.error {
+    color: #b91c1c;
+}
+
+.tool-status.success {
+    color: #065f46;
+}
+
+.tool-output {
+    margin-top: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    background: #fff;
+    padding: 12px;
+}
+
+.tool-output-label {
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #111827;
+}
+
+.tool-output-pre {
+    margin: 0;
+    white-space: pre-wrap;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    color: #1f2937;
 }
 
 @media (max-width: 640px) {

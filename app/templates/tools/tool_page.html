@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ tool_title }} – Tools{% endblock %}
+{% block title %}{{ tool.title }} – Tools{% endblock %}
 
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='tools/tools.css') }}">
@@ -12,25 +12,49 @@
     <nav class="tool-breadcrumb" aria-label="Breadcrumb">
         <a href="{{ url_for('tools.tools_home') }}">Tools</a>
         <span aria-hidden="true">/</span>
-        <span class="crumb-current">{{ tool_title }}</span>
+        <span class="crumb-current">{{ tool.title }}</span>
     </nav>
 
     <div class="tool-detail">
         <header class="tool-header">
-            <p class="eyebrow">Placeholder</p>
-            <h1>{{ tool_title }}</h1>
-            <p class="lead">This tool will be added soon. In the meantime, the request area below is a preview spot for
-                future inputs.</p>
+            <p class="eyebrow">{{ tool.category }}</p>
+            <h1>{{ tool.title }}</h1>
+            <p class="lead">{{ tool.description }}</p>
         </header>
 
         <div class="tool-panel" aria-live="polite">
-            <p class="coming-soon">Coming soon</p>
-            <form class="tool-form" aria-label="Tool request placeholder">
-                <label for="tool-input-{{ slug }}">Input (disabled for now)</label>
-                <textarea id="tool-input-{{ slug }}" name="input" rows="4" placeholder="We’ll add configuration fields here soon."
-                    disabled></textarea>
-                <button type="button" disabled aria-disabled="true">Run tool</button>
+            <form class="tool-form" data-tool-form data-tool-slug="{{ tool.slug }}"
+                data-output-label="{{ tool.output_label }}" aria-label="{{ tool.title }} input form">
+                {% for field in tool.inputs %}
+                <div class="tool-field">
+                    <label for="field-{{ field.name }}">{{ field.label }}{% if field.required %}*{% endif %}</label>
+                    {% if field.type == "textarea" %}
+                    <textarea id="field-{{ field.name }}" name="{{ field.name }}" rows="4" placeholder="{{ field.placeholder }}"
+                        {% if field.required %}required{% endif %} maxlength="{{ field.max_chars }}"
+                        data-input-field data-type="{{ field.type }}"></textarea>
+                    {% elif field.type == "select" %}
+                    <select id="field-{{ field.name }}" name="{{ field.name }}" data-input-field data-type="{{ field.type }}"
+                        {% if field.required %}required{% endif %}>
+                        {% if not field.required %}<option value="">Select an option</option>{% endif %}
+                        {% for option in field.options %}
+                        <option value="{{ option }}" {% if field.default and field.default == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input id="field-{{ field.name }}" type="text" name="{{ field.name }}" placeholder="{{ field.placeholder }}"
+                        {% if field.required %}required{% endif %} maxlength="{{ field.max_chars }}"
+                        data-input-field data-type="{{ field.type }}">
+                    {% endif %}
+                    {% if field.max_chars %}<small class="char-limit">Max {{ field.max_chars }} chars</small>{% endif %}
+                </div>
+                {% endfor %}
+                <button type="submit" class="tool-run-btn" data-run-button>Run tool</button>
             </form>
+            <div class="tool-status" data-tool-status role="status" aria-live="polite"></div>
+            <div class="tool-output" data-tool-output>
+                <div class="tool-output-label">{{ tool.output_label }}</div>
+                <pre class="tool-output-pre" aria-live="polite"></pre>
+            </div>
         </div>
     </div>
 </section>
