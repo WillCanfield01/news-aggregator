@@ -9,6 +9,7 @@ from app.extensions import db, login_manager
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
+from app.tools import tools_bp, api_tools_bp
 from app.scripts.generate_timeline_round import ensure_today_round
 
 def schedule_daily_reddit_article(app):
@@ -69,6 +70,8 @@ def create_app():
     app.register_blueprint(reddit_bp)
     app.register_blueprint(create_escape_bp(), url_prefix="/escape")
     app.register_blueprint(roulette_bp)    
+    app.register_blueprint(tools_bp)
+    app.register_blueprint(api_tools_bp)
 
     # Optional: /escape → /escape/today convenience
     @app.route("/escape")

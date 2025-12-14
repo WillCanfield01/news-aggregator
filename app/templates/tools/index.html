@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Tools Hub{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='tools/tools.css') }}">
+<script src="{{ url_for('static', filename='tools/tools.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+<section class="tools-shell">
+    <div class="tools-hero">
+        <p class="eyebrow">Tools Hub</p>
+        <h1>Workflow helpers, coming soon</h1>
+        <p class="lead">We’re preparing a curated set of utility tools to speed up investigations, writing, and reporting.
+            Check back soon for the first batch.</p>
+    </div>
+
+    <div class="tools-grid" role="list" aria-label="Tools coming soon">
+        <div class="tools-empty" role="listitem">
+            <p class="placeholder-title">No tools are live yet</p>
+            <p class="placeholder-copy">This space will house cards for each tool once they’re enabled.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

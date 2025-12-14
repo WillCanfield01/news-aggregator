@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tool_title }} – Tools{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='tools/tools.css') }}">
+<script src="{{ url_for('static', filename='tools/tools.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+<section class="tools-shell">
+    <nav class="tool-breadcrumb" aria-label="Breadcrumb">
+        <a href="{{ url_for('tools.tools_home') }}">Tools</a>
+        <span aria-hidden="true">/</span>
+        <span class="crumb-current">{{ tool_title }}</span>
+    </nav>
+
+    <div class="tool-detail">
+        <header class="tool-header">
+            <p class="eyebrow">Placeholder</p>
+            <h1>{{ tool_title }}</h1>
+            <p class="lead">This tool will be added soon. In the meantime, the request area below is a preview spot for
+                future inputs.</p>
+        </header>
+
+        <div class="tool-panel" aria-live="polite">
+            <p class="coming-soon">Coming soon</p>
+            <form class="tool-form" aria-label="Tool request placeholder">
+                <label for="tool-input-{{ slug }}">Input (disabled for now)</label>
+                <textarea id="tool-input-{{ slug }}" name="input" rows="4" placeholder="We’ll add configuration fields here soon."
+                    disabled></textarea>
+                <button type="button" disabled aria-disabled="true">Run tool</button>
+            </form>
+        </div>
+    </div>
+</section>
+{% endblock %}
