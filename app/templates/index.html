@@ -107,6 +107,69 @@ next.{% endblock %}
         padding: clamp(20px, 2vw + 12px, 32px);
     }
 
+    /* Product highlights */
+    .products {
+        margin: 36px 0 10px;
+        display: grid;
+        gap: 18px;
+    }
+
+    .product-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    }
+
+    .product-card {
+        background: #fff;
+        border-radius: 16px;
+        border: 1px solid #e5e7eb;
+        padding: 18px;
+        box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+    }
+
+    .product-card h3 {
+        margin: 0 0 8px;
+        font-size: 1.2rem;
+        color: #0f1b2d;
+    }
+
+    .product-card p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        line-height: 1.5;
+    }
+
+    .product-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        background: #eef3ff;
+        color: #1a46c7;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 0.9rem;
+    }
+
+    .cta-inline {
+        font-weight: 700;
+        color: var(--brand);
+        text-decoration: none;
+    }
+
+    .cta-inline:hover {
+        text-decoration: underline;
+    }
+
     .badge-feature {
         display: inline-block;
         background: #e8f1ff;
@@ -221,6 +284,52 @@ next.{% endblock %}
         {% else %}
         <div class="headline">New briefing drops daily. Check back soon.</div>
         {% endif %}
+    </section>
+
+    <section class="products">
+        <div class="product-grid">
+            <div class="product-card">
+                <div class="product-meta">
+                    <span class="pill">Game</span>
+                    <span class="pill">New daily</span>
+                </div>
+                <h3>Daily Escape</h3>
+                <p>Crack today’s security-themed mini escape room in just a few guesses. Fresh puzzle every day.</p>
+                <a class="cta-inline" href="/escape/play">Play today’s Escape →</a>
+            </div>
+            <div class="product-card">
+                <div class="product-meta">
+                    <span class="pill">Trivia</span>
+                </div>
+                <h3>Timeline Roulette</h3>
+                <p>Spot the real historical event among two fakes. Keep your streak alive and climb the leaderboard.</p>
+                <a class="cta-inline" href="/roulette">Play Timeline Roulette →</a>
+            </div>
+            <div class="product-card">
+                <div class="product-meta">
+                    <span class="pill">Tools</span>
+                </div>
+                <h3>Tools Hub</h3>
+                <p>Purpose-built utilities for your workflow—resume polishers, habit trackers, and more to come.</p>
+                <a class="cta-inline" href="/tools">Browse tools →</a>
+            </div>
+            <div class="product-card">
+                <div class="product-meta">
+                    <span class="pill">Career</span>
+                </div>
+                <h3>Resume Bullet Improver</h3>
+                <p>Paste raw experience notes and get crisp, measurable bullets tailored to your target role.</p>
+                <a class="cta-inline" href="/tools/resume-bullets">Improve bullets →</a>
+            </div>
+            <div class="product-card">
+                <div class="product-meta">
+                    <span class="pill">Habits</span>
+                </div>
+                <h3>Daily Habit Check-In</h3>
+                <p>Track a habit with Done/Skipped, view streaks and the last 7 days—all saved in your browser.</p>
+                <a class="cta-inline" href="/tools/daily-checkin">Log today’s check-in →</a>
+            </div>
+        </div>
     </section>
 
     <div class="below">

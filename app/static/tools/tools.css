@@ -161,6 +161,16 @@
     box-shadow: 0 10px 28px rgba(17, 24, 39, 0.08);
 }
 
+.tool-note {
+    background: #eef3ff;
+    border: 1px solid #d7e3ff;
+    color: #1f2937;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 10px 0 14px;
+    font-weight: 600;
+}
+
 .tool-header h1 {
     margin: 6px 0 8px;
     font-size: clamp(1.6rem, 1.4vw + 1rem, 2.2rem);
@@ -184,6 +194,13 @@
 .tool-form {
     display: grid;
     gap: 10px;
+}
+
+.tool-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .tool-field label {
@@ -233,6 +250,12 @@
     letter-spacing: 0.01em;
     cursor: pointer;
     opacity: 1;
+}
+
+.tool-clear-btn {
+    background: #e5e7eb;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
 }
 
 .tool-run-btn[disabled] {

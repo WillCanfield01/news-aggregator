@@ -53,6 +53,34 @@ def get_tools_registry() -> List[ToolEntry]:
                 },
             ],
         },
+        {
+            "slug": "daily-checkin",
+            "title": "Daily Habit Check-In",
+            "description": "Track one habit per day with a simple done or skipped check-in.",
+            "category": "Habits",
+            "is_enabled": True,
+            "output_label": "Status",
+            "inputs": [
+                {
+                    "name": "habit_name",
+                    "label": "Habit name",
+                    "type": "text",
+                    "required": True,
+                    "max_chars": 80,
+                    "placeholder": "e.g., Walk 20 minutes",
+                },
+                {
+                    "name": "status",
+                    "label": "Status",
+                    "type": "select",
+                    "required": True,
+                    "max_chars": 10,
+                    "placeholder": "",
+                    "options": ["Done", "Skipped"],
+                    "default": "Done",
+                },
+            ],
+        },
     ]
 
 

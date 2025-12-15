@@ -15,6 +15,12 @@
         <span class="crumb-current">{{ tool.title }}</span>
     </nav>
 
+    {% if tool.slug == "daily-checkin" %}
+    <div class="tool-note" role="note">
+        Data for this habit stays in your browser’s storage only. Clear site data to remove it—no account required.
+    </div>
+    {% endif %}
+
     <div class="tool-detail">
         <header class="tool-header">
             <p class="eyebrow">{{ tool.category }}</p>
@@ -48,7 +54,10 @@
                     {% if field.max_chars %}<small class="char-limit">Max {{ field.max_chars }} chars</small>{% endif %}
                 </div>
                 {% endfor %}
-                <button type="submit" class="tool-run-btn" data-run-button>Run tool</button>
+                <div class="tool-actions">
+                    <button type="submit" class="tool-run-btn" data-run-button>Run tool</button>
+                    <button type="button" class="tool-clear-btn" data-clear-button style="display:none;">Clear habit data</button>
+                </div>
             </form>
             <div class="tool-status" data-tool-status role="status" aria-live="polite"></div>
             <div class="tool-output" data-tool-output>
