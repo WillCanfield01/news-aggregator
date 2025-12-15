@@ -244,6 +244,21 @@
         const statusEl = document.querySelector("[data-tool-status]");
         const outputEl = document.querySelector("[data-tool-output]");
         const outputPre = outputEl ? outputEl.querySelector(".tool-output-pre") : null;
+        const shareBlock = outputEl ? outputEl.querySelector("[data-share-block]") : null;
+        const shareUrlEl = outputEl ? outputEl.querySelector("[data-share-url]") : null;
+        const copyShareBtn = outputEl ? outputEl.querySelector("[data-copy-share]") : null;
+        const copyBtn = form.querySelector("[data-copy-button]");
+        const viewMode = form.dataset.viewMode === "true";
+        const savedInput = (() => {
+            const raw = form.dataset.savedInput;
+            if (!raw) return null;
+            try {
+                return JSON.parse(raw);
+            } catch (e) {
+                return null;
+            }
+        })();
+        let lockedView = viewMode;
 
         const setStatus = (text, type = "") => {
             if (!statusEl) return;
@@ -265,10 +280,67 @@
             }
         };
 
+        const showShare = (url) => {
+            if (!shareBlock || !shareUrlEl) return;
+            const full = url.startsWith("http") ? url : `${window.location.origin}${url}`;
+            shareUrlEl.textContent = full;
+            shareBlock.style.display = "block";
+            if (copyShareBtn) {
+                copyShareBtn.onclick = async () => {
+                    try {
+                        await navigator.clipboard.writeText(full);
+                        setStatus("Link copied.", "success");
+                    } catch (e) {
+                        setStatus("Unable to copy link.", "error");
+                    }
+                };
+            }
+        };
+
+        const setViewMode = (isView) => {
+            lockedView = isView;
+            const fields = form.querySelectorAll("[data-input-field]");
+            fields.forEach((f) => {
+                f.disabled = isView;
+            });
+            if (runBtn) runBtn.style.display = isView ? "none" : "inline-block";
+            if (copyBtn) copyBtn.style.display = isView ? "inline-block" : "none";
+        };
+
+        if (savedInput) {
+            const fields = form.querySelectorAll("[data-input-field]");
+            fields.forEach((f) => {
+                if (savedInput[f.name] !== undefined) {
+                    f.value = savedInput[f.name];
+                }
+            });
+        }
+
+        if (viewMode) {
+            setViewMode(true);
+        }
+
+        const initialShare = form.dataset.shareInitial;
+        if (initialShare) {
+            showShare(initialShare);
+        }
+
+        if (copyBtn) {
+            copyBtn.addEventListener("click", () => {
+                setViewMode(false);
+                setStatus("Copied to new. Edit and re-run to generate a fresh link.", "success");
+            });
+        }
+
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
             const slug = form.dataset.toolSlug;
             if (!slug) return;
+
+            if (lockedView) {
+                setStatus("Use Copy to new before editing this shared view.", "error");
+                return;
+            }
 
             if (slug === "daily-checkin") {
                 return;
@@ -289,6 +361,9 @@
 
             const output = response.data?.output || "No output returned.";
             renderOutput(output);
+            if (response.data?.share_url) {
+                showShare(response.data.share_url);
+            }
             setStatus("Done.", "success");
             setLoading(false);
         });

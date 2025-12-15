@@ -21,6 +21,12 @@
     </div>
     {% endif %}
 
+    {% if error_message %}
+    <div class="tool-note" role="alert">
+        {{ error_message }}
+    </div>
+    {% endif %}
+
     <div class="tool-detail">
         <header class="tool-header">
             <p class="eyebrow">{{ tool.category }}</p>
@@ -30,7 +36,10 @@
 
         <div class="tool-panel" aria-live="polite">
             <form class="tool-form" data-tool-form data-tool-slug="{{ tool.slug }}"
-                data-output-label="{{ tool.output_label }}" aria-label="{{ tool.title }} input form">
+                data-output-label="{{ tool.output_label }}" aria-label="{{ tool.title }} input form"
+                data-view-mode="{{ 'true' if view_mode else 'false' }}"
+                {% if saved_input %}data-saved-input='{{ saved_input|safe }}'{% endif %}
+                {% if share_url %}data-share-initial="{{ share_url }}"{% endif %}>
                 {% for field in tool.inputs %}
                 <div class="tool-field">
                     <label for="field-{{ field.name }}">{{ field.label }}{% if field.required %}*{% endif %}</label>
@@ -57,12 +66,19 @@
                 <div class="tool-actions">
                     <button type="submit" class="tool-run-btn" data-run-button>Run tool</button>
                     <button type="button" class="tool-clear-btn" data-clear-button style="display:none;">Clear habit data</button>
+                    <button type="button" class="tool-copy-btn" data-copy-button style="display:none;">Copy to new</button>
                 </div>
             </form>
             <div class="tool-status" data-tool-status role="status" aria-live="polite"></div>
             <div class="tool-output" data-tool-output>
                 <div class="tool-output-label">{{ tool.output_label }}</div>
-                <pre class="tool-output-pre" aria-live="polite"></pre>
+                <pre class="tool-output-pre" aria-live="polite">{% if saved_output %}{{ saved_output }}{% endif %}</pre>
+                <div class="tool-share" data-share-block style="display:none;">
+                    <div class="tool-share-link">
+                        <span data-share-url></span>
+                        <button type="button" data-copy-share class="tool-copy-share">Copy link</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

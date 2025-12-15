@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Daily Cybersecurity Briefing – Clear, Credible, Actionable{% endblock %}
-{% block description %}Daily, no-fluff cybersecurity briefing for busy pros—top incidents, CVEs, patches, and what to do
-next.{% endblock %}
+{% block title %}The Real Roundup – Briefings, Games, and Tools{% endblock %}
+{% block description %}Daily security briefings plus interactive games and productivity tools for security-minded teams.{% endblock %}
 {% block canonical %}https://therealroundup.com/{% endblock %}
 
 {% block head %}
@@ -126,6 +125,10 @@ next.{% endblock %}
         border: 1px solid #e5e7eb;
         padding: 18px;
         box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 230px;
     }
 
     .product-card h3 {
@@ -164,6 +167,8 @@ next.{% endblock %}
         font-weight: 700;
         color: var(--brand);
         text-decoration: none;
+        margin-top: auto;
+        display: inline-block;
     }
 
     .cta-inline:hover {
@@ -250,10 +255,9 @@ next.{% endblock %}
 {% block content %}
 <div class="hero-wrap">
     <section class="hero container">
-        <h1 class="site-title">Daily Cybersecurity Briefing</h1>
+        <h1 class="site-title">The Real Roundup</h1>
         <div class="subtext">
-            A fast, daily summary of today’s biggest security stories.<br>
-            Incidents, vulnerabilities, patches, plus what matters for your org.
+            Daily security briefings, interactive games, and practical tools to keep your skills sharp.
         </div>
         <div class="cta-row">
             <a href="#feature" class="cta-primary">See Today’s Briefing</a>
@@ -290,8 +294,16 @@ next.{% endblock %}
         <div class="product-grid">
             <div class="product-card">
                 <div class="product-meta">
+                    <span class="pill">Briefings</span>
+                </div>
+                <h3>Daily Security Briefing</h3>
+                <p>Clear, daily cybersecurity rundown with the key incidents, CVEs, and takeaways for your org.</p>
+                <a class="cta-inline" href="#feature">See today’s briefing →</a>
+            </div>
+            <div class="product-card">
+                <div class="product-meta">
                     <span class="pill">Game</span>
-                    <span class="pill">New daily</span>
+                    <span class="pill">Daily</span>
                 </div>
                 <h3>Daily Escape</h3>
                 <p>Crack today’s security-themed mini escape room in just a few guesses. Fresh puzzle every day.</p>
@@ -312,22 +324,6 @@ next.{% endblock %}
                 <h3>Tools Hub</h3>
                 <p>Purpose-built utilities for your workflow—resume polishers, habit trackers, and more to come.</p>
                 <a class="cta-inline" href="/tools">Browse tools →</a>
-            </div>
-            <div class="product-card">
-                <div class="product-meta">
-                    <span class="pill">Career</span>
-                </div>
-                <h3>Resume Bullet Improver</h3>
-                <p>Paste raw experience notes and get crisp, measurable bullets tailored to your target role.</p>
-                <a class="cta-inline" href="/tools/resume-bullets">Improve bullets →</a>
-            </div>
-            <div class="product-card">
-                <div class="product-meta">
-                    <span class="pill">Habits</span>
-                </div>
-                <h3>Daily Habit Check-In</h3>
-                <p>Track a habit with Done/Skipped, view streaks and the last 7 days—all saved in your browser.</p>
-                <a class="cta-inline" href="/tools/daily-checkin">Log today’s check-in →</a>
             </div>
         </div>
     </section>

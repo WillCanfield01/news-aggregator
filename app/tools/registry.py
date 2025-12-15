@@ -81,6 +81,40 @@ def get_tools_registry() -> List[ToolEntry]:
                 },
             ],
         },
+        {
+            "slug": "expense-splitter",
+            "title": "Expense Splitter",
+            "description": "Create a simple shared expense sheet and see who owes who.",
+            "category": "Finance",
+            "is_enabled": True,
+            "output_label": "Settlement",
+            "inputs": [
+                {
+                    "name": "event_name",
+                    "label": "Event name",
+                    "type": "text",
+                    "required": True,
+                    "max_chars": 80,
+                    "placeholder": "e.g., Tahoe trip",
+                },
+                {
+                    "name": "participants",
+                    "label": "Participants",
+                    "type": "text",
+                    "required": True,
+                    "max_chars": 400,
+                    "placeholder": "e.g., Will, Sam, Jordan",
+                },
+                {
+                    "name": "expenses",
+                    "label": "Expenses",
+                    "type": "textarea",
+                    "required": True,
+                    "max_chars": 5000,
+                    "placeholder": "Format: payer | amount | description | split(optional)\nExamples:\nWill | 60 | Groceries\nSam | 120 | Airbnb | Will, Sam, Jordan\nJordan | 30 | Gas | Sam, Jordan",
+                },
+            ],
+        },
     ]
 
 

@@ -59,6 +59,7 @@ def create_app():
     # ---- Import models so SQLAlchemy knows them, then (optionally) create tables ----
     from app.escape import models as _escape_models  # noqa: F401
     from app.models import CommunityArticle          # site models
+    from app.tools import models as _tools_models    # tools models
     with app.app_context():
         db.create_all()
 

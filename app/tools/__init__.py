@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, jsonify, render_template, request, url_for
 
-from app.tools.handlers import run_resume_bullets
+from app.extensions import db
+from app.tools.handlers import run_expense_splitter, run_resume_bullets
+from app.tools.models import SharedExpenseEvent
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 
 # UI blueprint
@@ -101,12 +105,46 @@ def tools_home():
     return render_template("tools/index.html", tools=enabled_tools)
 
 
+@tools_bp.route("/expense-splitter/<token>", methods=["GET"])
+def expense_splitter_view(token: str):
+    tool = get_tool_by_slug("expense-splitter")
+    if not tool or not tool.get("is_enabled"):
+        abort(404)
+
+    event = SharedExpenseEvent.query.filter_by(token=token).first()
+    now = datetime.now(timezone.utc)
+    if not event or not event.expires_at or event.expires_at < now:
+        return render_template(
+            "tools/tool_page.html",
+            tool=tool,
+            error_message="This shared expense could not be found or has expired.",
+            view_mode=True,
+        ), 404
+
+    payload = event.to_payload()
+    saved_output = payload.get("settlement_text", "")
+    saved_input = {
+        "event_name": payload.get("event_name", ""),
+        "participants": ", ".join(payload.get("participants", [])),
+        "expenses": payload.get("expenses_raw", ""),
+    }
+    return render_template(
+        "tools/tool_page.html",
+        tool=tool,
+        view_mode=True,
+        saved_output=saved_output,
+        saved_input=json.dumps(saved_input),
+        share_url=url_for("tools.expense_splitter_view", token=token),
+        token=token,
+    )
+
+
 @tools_bp.route("/<slug>", methods=["GET"])
 def tool_page(slug: str):
     tool = get_tool_by_slug(slug)
     if not tool or not tool.get("is_enabled"):
         abort(404)
-    return render_template("tools/tool_page.html", tool=tool)
+    return render_template("tools/tool_page.html", tool=tool, view_mode=False)
 
 
 @api_tools_bp.route("/run", methods=["POST"])
@@ -147,5 +185,25 @@ def run_tool():
             return _build_response(True, data=result, error=None, request_id=request_id), 200
         except Exception as exc:
             return _error_response("TOOL_EXECUTION_FAILED", f"Resume helper failed: {exc}", request_id, status=500)
+
+    if tool_slug == "expense-splitter":
+        try:
+            result = run_expense_splitter(validated_input)
+            expires_at = datetime.fromisoformat(result["expires_at"])
+            share_url = url_for("tools.expense_splitter_view", token=result["token"])
+            event = SharedExpenseEvent(
+                token=result["token"],
+                expires_at=expires_at,
+                payload_json=result["payload_json"],
+            )
+            db.session.add(event)
+            db.session.commit()
+            data = {"output": result["output"], "token": result["token"], "share_url": share_url}
+            return _build_response(True, data=data, error=None, request_id=request_id), 200
+        except ValueError as exc:
+            return _error_response("INVALID_INPUT", str(exc), request_id, status=400)
+        except Exception as exc:
+            db.session.rollback()
+            return _error_response("TOOL_EXECUTION_FAILED", f"Expense splitter failed: {exc}", request_id, status=500)
 
     return _error_response("TOOL_NOT_AVAILABLE", "Tool not available yet.", request_id)

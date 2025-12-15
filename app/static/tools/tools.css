@@ -298,6 +298,35 @@
     color: #1f2937;
 }
 
+.tool-share {
+    margin-top: 10px;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 10px;
+}
+
+.tool-share-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.tool-copy-share,
+.tool-copy-btn {
+    background: #eef3ff;
+    border: 1px solid #d7e3ff;
+    color: #1a46c7;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+.tool-copy-btn {
+    display: none;
+}
+
 @media (max-width: 640px) {
     .tools-shell {
         margin-top: 12px;
