@@ -8,7 +8,7 @@ from uuid import uuid4
 from flask import Blueprint, abort, jsonify, render_template, request, url_for
 
 from app.extensions import db
-from app.tools.handlers import run_expense_splitter, run_resume_bullets, run_trip_planner
+from app.tools.handlers import run_expense_splitter, run_resume_bullets, run_trip_planner, run_daily_phrase
 from app.tools.models import SharedExpenseEvent
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 
@@ -231,7 +231,12 @@ def run_tool():
 
     if tool_slug == "trip-planner":
         try:
-            result = run_trip_planner(validated_input)
+            # Preserve structured fields beyond the schema-defined ones
+            merged_input: Dict[str, Any] = dict(validated_input)
+            for k, v in (tool_input or {}).items():
+                if k not in merged_input:
+                    merged_input[k] = v
+            result = run_trip_planner(merged_input)
             expires_at = datetime.fromisoformat(result["expires_at"])
             share_url = url_for("tools.trip_share_view", token=result["token"])
             event = SharedExpenseEvent(
@@ -253,6 +258,29 @@ def run_tool():
         except Exception as exc:
             db.session.rollback()
             return _error_response("TOOL_EXECUTION_FAILED", f"Trip planner failed: {exc}", request_id, status=500)
+
+    if tool_slug == "daily-phrase":
+        try:
+            result = run_daily_phrase(validated_input)
+            output_lines = [
+                f"Date: {result.get('date')}",
+                f"Phrase: {result.get('phrase')}",
+                f"Translation: {result.get('translation')}",
+                f"Example: {result.get('example')}",
+                "Same phrase for everyone today.",
+            ]
+            data = {
+                "output": "\n".join([line for line in output_lines if line]),
+                "phrase": result.get("phrase"),
+                "translation": result.get("translation"),
+                "example": result.get("example"),
+                "date": result.get("date"),
+            }
+            return _build_response(True, data=data, error=None, request_id=request_id), 200
+        except ValueError as exc:
+            return _error_response("INVALID_REQUEST", str(exc), request_id, status=400)
+        except Exception as exc:
+            return _error_response("TOOL_EXECUTION_FAILED", f"Daily phrase failed: {exc}", request_id, status=500)
 
     if tool_slug == "expense-splitter":
         try:

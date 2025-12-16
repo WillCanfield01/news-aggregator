@@ -336,12 +336,13 @@
 
         const peopleSection = createEl("div", { className: "tp-section" });
         const peopleHeader = createEl("h3", { text: "People" });
+        const peopleRow = createEl("div", { className: "tp-inline" });
         const peopleInput = createEl("input", { type: "text", placeholder: "Add person" });
-        const peopleAdd = createEl("button", { type: "button", className: "tool-run-btn" });
+        const peopleAdd = createEl("button", { type: "button", className: "tool-run-btn tp-add-btn" });
         peopleAdd.textContent = "Add";
-        peopleAdd.style.width = "auto";
+        peopleRow.append(peopleInput, peopleAdd);
         const chipsWrap = createEl("div", { className: "chip-row" });
-        peopleSection.append(peopleHeader, peopleInput, peopleAdd, chipsWrap);
+        peopleSection.append(peopleHeader, peopleRow, chipsWrap);
 
         const budgetSection = createEl("div", { className: "tp-section" });
         budgetSection.append(createEl("h3", { text: "Budgets" }));
@@ -361,6 +362,7 @@
 
         const plannedSection = createEl("div", { className: "tp-section" });
         plannedSection.append(createEl("h3", { text: "Planned items" }));
+        plannedSection.append(createEl("p", { className: "muted", text: "Track what isn’t booked yet—estimate cost, date, and who’s on point." }));
         const plannedList = createEl("div", { className: "share-sections" });
         const addPlannedBtn = createEl("button", { type: "button", className: "tool-run-btn" });
         addPlannedBtn.textContent = "Add planned item";
@@ -407,7 +409,7 @@
                 const catInput = createEl("input", { type: "text", value: b.category });
                 const amtInput = createEl("input", { type: "number", value: b.amount });
                 amtInput.step = "0.01";
-                const remove = createEl("button", { type: "button" });
+                const remove = createEl("button", { type: "button", className: "tp-remove-btn" });
                 remove.textContent = "✕";
                 remove.onclick = () => {
                     state.budgets.splice(idx, 1);
@@ -435,8 +437,16 @@
 
         function renderExpenses() {
             expensesList.innerHTML = "";
+            // Header
+            const header = createEl("div", { className: "share-row share-head tp-exp-grid" });
+            ["Payer", "Amount", "Category", "Description", "Split with", ""].forEach((h) => {
+                const span = createEl("span", { text: h });
+                header.append(span);
+            });
+            expensesList.append(header);
+
             state.expensesPaid.forEach((exp, idx) => {
-                const wrap = createEl("div", { className: "share-row" });
+                const wrap = createEl("div", { className: "share-row tp-exp-grid" });
                 const payer = createEl("select");
                 state.people.forEach((p) => {
                     const opt = createEl("option", { text: p });
@@ -450,7 +460,7 @@
                 };
                 const amount = createEl("input", { type: "number", value: exp.amount || 0 });
                 amount.step = "0.01";
-        amount.min = "0";
+                amount.min = "0";
                 amount.oninput = () => {
                     exp.amount = parseFloat(amount.value || "0") || 0;
                     renderOutput();
@@ -466,7 +476,7 @@
                     exp.category = cat.value;
                     renderOutput();
                 };
-                const desc = createEl("input", { type: "text", value: exp.description || "" });
+                const desc = createEl("input", { type: "text", value: exp.description || "", placeholder: "What was this?" });
                 desc.oninput = () => (exp.description = desc.value);
                 const splitWrap = createEl("div");
                 state.people.forEach((p) => {
@@ -486,7 +496,7 @@
                     lbl.append(cb, document.createTextNode(" " + p));
                     splitWrap.append(lbl, document.createElement("br"));
                 });
-                const remove = createEl("button", { type: "button" });
+                const remove = createEl("button", { type: "button", className: "tp-remove-btn" });
                 remove.textContent = "✕";
                 remove.onclick = () => {
                     state.expensesPaid.splice(idx, 1);
@@ -500,7 +510,10 @@
 
         addExpenseBtn.onclick = () => {
             if (!state.people.length) {
-                if (statusEl) statusEl.textContent = "Add at least one person first.";
+                if (statusEl) {
+                    statusEl.textContent = "Add at least one person first.";
+                    statusEl.className = "tool-status error";
+                }
                 return;
             }
             state.expensesPaid.push({
@@ -511,12 +524,20 @@
                 split_with: state.people.slice(),
             });
             renderExpenses();
+            renderOutput();
         };
 
         function renderPlanned() {
             plannedList.innerHTML = "";
+            // Header
+            const header = createEl("div", { className: "share-row share-head tp-grid" });
+            ["Category", "Estimate", "Description", "Date", "Assigned to", ""].forEach((h) => {
+                const span = createEl("span", { text: h });
+                header.append(span);
+            });
+            plannedList.append(header);
             state.itemsPlanned.forEach((item, idx) => {
-                const wrap = createEl("div", { className: "share-row" });
+                const wrap = createEl("div", { className: "share-row tp-grid" });
                 const cat = createEl("select");
                 state.budgets.forEach((b) => {
                     const opt = createEl("option", { text: b.category });
@@ -528,14 +549,14 @@
                     item.category = cat.value;
                     renderOutput();
                 };
-                const amount = createEl("input", { type: "number", value: item.amount || 0 });
+                const amount = createEl("input", { type: "number", value: item.amount || 0, placeholder: "Estimate" });
                 amount.step = "0.01";
         amount.min = "0";
                 amount.oninput = () => {
                     item.amount = parseFloat(amount.value || "0") || 0;
                     renderOutput();
                 };
-                const desc = createEl("input", { type: "text", value: item.description || "" });
+                const desc = createEl("input", { type: "text", value: item.description || "", placeholder: "What’s left to book?" });
                 desc.oninput = () => (item.description = desc.value);
                 const due = createEl("input", { type: "date", value: item.due_date || "" });
                 due.oninput = () => (item.due_date = due.value);
@@ -550,7 +571,7 @@
                     assign.append(opt);
                 });
                 assign.onchange = () => (item.assigned_to = assign.value || null);
-                const remove = createEl("button", { type: "button" });
+                const remove = createEl("button", { type: "button", className: "tp-remove-btn" });
                 remove.textContent = "✕";
                 remove.onclick = () => {
                     state.itemsPlanned.splice(idx, 1);
@@ -861,7 +882,12 @@
             if (response.data?.share_url) {
                 showShare(response.data.share_url);
             }
-            setStatus("Done.", "success");
+            if (slug === "daily-phrase") {
+                setStatus("Come back tomorrow for a new phrase.", "success");
+                if (runBtn) runBtn.disabled = true;
+            } else {
+                setStatus("Done.", "success");
+            }
             setLoading(false);
         });
     }

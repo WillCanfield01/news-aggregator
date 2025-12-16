@@ -258,6 +258,31 @@
     border: 1px solid #d1d5db;
 }
 
+.tp-inline {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.tp-add-btn {
+    width: auto !important;
+    min-width: auto;
+    padding: 10px 14px;
+}
+
+.tp-remove-btn {
+    background: #e5e7eb;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    width: auto;
+    min-width: auto;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
 .tool-run-btn[disabled] {
     cursor: not-allowed;
     opacity: 0.6;
@@ -383,6 +408,16 @@
 .share-head {
     background: #f3f4f6;
     font-weight: 700;
+}
+
+.tp-grid {
+    grid-template-columns: 1fr 1fr 2fr 1fr 1fr 60px;
+    align-items: center;
+}
+
+.tp-exp-grid {
+    grid-template-columns: 1fr 1fr 1fr 1.5fr 1fr 70px;
+    align-items: center;
 }
 
 .muted {

@@ -12,6 +12,7 @@ import openai
 # Reuse existing OpenAI integration style
 _client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _DEFAULT_MODEL = "gpt-4.1-mini"
+_DAILY_PHRASE_CACHE: Dict[str, Dict[str, str]] = {}
 
 
 def run_resume_bullets(payload: Dict[str, Any]) -> Dict[str, str]:
@@ -417,3 +418,56 @@ def run_trip_planner(payload: Dict[str, Any]) -> Dict[str, Any]:
             "total_owes": round(total_owes, 2),
         },
     }
+
+
+# ---- Daily Phrase ----
+
+
+def run_daily_phrase(payload: Dict[str, Any]) -> Dict[str, Any]:
+    language = (payload.get("language") or "Spanish").strip()
+    level = (payload.get("level") or "Beginner").strip()
+    today = datetime.now().strftime("%Y-%m-%d")
+    cache_key = f"daily_phrase::{language}::{level}::{today}"
+
+    if cache_key in _DAILY_PHRASE_CACHE:
+        cached = _DAILY_PHRASE_CACHE[cache_key]
+        return {
+            "phrase": cached["phrase"],
+            "translation": cached["translation"],
+            "example": cached["example"],
+            "date": today,
+        }
+
+    prompt = (
+        "Provide one useful daily phrase.\n"
+        f"Language: {language}\n"
+        f"Level: {level}\n"
+        "Return three parts:\n"
+        "- Phrase (short; for Beginner keep it simple, avoid long sentences)\n"
+        "- Translation (clear English)\n"
+        "- Example (natural sentence using the phrase)\n"
+        "No slang unless level is Advanced. No emojis. No markdown. Keep it concise."
+    )
+
+    try:
+        result = _client.chat.completions.create(
+            model=_DEFAULT_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a concise language tutor."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=200,
+            temperature=0.4,
+            timeout=15,
+        )
+        content = result.choices[0].message.content.strip()
+        # naive parse: expect three lines
+        parts = [p.strip() for p in content.split("\n") if p.strip()]
+        phrase = parts[0] if parts else content
+        translation = parts[1] if len(parts) > 1 else ""
+        example = parts[2] if len(parts) > 2 else ""
+        data = {"phrase": phrase, "translation": translation, "example": example, "date": today}
+        _DAILY_PHRASE_CACHE[cache_key] = data
+        return data
+    except Exception as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc}") from exc

@@ -151,6 +151,36 @@ def get_tools_registry() -> List[ToolEntry]:
                 },
             ],
         },
+        {
+            "slug": "daily-phrase",
+            "title": "Daily Language Phrase",
+            "description": "Learn one useful phrase per day, no streaks, no pressure.",
+            "category": "Language",
+            "is_enabled": True,
+            "output_label": "Today's phrase",
+            "inputs": [
+                {
+                    "name": "language",
+                    "label": "Language",
+                    "type": "select",
+                    "required": True,
+                    "max_chars": 20,
+                    "placeholder": "",
+                    "options": ["Spanish", "French", "German", "Italian", "Japanese"],
+                    "default": "Spanish",
+                },
+                {
+                    "name": "level",
+                    "label": "Level",
+                    "type": "select",
+                    "required": True,
+                    "max_chars": 20,
+                    "placeholder": "",
+                    "options": ["Beginner", "Intermediate", "Advanced"],
+                    "default": "Beginner",
+                },
+            ],
+        },
     ]
 
 
