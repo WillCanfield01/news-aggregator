@@ -97,15 +97,6 @@
         border-color: rgba(31, 87, 255, .55);
     }
 
-    /* Feature card */
-    .feature {
-        margin-top: -36px;
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: 0 12px 30px rgba(16, 24, 40, 0.10);
-        padding: clamp(20px, 2vw + 12px, 32px);
-    }
-
     /* Product highlights */
     .products {
         margin: 36px 0 10px;
@@ -260,7 +251,7 @@
             Daily security briefings, interactive games, and practical tools to keep your skills sharp.
         </div>
         <div class="cta-row">
-            <a href="#feature" class="cta-primary">See Today’s Briefing</a>
+            <a href="/all-articles/articles" class="cta-primary">Browse all briefings</a>
             <a href="/escape/play" class="main-btn">Play Daily Escape</a>
             <a href="/roulette" class="main-btn">Play Timeline Roulette</a>
             <a href="/tools" class="main-btn">Tools Hub</a>
@@ -270,26 +261,6 @@
 </div>
 
 <main class="container">
-    <section id="feature" class="feature">
-        <div class="badge-feature">Today’s Briefing</div>
-
-        {% if latest %}
-        <div id="headline" class="headline">{{ latest.title }}</div>
-        <div id="summary" class="summary">
-            {{ ((latest.html_content or latest.content)|striptags
-            |replace('Photo by','')
-            |replace('on Unsplash','')
-            |replace('## ','')
-            )[:220] }}…
-        </div>
-        <a href="{{ url_for('all_articles.read_article', filename=latest.filename) }}" class="cta-secondary">
-            Read the full briefing
-        </a>
-        {% else %}
-        <div class="headline">New briefing drops daily. Check back soon.</div>
-        {% endif %}
-    </section>
-
     <section class="products">
         <div class="product-grid">
             <div class="product-card">
@@ -298,7 +269,7 @@
                 </div>
                 <h3>Daily Security Briefing</h3>
                 <p>Clear, daily cybersecurity rundown with the key incidents, CVEs, and takeaways for your org.</p>
-                <a class="cta-inline" href="#feature">See today’s briefing →</a>
+                <a class="cta-inline" href="/all-articles/articles">Browse all briefings →</a>
             </div>
             <div class="product-card">
                 <div class="product-meta">
@@ -327,10 +298,6 @@
             </div>
         </div>
     </section>
-
-    <div class="below">
-        <a href="/all-articles/articles" class="cta-secondary">Browse all briefings</a>
-    </div>
 
 </main>
 {% endblock %}

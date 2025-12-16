@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Trip Planner – Share{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='tools/tools.css') }}">
+{% endblock %}
+
+{% block content %}
+<section class="tools-shell">
+    <div class="tool-detail">
+        <header class="tool-header">
+            <p class="eyebrow">Shared Trip</p>
+            <h1>{{ trip_name or "Trip" }}</h1>
+            {% if currency %}<p class="lead">Currency: {{ currency }}</p>{% endif %}
+            {% if notes %}<p class="lead">Notes: {{ notes }}</p>{% endif %}
+            {% if share_url %}
+            <p class="lead">Share link: <a href="{{ share_url }}">{{ share_url }}</a></p>
+            <a class="cta-inline" href="{{ url_for('tools.tool_page', slug='trip-planner') }}?from={{ token }}">Duplicate and edit →</a>
+            {% endif %}
+            {% if error_message %}
+            <div class="tool-note" role="alert">{{ error_message }}</div>
+            {% endif %}
+        </header>
+
+        {% if legacy_output %}
+        <div class="tool-output" style="margin-top:12px;">
+            <div class="tool-output-label">Shared expenses</div>
+            <pre class="tool-output-pre">{{ legacy_output }}</pre>
+            <a class="cta-inline" href="{{ url_for('tools.tool_page', slug='trip-planner') }}">Open Trip Planner →</a>
+        </div>
+        {% else %}
+        <div class="share-sections">
+            <div class="share-section">
+                <h3>People</h3>
+                <div class="chip-row">
+                    {% for p in people %}
+                    <span class="chip">{{ p }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="share-section">
+                <h3>Budgets</h3>
+                {% if budgets %}
+                <div class="share-table">
+                    <div class="share-row share-head">
+                        <span>Category</span><span>Planned</span><span>Spent</span><span>Upcoming</span><span>Remaining</span>
+                    </div>
+                    {% for b in budgets %}
+                    <div class="share-row">
+                        <span>{{ b.category }}</span>
+                        <span>{{ "%.2f"|format(b.planned) }}</span>
+                        <span>{{ "%.2f"|format(b.spent) }}</span>
+                        <span>{{ "%.2f"|format(b.upcoming) }}</span>
+                        <span>{{ "%.2f"|format(b.remaining) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="muted">No budgets added.</p>
+                {% endif %}
+            </div>
+
+            <div class="share-section">
+                <h3>Paid expenses</h3>
+                {% if expenses %}
+                <div class="share-table">
+                    <div class="share-row share-head">
+                        <span>Payer</span><span>Amount</span><span>Category</span><span>Description</span><span>Split with</span>
+                    </div>
+                    {% for e in expenses %}
+                    <div class="share-row">
+                        <span>{{ e.payer }}</span>
+                        <span>{{ "%.2f"|format(e.amount) }}</span>
+                        <span>{{ e.category }}</span>
+                        <span>{{ e.description }}</span>
+                        <span>{{ e.split_with|join(", ") }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="muted">No paid expenses yet.</p>
+                {% endif %}
+            </div>
+
+            <div class="share-section">
+                <h3>Planned items</h3>
+                {% if planned %}
+                <div class="share-table">
+                    <div class="share-row share-head">
+                        <span>Category</span><span>Amount</span><span>Description</span><span>Due</span><span>Assigned</span>
+                    </div>
+                    {% for i in planned %}
+                    <div class="share-row">
+                        <span>{{ i.category }}</span>
+                        <span>{{ "%.2f"|format(i.amount) }}</span>
+                        <span>{{ i.description }}</span>
+                        <span>{{ i.due_date }}</span>
+                        <span>{{ i.assigned_to or "—" }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="muted">No planned items.</p>
+                {% endif %}
+            </div>
+
+            <div class="share-section">
+                <h3>Settlement (paid items)</h3>
+                {% if settlements %}
+                <ul>
+                    {% for s in settlements %}
+                    <li>{{ s[0] }} pays {{ s[1] }} {{ "%.2f"|format(s[2]) }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="muted">No transfers needed.</p>
+                {% endif %}
+            </div>
+
+            <div class="share-section">
+                <h3>Per person totals</h3>
+                {% if per_person %}
+                <div class="share-table">
+                    <div class="share-row share-head">
+                        <span>Name</span><span>Paid</span><span>Owes</span><span>Net</span>
+                    </div>
+                    {% for p in per_person %}
+                    <div class="share-row">
+                        <span>{{ p.name }}</span>
+                        <span>{{ "%.2f"|format(p.paid) }}</span>
+                        <span>{{ "%.2f"|format(p.owes) }}</span>
+                        <span>{{ "%.2f"|format(p.net) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="muted">No expense data yet.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

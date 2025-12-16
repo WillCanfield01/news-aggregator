@@ -194,6 +194,7 @@ def run_expense_splitter(payload: Dict[str, Any]) -> Dict[str, Any]:
     expires_at = datetime.now(timezone.utc) + timedelta(days=14)
 
     payload_json = {
+        "type": "expense-splitter",
         "event_name": event_name,
         "participants": participants,
         "expenses_raw": expenses_raw,
@@ -205,4 +206,214 @@ def run_expense_splitter(payload: Dict[str, Any]) -> Dict[str, Any]:
         "token": token,
         "expires_at": expires_at.isoformat(),
         "payload_json": json.dumps(payload_json),
+    }
+
+
+# ---- Trip Planner ----
+
+
+def _coerce_amount(val, label):
+    try:
+        amt = float(val)
+    except Exception:
+        raise ValueError(f"{label} must be a number.")
+    if amt < 0:
+        raise ValueError(f"{label} must be positive.")
+    return amt
+
+
+def run_trip_planner(payload: Dict[str, Any]) -> Dict[str, Any]:
+    trip_name = (payload.get("trip_name") or "").strip()
+    currency = (payload.get("currency") or "").strip() or "USD"
+    notes = (payload.get("notes") or "").strip()
+    people = payload.get("people") or []
+    budgets = payload.get("budgets") or []
+    expenses_paid = payload.get("expenses_paid") or []
+    items_planned = payload.get("items_planned") or []
+
+    if not trip_name:
+        raise ValueError('"trip_name" is required.')
+    if not currency:
+        raise ValueError('"currency" is required.')
+    if not isinstance(people, list) or len(people) == 0:
+        raise ValueError("At least one person is required.")
+    people_norm = [p.strip() for p in people if p and str(p).strip()]
+    if not people_norm:
+        raise ValueError("At least one person is required.")
+    people_lower_map = {p.lower(): p for p in people_norm}
+
+    # Budgets
+    budget_summaries = []
+    total_budget = 0.0
+    for b in budgets:
+        cat = (b.get("category") or "Other").strip() or "Other"
+        amt_raw = b.get("amount", 0)
+        amt = _coerce_amount(amt_raw, f"Budget for {cat}")
+        total_budget += amt
+        budget_summaries.append({"category": cat, "amount": amt})
+
+    # Expenses (paid)
+    balances = {p: {"paid": 0.0, "owes": 0.0} for p in people_norm}
+    expenses_clean = []
+    for idx, exp in enumerate(expenses_paid, start=1):
+        payer_raw = (exp.get("payer") or "").strip()
+        if not payer_raw:
+            raise ValueError(f"Expense {idx}: payer required.")
+        payer_key = payer_raw.lower()
+        if payer_key not in people_lower_map:
+            raise ValueError(f"Expense {idx}: payer '{payer_raw}' not in people list.")
+        payer = people_lower_map[payer_key]
+        amount = _coerce_amount(exp.get("amount", 0), f"Expense {idx} amount")
+        if amount <= 0:
+            raise ValueError(f"Expense {idx}: amount must be positive.")
+        category = (exp.get("category") or "").strip() or "Other"
+        description = (exp.get("description") or "").strip()
+        split_with = exp.get("split_with") or []
+        if not split_with:
+            split_with = list(people_norm)
+        split_clean = []
+        for name in split_with:
+            key = (name or "").strip().lower()
+            if key not in people_lower_map:
+                raise ValueError(f"Expense {idx}: split participant '{name}' not in people list.")
+            split_clean.append(people_lower_map[key])
+        share = amount / len(split_clean)
+        balances[payer]["paid"] += amount
+        for person in split_clean:
+            balances[person]["owes"] += share
+        expenses_clean.append(
+            {
+                "payer": payer,
+                "amount": amount,
+                "category": category,
+                "description": description,
+                "split_with": split_clean,
+                "status": "Paid",
+            }
+        )
+
+    # Planned items
+    planned_clean = []
+    for idx, item in enumerate(items_planned, start=1):
+        category = (item.get("category") or "").strip() or "Other"
+        amount = _coerce_amount(item.get("amount", 0), f"Planned item {idx} amount")
+        description = (item.get("description") or "").strip()
+        due_date = (item.get("due_date") or "").strip()
+        assigned_to_raw = (item.get("assigned_to") or "").strip()
+        assigned_to = None
+        if assigned_to_raw:
+            key = assigned_to_raw.lower()
+            if key not in people_lower_map:
+                raise ValueError(f"Planned item {idx}: assigned_to '{assigned_to_raw}' not in people list.")
+            assigned_to = people_lower_map[key]
+        planned_clean.append(
+            {
+                "category": category,
+                "amount": amount,
+                "description": description,
+                "due_date": due_date,
+                "assigned_to": assigned_to,
+                "status": "Planned",
+            }
+        )
+
+    settlements = _compute_settlements(balances)
+
+    per_person = []
+    for person, data in balances.items():
+        paid = round(data["paid"], 2)
+        owes = round(data["owes"], 2)
+        net = round(paid - owes, 2)
+        per_person.append({"name": person, "paid": paid, "owes": owes, "net": net})
+
+    total_paid = sum(d["paid"] for d in balances.values())
+    total_owes = sum(d["owes"] for d in balances.values())
+
+    # Budget remaining
+    spent_by_category = {}
+    for exp in expenses_clean:
+        cat = exp["category"]
+        spent_by_category[cat] = spent_by_category.get(cat, 0) + exp["amount"]
+    planned_by_category = {}
+    for item in planned_clean:
+        cat = item["category"]
+        planned_by_category[cat] = planned_by_category.get(cat, 0) + item["amount"]
+
+    budget_summary = []
+    all_categories = set(spent_by_category.keys()) | set(planned_by_category.keys()) | {b["category"] for b in budget_summaries}
+    budget_map = {b["category"]: b["amount"] for b in budget_summaries}
+    for cat in all_categories:
+        planned_amt = budget_map.get(cat, 0.0)
+        spent = spent_by_category.get(cat, 0.0)
+        upcoming = planned_by_category.get(cat, 0.0)
+        remaining = planned_amt - (spent + upcoming)
+        budget_summary.append(
+            {
+                "category": cat,
+                "planned": round(planned_amt, 2),
+                "spent": round(spent, 2),
+                "upcoming": round(upcoming, 2),
+                "remaining": round(remaining, 2),
+            }
+        )
+
+    lines: List[str] = []
+    lines.append(f"Trip: {trip_name} ({currency})")
+    lines.append(f"People: {', '.join(people_norm)}")
+    if notes:
+        lines.append(f"Notes: {notes}")
+    lines.append("")
+    lines.append("Budgets:")
+    if budget_summary:
+        for b in budget_summary:
+            lines.append(f"{b['category']}: planned {b['planned']:.2f}, spent {b['spent']:.2f}, upcoming {b['upcoming']:.2f}, remaining {b['remaining']:.2f}")
+    else:
+        lines.append("None set.")
+    lines.append("")
+    lines.append("Totals:")
+    for p in per_person:
+        lines.append(f"{p['name']}: paid {p['paid']:.2f}, owes {p['owes']:.2f}, net {p['net']:+.2f}")
+    lines.append("")
+    lines.append("Settle (paid items only):")
+    if settlements:
+        for debtor, creditor, amt in settlements:
+            lines.append(f"{debtor} pays {creditor} {amt:.2f}")
+    else:
+        lines.append("No transfers needed.")
+
+    output_text = "\n".join(lines)
+    token = secrets.token_urlsafe(8)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=14)
+
+    payload_json = {
+        "type": "trip-planner",
+        "trip_name": trip_name,
+        "currency": currency,
+        "notes": notes,
+        "people": people_norm,
+        "budgets": budget_summaries,
+        "expenses_paid": expenses_clean,
+        "items_planned": planned_clean,
+        "settlement_text": output_text,
+        "per_person": per_person,
+        "settlement_transfers": settlements,
+        "budget_summary": budget_summary,
+        "total_budget": round(total_budget, 2),
+        "total_paid": round(total_paid, 2),
+        "total_owes": round(total_owes, 2),
+    }
+
+    return {
+        "output": output_text,
+        "token": token,
+        "expires_at": expires_at.isoformat(),
+        "payload_json": json.dumps(payload_json),
+        "structured": {
+            "per_person": per_person,
+            "settlement_transfers": settlements,
+            "budget_summary": budget_summary,
+            "total_budget": round(total_budget, 2),
+            "total_paid": round(total_paid, 2),
+            "total_owes": round(total_owes, 2),
+        },
     }

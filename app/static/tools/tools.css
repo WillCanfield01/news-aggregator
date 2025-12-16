@@ -327,6 +327,68 @@
     display: none;
 }
 
+.chip-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chip {
+    background: #eef3ff;
+    border: 1px solid #d7e3ff;
+    color: #1a46c7;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.share-sections {
+    display: grid;
+    gap: 16px;
+}
+
+.share-section h3 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+}
+
+.tp-section {
+    margin-top: 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 12px;
+    background: #fff;
+}
+
+.share-table {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.share-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    align-items: center;
+}
+
+.share-row:last-child {
+    border-bottom: none;
+}
+
+.share-head {
+    background: #f3f4f6;
+    font-weight: 700;
+}
+
+.muted {
+    color: #6b7280;
+}
+
 @media (max-width: 640px) {
     .tools-shell {
         margin-top: 12px;

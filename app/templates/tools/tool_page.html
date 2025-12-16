@@ -32,6 +32,9 @@
             <p class="eyebrow">{{ tool.category }}</p>
             <h1>{{ tool.title }}</h1>
             <p class="lead">{{ tool.description }}</p>
+            {% if callout_message %}
+            <div class="tool-note" role="note">{{ callout_message }}</div>
+            {% endif %}
         </header>
 
         <div class="tool-panel" aria-live="polite">
@@ -63,6 +66,7 @@
                     {% if field.max_chars %}<small class="char-limit">Max {{ field.max_chars }} chars</small>{% endif %}
                 </div>
                 {% endfor %}
+                <div id="tool-custom-ui"></div>
                 <div class="tool-actions">
                     <button type="submit" class="tool-run-btn" data-run-button>Run tool</button>
                     <button type="button" class="tool-clear-btn" data-clear-button style="display:none;">Clear habit data</button>

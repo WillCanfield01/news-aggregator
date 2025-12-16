@@ -8,7 +8,7 @@ from uuid import uuid4
 from flask import Blueprint, abort, jsonify, render_template, request, url_for
 
 from app.extensions import db
-from app.tools.handlers import run_expense_splitter, run_resume_bullets
+from app.tools.handlers import run_expense_splitter, run_resume_bullets, run_trip_planner
 from app.tools.models import SharedExpenseEvent
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 
@@ -108,7 +108,7 @@ def tools_home():
 @tools_bp.route("/expense-splitter/<token>", methods=["GET"])
 def expense_splitter_view(token: str):
     tool = get_tool_by_slug("expense-splitter")
-    if not tool or not tool.get("is_enabled"):
+    if not tool:
         abort(404)
 
     event = SharedExpenseEvent.query.filter_by(token=token).first()
@@ -122,6 +122,9 @@ def expense_splitter_view(token: str):
         ), 404
 
     payload = event.to_payload()
+    if payload.get("type") == "trip-planner":
+        return trip_share_view(token)
+
     saved_output = payload.get("settlement_text", "")
     saved_input = {
         "event_name": payload.get("event_name", ""),
@@ -136,6 +139,46 @@ def expense_splitter_view(token: str):
         saved_input=json.dumps(saved_input),
         share_url=url_for("tools.expense_splitter_view", token=token),
         token=token,
+        callout_message="We moved this into Trip Planner. Use Copy to new to switch.",
+    )
+
+
+@tools_bp.route("/trip/<token>", methods=["GET"])
+def trip_share_view(token: str):
+    tool = get_tool_by_slug("trip-planner")
+    if not tool:
+        abort(404)
+    event = SharedExpenseEvent.query.filter_by(token=token).first()
+    now = datetime.now(timezone.utc)
+    if not event or not event.expires_at or event.expires_at < now:
+        return render_template(
+            "tools/trip_share.html",
+            error_message="This trip is unavailable or expired.",
+        ), 404
+    payload = event.to_payload()
+    p_type = payload.get("type")
+    if p_type != "trip-planner":
+        # Fallback for legacy expense payloads
+        return render_template(
+            "tools/trip_share.html",
+            legacy_output=payload.get("settlement_text", ""),
+            trip_name=payload.get("event_name", "Shared expenses"),
+            error_message=None,
+        )
+    return render_template(
+        "tools/trip_share.html",
+        trip_name=payload.get("trip_name", ""),
+        currency=payload.get("currency", ""),
+        notes=payload.get("notes", ""),
+        people=payload.get("people", []),
+        budgets=payload.get("budget_summary", []),
+        expenses=payload.get("expenses_paid", []),
+        planned=payload.get("items_planned", []),
+        per_person=payload.get("per_person", []),
+        settlements=payload.get("settlement_transfers", []),
+        share_url=url_for("tools.trip_share_view", token=token),
+        token=token,
+        error_message=None,
     )
 
 
@@ -186,6 +229,31 @@ def run_tool():
         except Exception as exc:
             return _error_response("TOOL_EXECUTION_FAILED", f"Resume helper failed: {exc}", request_id, status=500)
 
+    if tool_slug == "trip-planner":
+        try:
+            result = run_trip_planner(validated_input)
+            expires_at = datetime.fromisoformat(result["expires_at"])
+            share_url = url_for("tools.trip_share_view", token=result["token"])
+            event = SharedExpenseEvent(
+                token=result["token"],
+                expires_at=expires_at,
+                payload_json=result["payload_json"],
+            )
+            db.session.add(event)
+            db.session.commit()
+            data = {
+                "output": result["output"],
+                "token": result["token"],
+                "share_url": share_url,
+                "structured": result.get("structured"),
+            }
+            return _build_response(True, data=data, error=None, request_id=request_id), 200
+        except ValueError as exc:
+            return _error_response("INVALID_INPUT", str(exc), request_id, status=400)
+        except Exception as exc:
+            db.session.rollback()
+            return _error_response("TOOL_EXECUTION_FAILED", f"Trip planner failed: {exc}", request_id, status=500)
+
     if tool_slug == "expense-splitter":
         try:
             result = run_expense_splitter(validated_input)
@@ -207,3 +275,16 @@ def run_tool():
             return _error_response("TOOL_EXECUTION_FAILED", f"Expense splitter failed: {exc}", request_id, status=500)
 
     return _error_response("TOOL_NOT_AVAILABLE", "Tool not available yet.", request_id)
+
+
+@api_tools_bp.route("/trip/<token>", methods=["GET"])
+def get_trip_payload(token: str):
+    request_id = str(uuid4())
+    event = SharedExpenseEvent.query.filter_by(token=token).first()
+    now = datetime.now(timezone.utc)
+    if not event or not event.expires_at or event.expires_at < now:
+        return _error_response("NOT_FOUND", "Trip not found or expired.", request_id, status=404)
+    payload = event.to_payload()
+    if payload.get("type") != "trip-planner":
+        return _error_response("INVALID_REQUEST", "Not a trip planner event.", request_id, status=400)
+    return _build_response(True, data=payload, error=None, request_id=request_id), 200

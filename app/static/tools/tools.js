@@ -220,6 +220,474 @@
         updateForHabit();
     }
 
+    // ---- Trip Planner (structured UI) ----
+    const defaultBudgetCategories = ["Flight", "Lodging", "Food", "Activities", "Transport", "Other"];
+
+    function createEl(tag, opts = {}) {
+        const el = document.createElement(tag);
+        if (opts.className) el.className = opts.className;
+        if (opts.text) el.textContent = opts.text;
+        if (opts.type) el.type = opts.type;
+        if (opts.placeholder) el.placeholder = opts.placeholder;
+        if (opts.value !== undefined) el.value = opts.value;
+        return el;
+    }
+
+    function computeTripSummary(state) {
+        const balances = {};
+        state.people.forEach((p) => {
+            balances[p] = { paid: 0, owes: 0 };
+        });
+
+        state.expensesPaid.forEach((exp) => {
+            const shareList = exp.split_with && exp.split_with.length ? exp.split_with : state.people.slice();
+            const share = exp.amount / shareList.length;
+            if (balances[exp.payer]) balances[exp.payer].paid += exp.amount;
+            shareList.forEach((p) => {
+                if (balances[p]) balances[p].owes += share;
+            });
+        });
+
+        const perPerson = Object.entries(balances).map(([name, data]) => {
+            const paid = round2(data.paid);
+            const owes = round2(data.owes);
+            return { name, paid, owes, net: round2(paid - owes) };
+        });
+
+        // Settlement
+        const debtors = [];
+        const creditors = [];
+        perPerson.forEach((p) => {
+            if (Math.abs(p.net) < 0.01) return;
+            if (p.net < 0) debtors.push([p.name, -p.net]);
+            else creditors.push([p.name, p.net]);
+        });
+        debtors.sort((a, b) => a[1] - b[1]);
+        creditors.sort((a, b) => b[1] - a[1]);
+        const settlements = [];
+        let i = 0,
+            j = 0;
+        while (i < debtors.length && j < creditors.length) {
+            const pay = Math.min(debtors[i][1], creditors[j][1]);
+            settlements.push([debtors[i][0], creditors[j][0], round2(pay)]);
+            debtors[i][1] = round2(debtors[i][1] - pay);
+            creditors[j][1] = round2(creditors[j][1] - pay);
+            if (debtors[i][1] <= 0.01) i++;
+            if (creditors[j][1] <= 0.01) j++;
+        }
+
+        const spentByCat = {};
+        state.expensesPaid.forEach((e) => {
+            spentByCat[e.category] = (spentByCat[e.category] || 0) + e.amount;
+        });
+        const plannedByCat = {};
+        state.itemsPlanned.forEach((i) => {
+            plannedByCat[i.category] = (plannedByCat[i.category] || 0) + i.amount;
+        });
+        const budgetMap = {};
+        state.budgets.forEach((b) => {
+            budgetMap[b.category] = (budgetMap[b.category] || 0) + b.amount;
+        });
+        const cats = new Set([
+            ...Object.keys(spentByCat),
+            ...Object.keys(plannedByCat),
+            ...Object.keys(budgetMap),
+        ]);
+        const budgetSummary = [];
+        cats.forEach((cat) => {
+            const planned = round2(budgetMap[cat] || 0);
+            const spent = round2(spentByCat[cat] || 0);
+            const upcoming = round2(plannedByCat[cat] || 0);
+            budgetSummary.push({
+                category: cat,
+                planned,
+                spent,
+                upcoming,
+                remaining: round2(planned - (spent + upcoming)),
+            });
+        });
+
+        return { perPerson, settlements, budgetSummary };
+    }
+
+    function round2(num) {
+        return Math.round((num + Number.EPSILON) * 100) / 100;
+    }
+
+    function initTripPlanner(form) {
+        const custom = document.getElementById("tool-custom-ui");
+        if (!custom) return;
+        const statusEl = document.querySelector("[data-tool-status]");
+        const outputEl = document.querySelector("[data-tool-output]");
+        const outputPre = outputEl ? outputEl.querySelector(".tool-output-pre") : null;
+        const shareBlock = outputEl ? outputEl.querySelector("[data-share-block]") : null;
+        const shareUrlEl = outputEl ? outputEl.querySelector("[data-share-url]") : null;
+        const copyShareBtn = outputEl ? outputEl.querySelector("[data-copy-share]") : null;
+
+        const defaults = defaultBudgetCategories.map((c) => ({ category: c, amount: 0 }));
+
+        const state = {
+            people: [],
+            budgets: defaults.slice(),
+            expensesPaid: [],
+            itemsPlanned: [],
+        };
+        window.tripPlannerState = state;
+
+        const peopleSection = createEl("div", { className: "tp-section" });
+        const peopleHeader = createEl("h3", { text: "People" });
+        const peopleInput = createEl("input", { type: "text", placeholder: "Add person" });
+        const peopleAdd = createEl("button", { type: "button", className: "tool-run-btn" });
+        peopleAdd.textContent = "Add";
+        peopleAdd.style.width = "auto";
+        const chipsWrap = createEl("div", { className: "chip-row" });
+        peopleSection.append(peopleHeader, peopleInput, peopleAdd, chipsWrap);
+
+        const budgetSection = createEl("div", { className: "tp-section" });
+        budgetSection.append(createEl("h3", { text: "Budgets" }));
+        const budgetList = createEl("div", { className: "share-table" });
+        const addBudgetBtn = createEl("button", { type: "button", className: "tool-run-btn" });
+        addBudgetBtn.textContent = "Add category";
+        addBudgetBtn.style.width = "auto";
+        budgetSection.append(budgetList, addBudgetBtn);
+
+        const expensesSection = createEl("div", { className: "tp-section" });
+        expensesSection.append(createEl("h3", { text: "Paid expenses" }));
+        const expensesList = createEl("div", { className: "share-sections" });
+        const addExpenseBtn = createEl("button", { type: "button", className: "tool-run-btn" });
+        addExpenseBtn.textContent = "Add expense";
+        addExpenseBtn.style.width = "auto";
+        expensesSection.append(expensesList, addExpenseBtn);
+
+        const plannedSection = createEl("div", { className: "tp-section" });
+        plannedSection.append(createEl("h3", { text: "Planned items" }));
+        const plannedList = createEl("div", { className: "share-sections" });
+        const addPlannedBtn = createEl("button", { type: "button", className: "tool-run-btn" });
+        addPlannedBtn.textContent = "Add planned item";
+        addPlannedBtn.style.width = "auto";
+        plannedSection.append(plannedList, addPlannedBtn);
+
+        custom.append(peopleSection, budgetSection, expensesSection, plannedSection);
+
+        function renderPeople() {
+            chipsWrap.innerHTML = "";
+            state.people.forEach((p, idx) => {
+                const chip = createEl("span", { className: "chip" });
+                chip.textContent = p + " ✕";
+                chip.style.cursor = "pointer";
+                chip.onclick = () => {
+                    state.people.splice(idx, 1);
+                    renderPeople();
+                    renderExpenses();
+                    renderPlanned();
+                    renderOutput();
+                };
+                chipsWrap.append(chip);
+            });
+            renderBudgets();
+            renderExpenses();
+            renderPlanned();
+            renderOutput();
+        }
+
+        peopleAdd.onclick = () => {
+            const name = peopleInput.value.trim();
+            if (!name) return;
+            if (!state.people.includes(name)) {
+                state.people.push(name);
+                renderPeople();
+            }
+            peopleInput.value = "";
+        };
+
+        function renderBudgets() {
+            budgetList.innerHTML = "";
+            state.budgets.forEach((b, idx) => {
+                const row = createEl("div", { className: "share-row" });
+                const catInput = createEl("input", { type: "text", value: b.category });
+                const amtInput = createEl("input", { type: "number", value: b.amount });
+                amtInput.step = "0.01";
+                const remove = createEl("button", { type: "button" });
+                remove.textContent = "✕";
+                remove.onclick = () => {
+                    state.budgets.splice(idx, 1);
+                    renderBudgets();
+                    renderExpenses();
+                    renderOutput();
+                };
+                catInput.oninput = () => {
+                    state.budgets[idx].category = catInput.value.trim() || "Other";
+                    renderExpenses();
+                };
+                amtInput.oninput = () => {
+                    state.budgets[idx].amount = parseFloat(amtInput.value || "0") || 0;
+                    renderOutput();
+                };
+                row.append(catInput, amtInput, remove);
+                budgetList.append(row);
+            });
+        }
+
+        addBudgetBtn.onclick = () => {
+            state.budgets.push({ category: "New", amount: 0 });
+            renderBudgets();
+        };
+
+        function renderExpenses() {
+            expensesList.innerHTML = "";
+            state.expensesPaid.forEach((exp, idx) => {
+                const wrap = createEl("div", { className: "share-row" });
+                const payer = createEl("select");
+                state.people.forEach((p) => {
+                    const opt = createEl("option", { text: p });
+                    opt.value = p;
+                    if (p === exp.payer) opt.selected = true;
+                    payer.append(opt);
+                });
+                payer.onchange = () => {
+                    exp.payer = payer.value;
+                    renderOutput();
+                };
+                const amount = createEl("input", { type: "number", value: exp.amount || 0 });
+                amount.step = "0.01";
+        amount.min = "0";
+                amount.oninput = () => {
+                    exp.amount = parseFloat(amount.value || "0") || 0;
+                    renderOutput();
+                };
+                const cat = createEl("select");
+                state.budgets.forEach((b) => {
+                    const opt = createEl("option", { text: b.category });
+                    opt.value = b.category;
+                    if (b.category === exp.category) opt.selected = true;
+                    cat.append(opt);
+                });
+                cat.onchange = () => {
+                    exp.category = cat.value;
+                    renderOutput();
+                };
+                const desc = createEl("input", { type: "text", value: exp.description || "" });
+                desc.oninput = () => (exp.description = desc.value);
+                const splitWrap = createEl("div");
+                state.people.forEach((p) => {
+                    const lbl = createEl("label");
+                    const cb = createEl("input", { type: "checkbox" });
+                    cb.checked = !exp.split_with || exp.split_with.includes(p);
+                    cb.onchange = () => {
+                        const list = exp.split_with || [];
+                        if (cb.checked) {
+                            if (!list.includes(p)) list.push(p);
+                        } else {
+                            exp.split_with = list.filter((n) => n !== p);
+                        }
+                        exp.split_with = list.filter((n) => n);
+                        renderOutput();
+                    };
+                    lbl.append(cb, document.createTextNode(" " + p));
+                    splitWrap.append(lbl, document.createElement("br"));
+                });
+                const remove = createEl("button", { type: "button" });
+                remove.textContent = "✕";
+                remove.onclick = () => {
+                    state.expensesPaid.splice(idx, 1);
+                    renderExpenses();
+                    renderOutput();
+                };
+                wrap.append(payer, amount, cat, desc, splitWrap, remove);
+                expensesList.append(wrap);
+            });
+        }
+
+        addExpenseBtn.onclick = () => {
+            if (!state.people.length) {
+                if (statusEl) statusEl.textContent = "Add at least one person first.";
+                return;
+            }
+            state.expensesPaid.push({
+                payer: state.people[0],
+                amount: 0,
+                category: state.budgets[0]?.category || "Other",
+                description: "",
+                split_with: state.people.slice(),
+            });
+            renderExpenses();
+        };
+
+        function renderPlanned() {
+            plannedList.innerHTML = "";
+            state.itemsPlanned.forEach((item, idx) => {
+                const wrap = createEl("div", { className: "share-row" });
+                const cat = createEl("select");
+                state.budgets.forEach((b) => {
+                    const opt = createEl("option", { text: b.category });
+                    opt.value = b.category;
+                    if (b.category === item.category) opt.selected = true;
+                    cat.append(opt);
+                });
+                cat.onchange = () => {
+                    item.category = cat.value;
+                    renderOutput();
+                };
+                const amount = createEl("input", { type: "number", value: item.amount || 0 });
+                amount.step = "0.01";
+        amount.min = "0";
+                amount.oninput = () => {
+                    item.amount = parseFloat(amount.value || "0") || 0;
+                    renderOutput();
+                };
+                const desc = createEl("input", { type: "text", value: item.description || "" });
+                desc.oninput = () => (item.description = desc.value);
+                const due = createEl("input", { type: "date", value: item.due_date || "" });
+                due.oninput = () => (item.due_date = due.value);
+                const assign = createEl("select");
+                const noneOpt = createEl("option", { text: "Unassigned" });
+                noneOpt.value = "";
+                assign.append(noneOpt);
+                state.people.forEach((p) => {
+                    const opt = createEl("option", { text: p });
+                    opt.value = p;
+                    if (p === item.assigned_to) opt.selected = true;
+                    assign.append(opt);
+                });
+                assign.onchange = () => (item.assigned_to = assign.value || null);
+                const remove = createEl("button", { type: "button" });
+                remove.textContent = "✕";
+                remove.onclick = () => {
+                    state.itemsPlanned.splice(idx, 1);
+                    renderPlanned();
+                    renderOutput();
+                };
+                wrap.append(cat, amount, desc, due, assign, remove);
+                plannedList.append(wrap);
+            });
+        }
+
+        addPlannedBtn.onclick = () => {
+            state.itemsPlanned.push({
+                category: state.budgets[0]?.category || "Other",
+                amount: 0,
+                description: "",
+                due_date: "",
+                assigned_to: null,
+            });
+            renderPlanned();
+        };
+
+        function renderOutput() {
+            const summary = computeTripSummary(state);
+            const lines = [];
+            const tripName = form.querySelector('[name="trip_name"]')?.value || "Trip";
+            lines.push(`Trip: ${tripName}`);
+            lines.push(`People: ${state.people.join(", ") || "None"}`);
+            lines.push("");
+            lines.push("Budgets:");
+            if (summary.budgetSummary.length) {
+                summary.budgetSummary.forEach((b) => {
+                    lines.push(
+                        `${b.category}: planned ${b.planned.toFixed(2)}, spent ${b.spent.toFixed(2)}, upcoming ${b.upcoming.toFixed(2)}, remaining ${b.remaining.toFixed(2)}`
+                    );
+                });
+            } else {
+                lines.push("None set.");
+            }
+            lines.push("");
+            lines.push("Totals:");
+            summary.perPerson.forEach((p) => {
+                lines.push(`${p.name}: paid ${p.paid.toFixed(2)}, owes ${p.owes.toFixed(2)}, net ${p.net.toFixed(2)}`);
+            });
+            lines.push("");
+            lines.push("Settle:");
+            if (summary.settlements.length) {
+                summary.settlements.forEach((s) => {
+                    lines.push(`${s[0]} pays ${s[1]} ${s[2].toFixed(2)}`);
+                });
+            } else {
+                lines.push("No transfers needed.");
+            }
+            if (outputPre) outputPre.textContent = lines.join("\n");
+        }
+
+        function showShareLocal(url) {
+            if (!shareBlock || !shareUrlEl) return;
+            const full = url.startsWith("http") ? url : `${window.location.origin}${url}`;
+            shareUrlEl.textContent = full;
+            shareBlock.style.display = "block";
+            if (copyShareBtn) {
+                copyShareBtn.onclick = async () => {
+                    try {
+                        await navigator.clipboard.writeText(full);
+                        statusEl.textContent = "Link copied.";
+                        statusEl.className = "tool-status success";
+                    } catch (e) {
+                        statusEl.textContent = "Unable to copy.";
+                        statusEl.className = "tool-status error";
+                    }
+                };
+            }
+        }
+
+        // Expose payload builder for submit
+        window.tripPlannerBuildPayload = () => {
+            const tripName = form.querySelector('[name="trip_name"]')?.value.trim();
+            const currency = form.querySelector('[name="currency"]')?.value || "USD";
+            const notes = form.querySelector('[name="notes"]')?.value || "";
+            if (!tripName) return { ok: false, error: "Trip name is required." };
+            if (!state.people.length) return { ok: false, error: "Add at least one person." };
+            // basic amount validation
+            const expensesValid = state.expensesPaid.every((e) => e.payer && e.amount > 0);
+            if (!expensesValid) return { ok: false, error: "Expenses need payer and positive amount." };
+            return {
+                ok: true,
+                payload: {
+                    trip_name: tripName,
+                    currency,
+                    notes,
+                    people: state.people,
+                    budgets: state.budgets,
+                    expenses_paid: state.expensesPaid,
+                    items_planned: state.itemsPlanned,
+                },
+            };
+        };
+
+        // Prefill from ?from=token
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromToken = urlParams.get("from");
+        async function loadFromToken(token) {
+            try {
+                const res = await fetch(`/api/tools/trip/${token}`);
+                const data = await res.json();
+                if (!data.ok) return;
+                const p = data.data;
+                if (p.people) state.people = p.people;
+                if (p.budgets) state.budgets = p.budgets;
+                if (p.expenses_paid) state.expensesPaid = p.expenses_paid;
+                if (p.items_planned) state.itemsPlanned = p.items_planned;
+                const tripInput = form.querySelector('[name="trip_name"]');
+                if (tripInput && p.trip_name) tripInput.value = p.trip_name;
+                const currencyInput = form.querySelector('[name="currency"]');
+                if (currencyInput && p.currency) currencyInput.value = p.currency;
+                const notesInput = form.querySelector('[name="notes"]');
+                if (notesInput && p.notes) notesInput.value = p.notes;
+                renderPeople();
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        renderPeople();
+        renderBudgets();
+        renderExpenses();
+        renderPlanned();
+        renderOutput();
+
+        if (fromToken) {
+            loadFromToken(fromToken);
+        }
+
+        // expose for share block updates
+        window.tripPlannerShowShare = showShareLocal;
+    }
     function serializeForm(form) {
         const fields = form.querySelectorAll("[data-input-field]");
         const payload = {};
@@ -346,6 +814,35 @@
                 return;
             }
 
+            if (slug === "trip-planner") {
+                if (!window.tripPlannerState || !window.tripPlannerBuildPayload) {
+                    setStatus("Trip planner not initialized.", "error");
+                    return;
+                }
+                const { ok, payload, error } = window.tripPlannerBuildPayload();
+                if (!ok) {
+                    setStatus(error || "Please complete the required fields.", "error");
+                    return;
+                }
+                setStatus("");
+                setLoading(true);
+                const response = await runToolRequest(slug, payload);
+                if (!response || !response.ok) {
+                    const message = response?.error?.message || "Something went wrong.";
+                    setStatus(message, "error");
+                    setLoading(false);
+                    return;
+                }
+                const output = response.data?.output || "No output returned.";
+                renderOutput(output);
+                if (response.data?.share_url) {
+                    showShare(response.data.share_url);
+                }
+                setStatus("Saved and shared.", "success");
+                setLoading(false);
+                return;
+            }
+
             setStatus("");
             setLoading(true);
 
@@ -381,6 +878,11 @@
             const outputPre = outputEl ? outputEl.querySelector(".tool-output-pre") : null;
             const clearBtn = form.querySelector("[data-clear-button]");
             handleDailyCheckin(form, statusEl, outputPre, clearBtn);
+            return;
+        }
+
+        if (slug === "trip-planner") {
+            initTripPlanner(form);
         }
     }
 
