@@ -1,5 +1,6 @@
 (function () {
     const endpoint = "/api/tools/run";
+    window.__rrToolState = window.__rrToolState || {};
 
     async function runToolRequest(tool, input = {}) {
         const payload = { tool, input };
@@ -28,6 +29,93 @@
                 request_id: null,
             };
         }
+    }
+
+    // ---- Daily Phrase TTS (client only) ----
+    let cachedVoices = [];
+    function loadVoices() {
+        if (!("speechSynthesis" in window)) return [];
+        const voices = window.speechSynthesis.getVoices();
+        if (voices && voices.length) {
+            cachedVoices = voices;
+        }
+        return cachedVoices;
+    }
+    if ("speechSynthesis" in window) {
+        loadVoices();
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    function langCodeFor(language) {
+        const map = {
+            Spanish: "es-ES",
+            French: "fr-FR",
+            German: "de-DE",
+            Italian: "it-IT",
+            Japanese: "ja-JP",
+        };
+        return map[language] || "en-US";
+    }
+
+    function renderAudioControls(form) {
+        const outputEl = document.querySelector("[data-tool-output]");
+        if (!outputEl) return;
+        let audioWrap = outputEl.querySelector(".tool-audio");
+        const state = window.__rrToolState["daily-phrase"];
+        if (!state || !state.phrase) return;
+        if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+            if (!audioWrap) {
+                audioWrap = document.createElement("div");
+                audioWrap.className = "tool-audio";
+                const note = document.createElement("div");
+                note.className = "tool-audio-note";
+                note.textContent = "Audio not supported on this device.";
+                audioWrap.append(note);
+                outputEl.append(audioWrap);
+            }
+            return;
+        }
+        if (!audioWrap) {
+            audioWrap = document.createElement("div");
+            audioWrap.className = "tool-audio";
+            const playBtn = document.createElement("button");
+            playBtn.type = "button";
+            playBtn.textContent = "Play";
+            playBtn.onclick = () => speakPhrase(state);
+            const stopBtn = document.createElement("button");
+            stopBtn.type = "button";
+            stopBtn.textContent = "Stop";
+            stopBtn.onclick = () => window.speechSynthesis.cancel();
+            const note = document.createElement("div");
+            note.className = "tool-audio-note";
+            note.textContent = "Same phrase for everyone today.";
+            audioWrap.append(playBtn, stopBtn, note);
+            outputEl.append(audioWrap);
+        }
+    }
+
+    function speakPhrase(state) {
+        if (!state || !state.phrase) return;
+        if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+        window.speechSynthesis.cancel();
+        const langCode = langCodeFor(state.language);
+        const utter = new SpeechSynthesisUtterance(state.phrase);
+        utter.lang = langCode;
+        const voices = loadVoices();
+        if (voices && voices.length) {
+            const match = voices.find((v) => v.lang && v.lang.toLowerCase().startsWith(langCode.split("-")[0]));
+            if (match) utter.voice = match;
+        }
+        utter.rate = 0.95;
+        utter.pitch = 1.0;
+        window.speechSynthesis.speak(utter);
+    }
+
+    function initAudioControls(form) {
+        renderAudioControls(form);
+        window.addEventListener("beforeunload", () => {
+            if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        });
     }
 
     // ----- Daily Check-In (client only) -----
@@ -883,6 +971,14 @@
                 showShare(response.data.share_url);
             }
             if (slug === "daily-phrase") {
+                window.__rrToolState["daily-phrase"] = {
+                    phrase: response.data?.phrase,
+                    translation: response.data?.translation,
+                    example: response.data?.example,
+                    language: form.querySelector('[name="language"]')?.value || "",
+                    level: form.querySelector('[name="level"]')?.value || "",
+                };
+                renderAudioControls(form);
                 setStatus("Come back tomorrow for a new phrase.", "success");
                 if (runBtn) runBtn.disabled = true;
             } else {
@@ -909,6 +1005,10 @@
 
         if (slug === "trip-planner") {
             initTripPlanner(form);
+        }
+
+        if (slug === "daily-phrase") {
+            initAudioControls(form);
         }
     }
 

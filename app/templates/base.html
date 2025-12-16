@@ -17,17 +17,24 @@
 
     <style>
         /* Layout for footer always at bottom */
+        html {
+            min-height: 100%;
+        }
+
         body {
             display: flex;
             flex-direction: column;
-            min-height: 100vh;
+            min-height: 100dvh;
             margin: 0;
+            overflow-x: hidden;
             font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
             background: #f6f4ed;
         }
 
         .page-wrapper {
             flex: 1;
+            min-height: 0;
+            padding-bottom: env(safe-area-inset-bottom);
         }
 
         footer.footer-note {
@@ -61,6 +68,10 @@
 
         /* Mobile adjustments */
         @media (max-width: 768px) {
+            .page-wrapper {
+                padding-bottom: max(24px, env(safe-area-inset-bottom));
+            }
+
             .article-title {
                 font-size: 1.6rem;
             }

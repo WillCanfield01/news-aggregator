@@ -352,6 +352,28 @@
     display: none;
 }
 
+.tool-audio {
+    margin-top: 6px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.tool-audio button {
+    background: #eef3ff;
+    border: 1px solid #d7e3ff;
+    color: #1a46c7;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+.tool-audio-note {
+    color: #6b7280;
+    font-size: 0.95rem;
+}
+
 .chip-row {
     display: flex;
     gap: 8px;
