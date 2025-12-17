@@ -57,12 +57,21 @@
         return map[language] || "en-US";
     }
 
+    function normalizePhraseValue(text) {
+        if (text === undefined || text === null) return "";
+        const value = String(text).trim().replace(/^["']+|["']+$/g, "");
+        const match = value.match(/^(?:phrase|translation|example)\s*:\s*(.+)$/i);
+        const withoutLabel = match ? match[1].trim() : value;
+        return withoutLabel.replace(/^[\-\u2013\u2014]\s*/, "").trim();
+    }
+
     function renderAudioControls(form) {
         const outputEl = document.querySelector("[data-tool-output]");
         if (!outputEl) return;
         let audioWrap = outputEl.querySelector(".tool-audio");
         const state = window.__rrToolState["daily-phrase"];
-        if (!state || !state.phrase) return;
+        const phraseText = normalizePhraseValue(state?.phrase);
+        if (!state || !phraseText) return;
         if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
             if (!audioWrap) {
                 audioWrap = document.createElement("div");
@@ -95,11 +104,13 @@
     }
 
     function speakPhrase(state) {
-        if (!state || !state.phrase) return;
+        if (!state) return;
         if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+        const phraseText = normalizePhraseValue(state.phrase);
+        if (!phraseText) return;
         window.speechSynthesis.cancel();
         const langCode = langCodeFor(state.language);
-        const utter = new SpeechSynthesisUtterance(state.phrase);
+        const utter = new SpeechSynthesisUtterance(phraseText);
         utter.lang = langCode;
         const voices = loadVoices();
         if (voices && voices.length) {
@@ -971,10 +982,11 @@
                 showShare(response.data.share_url);
             }
             if (slug === "daily-phrase") {
+                const phrase = normalizePhraseValue(response.data?.phrase);
                 window.__rrToolState["daily-phrase"] = {
-                    phrase: response.data?.phrase,
-                    translation: response.data?.translation,
-                    example: response.data?.example,
+                    phrase,
+                    translation: normalizePhraseValue(response.data?.translation),
+                    example: normalizePhraseValue(response.data?.example),
                     language: form.querySelector('[name="language"]')?.value || "",
                     level: form.querySelector('[name="level"]')?.value || "",
                 };

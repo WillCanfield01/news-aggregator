@@ -20,9 +20,11 @@
     <div class="tools-grid" role="list" aria-label="Available tools">
         {% for tool in tools %}
         <a class="tool-card" role="listitem" href="{{ url_for('tools.tool_page', slug=tool.slug) }}">
-            <div class="tool-card-category">{{ tool.category }}</div>
-            <h2 class="tool-card-title">{{ tool.title }}</h2>
-            <p class="tool-card-desc">{{ tool.description }}</p>
+            <div class="tool-card-body">
+                <div class="tool-card-category">{{ tool.category }}</div>
+                <h2 class="tool-card-title">{{ tool.title }}</h2>
+                <p class="tool-card-desc">{{ tool.description }}</p>
+            </div>
             <span class="tool-card-link">Open tool →</span>
         </a>
         {% endfor %}

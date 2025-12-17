@@ -75,6 +75,14 @@
     color: var(--tools-ink);
     box-shadow: 0 8px 18px rgba(17, 24, 39, 0.05);
     transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+    min-height: 220px;
+}
+
+.tool-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
 }
 
 .tool-card:hover,
@@ -100,11 +108,13 @@
     margin: 0 0 14px;
     color: var(--tools-muted);
     line-height: 1.5;
+    flex: 1;
 }
 
 .tool-card-link {
     color: #6b46c1;
     font-weight: 700;
+    margin-top: auto;
 }
 
 .tools-empty {
@@ -455,5 +465,9 @@
     .tools-hero,
     .tool-detail {
         padding: 20px 18px;
+    }
+
+    .tool-card {
+        min-height: auto;
     }
 }

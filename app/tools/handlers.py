@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Tuple
@@ -13,6 +14,54 @@ import openai
 _client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _DEFAULT_MODEL = "gpt-4.1-mini"
 _DAILY_PHRASE_CACHE: Dict[str, Dict[str, str]] = {}
+
+
+def _clean_daily_phrase_value(value: Any) -> str:
+    text = str(value or "").strip().strip("\"'")
+    if not text:
+        return ""
+    lowered = text.lower()
+    for label in ("phrase:", "translation:", "example:"):
+        if lowered.startswith(label):
+            text = text.split(":", 1)[1].strip()
+            break
+    text = re.sub(r"^[\-\u2013\u2014]\s*", "", text)
+    text = re.sub(r"^\d+\.\s*", "", text)
+    return text.strip()
+
+
+def _parse_daily_phrase_content(content: str) -> Dict[str, str]:
+    raw = (content or "").strip()
+    if not raw:
+        return {"phrase": "", "translation": "", "example": ""}
+
+    parsed: Dict[str, Any] | None = None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        match = re.search(r"\{.*\}", raw, re.S)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+            except Exception:
+                parsed = None
+
+    if isinstance(parsed, dict):
+        return {
+            "phrase": _clean_daily_phrase_value(parsed.get("phrase")),
+            "translation": _clean_daily_phrase_value(parsed.get("translation")),
+            "example": _clean_daily_phrase_value(parsed.get("example")),
+        }
+
+    parts = [p.strip() for p in raw.splitlines() if p.strip()]
+    phrase = parts[0] if parts else raw
+    translation = parts[1] if len(parts) > 1 else ""
+    example = parts[2] if len(parts) > 2 else ""
+    return {
+        "phrase": _clean_daily_phrase_value(phrase),
+        "translation": _clean_daily_phrase_value(translation),
+        "example": _clean_daily_phrase_value(example),
+    }
 
 
 def run_resume_bullets(payload: Dict[str, Any]) -> Dict[str, str]:
@@ -442,31 +491,33 @@ def run_daily_phrase(payload: Dict[str, Any]) -> Dict[str, Any]:
         "Provide one useful daily phrase.\n"
         f"Language: {language}\n"
         f"Level: {level}\n"
-        "Return three parts:\n"
-        "- Phrase (short; for Beginner keep it simple, avoid long sentences)\n"
-        "- Translation (clear English)\n"
-        "- Example (natural sentence using the phrase)\n"
-        "No slang unless level is Advanced. No emojis. No markdown. Keep it concise."
+        "Respond ONLY with strict JSON in this exact shape (no markdown, no labels, no extra text):\n"
+        '{"phrase":"<phrase in the target language>","translation":"<english translation>","example":"<natural sentence using the phrase>"}\n'
+        "Keep the phrase short for beginners, avoid slang unless Advanced, and keep the example concise."
     )
 
     try:
         result = _client.chat.completions.create(
             model=_DEFAULT_MODEL,
             messages=[
-                {"role": "system", "content": "You are a concise language tutor."},
+                {
+                    "role": "system",
+                    "content": "You are a concise language tutor. Reply with JSON only using keys phrase, translation, example.",
+                },
                 {"role": "user", "content": prompt},
             ],
             max_tokens=200,
             temperature=0.4,
             timeout=15,
         )
-        content = result.choices[0].message.content.strip()
-        # naive parse: expect three lines
-        parts = [p.strip() for p in content.split("\n") if p.strip()]
-        phrase = parts[0] if parts else content
-        translation = parts[1] if len(parts) > 1 else ""
-        example = parts[2] if len(parts) > 2 else ""
-        data = {"phrase": phrase, "translation": translation, "example": example, "date": today}
+        content = (result.choices[0].message.content or "").strip()
+        parsed = _parse_daily_phrase_content(content)
+        data = {
+            "phrase": parsed.get("phrase", ""),
+            "translation": parsed.get("translation", ""),
+            "example": parsed.get("example", ""),
+            "date": today,
+        }
         _DAILY_PHRASE_CACHE[cache_key] = data
         return data
     except Exception as exc:

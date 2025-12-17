@@ -262,19 +262,23 @@ def run_tool():
     if tool_slug == "daily-phrase":
         try:
             result = run_daily_phrase(validated_input)
+            phrase = (result.get("phrase") or "").strip()
+            translation = (result.get("translation") or "").strip()
+            example = (result.get("example") or "").strip()
+            date = (result.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
             output_lines = [
-                f"Date: {result.get('date')}",
-                f"Phrase: {result.get('phrase')}",
-                f"Translation: {result.get('translation')}",
-                f"Example: {result.get('example')}",
+                f"Date: {date}",
+                f"Phrase: {phrase}",
+                f"Translation: {translation}",
+                f"Example: {example}",
                 "Same phrase for everyone today.",
             ]
             data = {
                 "output": "\n".join([line for line in output_lines if line]),
-                "phrase": result.get("phrase"),
-                "translation": result.get("translation"),
-                "example": result.get("example"),
-                "date": result.get("date"),
+                "phrase": phrase,
+                "translation": translation,
+                "example": example,
+                "date": date,
             }
             return _build_response(True, data=data, error=None, request_id=request_id), 200
         except ValueError as exc:
