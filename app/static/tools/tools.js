@@ -815,6 +815,12 @@
             const name = field.name;
             const type = field.dataset.type || field.type;
             if (!name) return;
+            const wrapper = field.closest("[data-depends-field]");
+            if (wrapper && wrapper.dataset.conditionalHidden === "true") {
+                return;
+            }
+            if (field.disabled) return;
+            if (!name) return;
             let value = field.value || "";
             if (type === "text" || type === "textarea") {
                 value = value.trim();
@@ -827,6 +833,44 @@
     function attachToolForm() {
         const form = document.querySelector("[data-tool-form]");
         if (!form) return;
+        const conditionalControls = form.querySelectorAll("[data-depends-field]");
+
+        const applyConditionalVisibility = () => {
+            conditionalControls.forEach((wrapper) => {
+                const dependsField = wrapper.dataset.dependsField;
+                const dependsValue = wrapper.dataset.dependsValue;
+                if (!dependsField) return;
+                const controller = form.querySelector(`[name="${dependsField}"]`);
+                const current = controller ? controller.value : "";
+                const shouldShow = current === dependsValue;
+                wrapper.dataset.conditionalHidden = shouldShow ? "false" : "true";
+                if (shouldShow) {
+                    wrapper.style.display = "";
+                    const input = wrapper.querySelector("[data-input-field]");
+                    if (input) input.disabled = false;
+                } else {
+                    wrapper.style.display = "none";
+                    const input = wrapper.querySelector("[data-input-field]");
+                    if (input) {
+                        input.disabled = true;
+                        input.value = "";
+                    }
+                }
+            });
+        };
+
+        const conditionalControllers = new Set();
+        conditionalControls.forEach((wrapper) => {
+            const dependsField = wrapper.dataset.dependsField;
+            if (dependsField) {
+                const controller = form.querySelector(`[name="${dependsField}"]`);
+                if (controller) conditionalControllers.add(controller);
+            }
+        });
+        conditionalControllers.forEach((controller) => {
+            controller.addEventListener("change", applyConditionalVisibility);
+        });
+        applyConditionalVisibility();
 
         const runBtn = form.querySelector("[data-run-button]") || form.querySelector("button[type='submit']");
         const statusEl = document.querySelector("[data-tool-status]");
@@ -902,6 +946,7 @@
                     f.value = savedInput[f.name];
                 }
             });
+            applyConditionalVisibility();
         }
 
         if (viewMode) {

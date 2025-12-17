@@ -44,7 +44,7 @@
                 {% if saved_input %}data-saved-input='{{ saved_input|safe }}'{% endif %}
                 {% if share_url %}data-share-initial="{{ share_url }}"{% endif %}>
                 {% for field in tool.inputs %}
-                <div class="tool-field">
+                <div class="tool-field" {% if field.depends_on %}data-depends-field="{{ field.depends_on.field }}" data-depends-value="{{ field.depends_on.value }}"{% endif %}>
                     <label for="field-{{ field.name }}">{{ field.label }}{% if field.required %}*{% endif %}</label>
                     {% if field.type == "textarea" %}
                     <textarea id="field-{{ field.name }}" name="{{ field.name }}" rows="4" placeholder="{{ field.placeholder }}"
@@ -64,6 +64,7 @@
                         data-input-field data-type="{{ field.type }}">
                     {% endif %}
                     {% if field.max_chars %}<small class="char-limit">Max {{ field.max_chars }} chars</small>{% endif %}
+                    {% if field.name == "occurrences_per_frequency" %}<small class="char-limit">If frequency is Monthly, enter uses per month.</small>{% endif %}
                 </div>
                 {% endfor %}
                 <div id="tool-custom-ui"></div>

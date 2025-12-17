@@ -676,90 +676,175 @@ def _format_hours(val: float) -> str:
 
 def run_worth_it(payload: Dict[str, Any]) -> Dict[str, Any]:
     item_name = (payload.get("item_name") or "").strip()
-    cost_raw = payload.get("cost") or ""
-    hours_raw = payload.get("hours") or ""
-    mode = (payload.get("mode") or "Time saved").strip() or "Time saved"
+    mode = (payload.get("mode") or payload.get("mode_selection") or "Time saved").strip() or "Time saved"
+    cost_raw = payload.get("cost") or payload.get("cost_amount") or ""
     frequency = (payload.get("frequency") or "One-time").strip() or "One-time"
+    minutes_saved_raw = payload.get("minutes_saved_per_occurrence") or payload.get("minutes") or ""
+    minutes_enjoyment_raw = payload.get("minutes_of_enjoyment_per_occurrence") or ""
+    hours_legacy = payload.get("hours")
+    occurrences_raw = payload.get("occurrences_per_frequency") or ""
     timeframe_raw = payload.get("timeframe") or ""
     hourly_value_raw = payload.get("hourly_value") or ""
     notes = (payload.get("notes") or "").strip()
 
     cost = _parse_money(cost_raw)
-    hours = _parse_hours(hours_raw)
 
-    if frequency not in {"One-time", "Weekly", "Monthly"}:
-        raise ValueError("Frequency must be One-time, Weekly, or Monthly.")
+    def _parse_positive_float(value: Any, label: str) -> float:
+        try:
+            num = float(str(value).strip())
+        except Exception:
+            raise ValueError(f"{label} must be a number.")
+        if num <= 0:
+            raise ValueError(f"{label} must be greater than zero.")
+        return num
+
+    if mode not in {"Time saved", "Enjoyment"}:
+        raise ValueError("Mode must be Time saved or Enjoyment.")
+
+    if not occurrences_raw:
+        raise ValueError('"occurrences_per_frequency" is required.')
+    occurrences_per_frequency = _parse_positive_float(occurrences_raw, "Occurrences per period")
+
+    minutes_per_occurrence_raw = minutes_saved_raw if mode == "Time saved" else minutes_enjoyment_raw
+    if not minutes_per_occurrence_raw and hours_legacy:
+        try:
+            minutes_per_occurrence_raw = float(hours_legacy) * 60
+        except Exception:
+            minutes_per_occurrence_raw = ""
+    if not minutes_per_occurrence_raw:
+        raise ValueError("Minutes per occurrence is required.")
+    minutes_per_occurrence = _parse_positive_float(minutes_per_occurrence_raw, "Minutes per occurrence")
+
+    def _parse_timeframe(raw: str, freq: str) -> tuple[float, str]:
+        text = (raw or "").strip().lower()
+        if not text:
+            if freq == "Weekly":
+                return 4.0, "weeks"
+            if freq == "Monthly":
+                return 1.0, "months"
+            if freq == "Yearly":
+                return 1.0, "years"
+            return 1.0, "occurrence"
+        match = re.match(r"^(\d+(?:\.\d+)?)(\s*(weeks?|w|months?|m|years?|y))$", text)
+        if not match:
+            raise ValueError("Timeframe must be like '8 weeks', '12 months', or '1 year'.")
+        amount = float(match.group(1))
+        unit_raw = match.group(2).strip()
+        if amount <= 0:
+            raise ValueError("Timeframe must be greater than zero.")
+        if unit_raw.startswith("w"):
+            return amount, "weeks"
+        if unit_raw.startswith("m"):
+            return amount, "months"
+        if unit_raw.startswith("y"):
+            return amount, "years"
+        raise ValueError("Timeframe must specify weeks, months, or years.")
 
     timeframe_amount, timeframe_unit = _parse_timeframe(timeframe_raw, frequency)
 
-    occurrences = 1.0
-    if frequency == "Weekly":
-        occurrences = timeframe_amount if timeframe_unit in {"weeks", ""} else timeframe_amount * 4.0
-    elif frequency == "Monthly":
-        occurrences = timeframe_amount if timeframe_unit in {"months", ""} else max(timeframe_amount / 4.0, 0.0)
+    freq = frequency
+    if freq not in {"One-time", "Weekly", "Monthly", "Yearly"}:
+        raise ValueError("Frequency must be One-time, Weekly, Monthly, or Yearly.")
 
-    total_cost = cost * occurrences
-    total_hours = hours * occurrences
-    base_cph = cost / hours
-    effective_cph = total_cost / total_hours if total_hours > 0 else base_cph
+    periods = 1.0
+    if freq == "Weekly":
+        if timeframe_unit == "weeks":
+            periods = timeframe_amount
+        elif timeframe_unit == "months":
+            periods = timeframe_amount * 4.0
+        elif timeframe_unit == "years":
+            periods = timeframe_amount * 52.0
+    elif freq == "Monthly":
+        if timeframe_unit == "months":
+            periods = timeframe_amount
+        elif timeframe_unit == "weeks":
+            periods = timeframe_amount / 4.0
+        elif timeframe_unit == "years":
+            periods = timeframe_amount * 12.0
+    elif freq == "Yearly":
+        if timeframe_unit == "years":
+            periods = timeframe_amount
+        elif timeframe_unit == "months":
+            periods = timeframe_amount / 12.0
+        elif timeframe_unit == "weeks":
+            periods = timeframe_amount / 52.0
+    else:
+        periods = 1.0
+
+    occurrences_total = occurrences_per_frequency * periods
+    if occurrences_total <= 0:
+        raise ValueError("Occurrences over timeframe must be greater than zero.")
+
+    hours_per_occurrence = minutes_per_occurrence / 60.0
+    total_hours = hours_per_occurrence * occurrences_total
+    if total_hours <= 0:
+        raise ValueError("Total hours must be greater than zero.")
+
+    total_minutes = minutes_per_occurrence * occurrences_total
+    total_cost = cost * periods
+    cost_per_occurrence = total_cost / occurrences_total
+    effective_cph = total_cost / total_hours
+    minutes_per_dollar = total_minutes / total_cost if total_cost > 0 else 0
 
     hourly_value_val = None
-    verdict_line = "Break-even hourly value: " + _format_currency(effective_cph)
     if str(hourly_value_raw).strip():
-        try:
-            hourly_value_val = _parse_money(hourly_value_raw)
-        except ValueError as exc:
-            raise ValueError(str(exc))
-        if hourly_value_val > effective_cph:
-            verdict_line = f"Worth it if your time is worth {_format_currency(hourly_value_val)}/hr (breakeven {_format_currency(effective_cph)}/hr)."
-        elif hourly_value_val < effective_cph:
-            verdict_line = f"Not worth it if your time is below {_format_currency(effective_cph)}/hr (you entered {_format_currency(hourly_value_val)}/hr)."
+        hourly_value_val = _parse_money(hourly_value_raw)
+
+    def _format_occurrence_label(val: float, unit: str) -> str:
+        if unit == "occurrence":
+            return "one-time"
+        if unit == "weeks":
+            return f"{_format_hours(val)} week(s)"
+        if unit == "months":
+            return f"{_format_hours(val)} month(s)"
+        if unit == "years":
+            return f"{_format_hours(val)} year(s)"
+        return _format_hours(val)
+
+    summary_timeframe = _format_occurrence_label(timeframe_amount, timeframe_unit)
+
+    verdict_line = f"Break-even hourly value: {_format_currency(effective_cph)} per hour."
+    extra_benchmark = ""
+    if hourly_value_val is not None:
+        if mode == "Time saved":
+            net_value = (hourly_value_val * total_hours) - total_cost
+            verdict_line = "Worth it" if net_value >= 0 else "Not worth it"
+            verdict_line += f" at your time value of {_format_currency(hourly_value_val)}/hr (breakeven {_format_currency(effective_cph)}/hr)."
         else:
-            verdict_line = f"Neutral: matches your time value at {_format_currency(hourly_value_val)}/hr."
+            verdict_line = f"Good value if you're happy paying {_format_currency(effective_cph)} per hour of enjoyment."
+            extra_benchmark = f" Your benchmark: {_format_currency(hourly_value_val)}/hr."
 
-    timeframe_label = ""
-    if frequency == "Weekly":
-        timeframe_label = f"{_format_hours(timeframe_amount)} week(s)"
-    elif frequency == "Monthly":
-        timeframe_label = f"{_format_hours(timeframe_amount)} month(s)"
-
-    lines = []
+    lines: List[str] = []
+    lines.append("Summary")
     lines.append(f"Item: {item_name or 'N/A'}")
     lines.append(f"Mode: {mode}")
+    lines.append(f"Frequency: {frequency}")
+    lines.append(f"Timeframe: {summary_timeframe}")
     lines.append("")
-    lines.append("Inputs:")
-    lines.append(f"- Cost: {_format_currency(cost)}")
-    lines.append(f"- Hours per use: {_format_hours(hours)}")
-    lines.append(f"- Frequency: {frequency}" + (f" over {timeframe_label}" if timeframe_label else ""))
+    lines.append("Inputs")
+    lines.append(f"Cost: {_format_currency(cost)}")
+    lines.append(f"Minutes per occurrence: {_format_hours(minutes_per_occurrence)}")
+    lines.append(f"Occurrences per period: {_format_hours(occurrences_per_frequency)}")
     if hourly_value_val is not None:
-        lines.append(f"- Your hourly value: {_format_currency(hourly_value_val)}")
+        lines.append(f"Optional hourly value: {_format_currency(hourly_value_val)}")
     if notes:
-        lines.append(f"- Notes: {notes}")
+        lines.append(f"Assumptions: {notes}")
     lines.append("")
-    lines.append("Results:")
-    lines.append(f"- Cost per hour: {_format_currency(base_cph)}")
-    if frequency != "One-time":
-        lines.append(f"- Total cost over timeframe: {_format_currency(total_cost)}")
-        lines.append(f"- Total hours over timeframe: {_format_hours(total_hours)}")
-        lines.append(f"- Effective cost per hour: {_format_currency(effective_cph)}")
-    else:
-        lines.append(f"- Effective cost per hour: {_format_currency(effective_cph)}")
-    lines.append(f"Verdict: {verdict_line}")
+    lines.append("Results")
+    lines.append(f"Occurrences total: {_format_hours(occurrences_total)}")
+    lines.append(f"Total cost: {_format_currency(total_cost)}")
+    lines.append(f"Total hours: {_format_hours(total_hours)}")
+    lines.append(f"Cost per occurrence: {_format_currency(cost_per_occurrence)}")
+    lines.append(f"Primary metric — Effective cost per hour: {_format_currency(effective_cph)}")
+    lines.append(f"Minutes per dollar: {minutes_per_dollar:,.2f}")
     lines.append("")
-    lines.append("Sanity checks:")
-    checks = []
-    checks.append(f"* Assumes {frequency.lower()} usage" + (f" for {timeframe_label}" if timeframe_label else ""))
+    lines.append("Verdict")
+    lines.append(f"{verdict_line}{extra_benchmark}")
+    lines.append("• Assumes usage is consistent over the stated timeframe.")
     if mode == "Time saved":
-        checks.append("* Treats hours as time saved")
+        lines.append("• Treats minutes as time saved.")
     else:
-        checks.append("* Treats hours as enjoyment time")
-    checks.append("* Linear scaling of cost and hours across timeframe")
-    if not str(hourly_value_raw).strip():
-        checks.append("* Verdict based on break-even hourly value")
-    else:
-        checks.append("* Verdict compared to your stated hourly value")
-    if notes:
-        checks.append(f"* Notes: {notes}")
-    lines.extend(checks)
+        lines.append("• Treats minutes as enjoyment time.")
+    lines.append("• Linear scaling of cost and minutes across the timeframe.")
 
     return {"output": "\n".join(lines)}
