@@ -271,29 +271,35 @@
             padding: 52px 0 40px;
         }
 
-        .products {
-            margin: 26px 0 24px;
-            gap: 22px;
+        .home-page .products {
+            margin: 28px 0 24px;
+            gap: 26px;
         }
 
-        .product-grid {
-            gap: 22px;
+        .home-page .product-grid {
+            gap: 26px;
         }
 
-        .product-card {
-            padding: 22px 18px 22px;
+        .home-page .product-card {
+            padding: 24px 20px 26px;
         }
 
-        .product-card h3 {
-            margin: 0 0 12px;
+        .home-page .product-card h3 {
+            margin: 0 0 14px;
         }
 
-        .product-card p {
-            margin: 0 0 16px;
+        .home-page .product-card p {
+            margin-top: 0;
+            margin-bottom: 18px;
+        }
+
+        .home-page .cta-inline {
+            margin-top: 20px;
+            padding-bottom: 6px;
         }
 
         .home-shell {
-            padding-bottom: 96px;
+            padding-bottom: 112px;
         }
     }
 
@@ -329,6 +335,7 @@
 {% endblock %}
 
 {% block content %}
+<div class="home-page">
 <div class="home-shell">
     <div class="hero-wrap">
         <section class="hero container">
@@ -386,5 +393,6 @@
         </section>
 
     </main>
+</div>
 </div>
 {% endblock %}
