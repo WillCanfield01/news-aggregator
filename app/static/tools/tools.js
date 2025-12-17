@@ -906,9 +906,162 @@
             }
         };
 
-        const renderOutput = (text) => {
-            if (outputPre) {
-                outputPre.textContent = text || "";
+        const renderOutput = (data) => {
+            if (!outputEl) return;
+            // clear previous cards
+            const oldCard = outputEl.querySelector(".result-card");
+            if (oldCard) oldCard.remove();
+            if (outputPre) outputPre.textContent = "";
+
+            const isShareCard = data && typeof data === "object" && data.share_card;
+            if (!isShareCard) {
+                if (outputPre) outputPre.textContent = typeof data === "string" ? data : "";
+                return;
+            }
+
+            const cardData = data.share_card;
+            const details = data.details || [];
+            const card = document.createElement("div");
+            card.className = "result-card";
+
+            const title = document.createElement("div");
+            title.className = "result-title";
+            title.textContent = cardData.title || "Result";
+            card.appendChild(title);
+
+            const primary = document.createElement("div");
+            primary.className = "result-primary";
+            const primaryLabel = document.createElement("div");
+            primaryLabel.className = "result-primary-label";
+            primaryLabel.textContent = cardData.primary_metric_label || "Primary metric";
+            const primaryValue = document.createElement("div");
+            primaryValue.className = "result-primary-value";
+            primaryValue.textContent = cardData.primary_metric_value || "";
+            primary.appendChild(primaryLabel);
+            primary.appendChild(primaryValue);
+            card.appendChild(primary);
+
+            const secondary = document.createElement("div");
+            secondary.className = "result-secondary";
+            const breakLabel = document.createElement("div");
+            breakLabel.textContent = cardData.break_even_label || "Break-even";
+            const breakValue = document.createElement("div");
+            breakValue.className = "result-secondary-value";
+            breakValue.textContent = cardData.break_even_value || "";
+            secondary.appendChild(breakLabel);
+            secondary.appendChild(breakValue);
+            card.appendChild(secondary);
+
+            const verdict = document.createElement("div");
+            verdict.className = "pill";
+            if (cardData.pill_class) verdict.classList.add(cardData.pill_class);
+            verdict.textContent = cardData.verdict || "";
+            card.appendChild(verdict);
+
+            if (cardData.subtext) {
+                const sub = document.createElement("div");
+                sub.className = "result-subtext";
+                sub.textContent = cardData.subtext;
+                card.appendChild(sub);
+            }
+
+            if (details.length) {
+                const rows = document.createElement("div");
+                rows.className = "detail-rows";
+                details.forEach((row) => {
+                    const r = document.createElement("div");
+                    r.className = "detail-row";
+                    const l = document.createElement("span");
+                    l.textContent = row.label;
+                    const v = document.createElement("span");
+                    v.textContent = row.value;
+                    r.append(l, v);
+                    rows.appendChild(r);
+                });
+                card.appendChild(rows);
+            }
+
+            outputEl.appendChild(card);
+
+            const comparison = data.comparison;
+            if (comparison && comparison.enabled) {
+                const compare = document.createElement("div");
+                compare.className = "compare-panel";
+                const titleRow = document.createElement("div");
+                titleRow.className = "compare-title";
+                titleRow.textContent = "Option A vs B";
+                compare.appendChild(titleRow);
+
+                const grid = document.createElement("div");
+                grid.className = "result-grid";
+                const aCol = document.createElement("div");
+                aCol.className = "compare-col";
+                const aName = document.createElement("div");
+                aName.className = "compare-name";
+                aName.textContent = comparison.a?.name || "Option A";
+                const aMetric = document.createElement("div");
+                aMetric.className = "compare-metric";
+                aMetric.textContent = typeof comparison.a?.primary_metric_value === "number" ? comparison.a.primary_metric_value.toFixed(2) : (comparison.a?.primary_metric_value || "");
+                if (comparison.winner === "A") aCol.classList.add("winner");
+                aCol.append(aName, aMetric);
+
+                const bCol = document.createElement("div");
+                bCol.className = "compare-col";
+                const bName = document.createElement("div");
+                bName.className = "compare-name";
+                bName.textContent = comparison.b?.name || "Option B";
+                const bMetric = document.createElement("div");
+                bMetric.className = "compare-metric";
+                bMetric.textContent = typeof comparison.b?.primary_metric_value === "number" ? comparison.b.primary_metric_value.toFixed(2) : (comparison.b?.primary_metric_value || "");
+                if (comparison.winner === "B") bCol.classList.add("winner");
+                bCol.append(bName, bMetric);
+
+                grid.append(aCol, bCol);
+                compare.appendChild(grid);
+
+                const note = document.createElement("div");
+                note.className = "compare-note";
+                note.textContent = comparison.break_even_note || "";
+                compare.appendChild(note);
+
+                outputEl.appendChild(compare);
+            }
+
+            const nudge = data.nudge;
+            if (nudge && nudge.enabled) {
+                const nudgePanel = document.createElement("div");
+                nudgePanel.className = "nudge-panel";
+                const nTitle = document.createElement("div");
+                nTitle.className = "compare-title";
+                nTitle.textContent = "Decision nudge";
+                nudgePanel.appendChild(nTitle);
+
+                const rows = document.createElement("div");
+                rows.className = "detail-rows";
+                const multRow = document.createElement("div");
+                multRow.className = "detail-row";
+                multRow.innerHTML = `<span>Expected usage multiplier</span><span>${nudge.expected_usage_multiplier || ""}</span>`;
+                rows.appendChild(multRow);
+                const adjRow = document.createElement("div");
+                adjRow.className = "detail-row";
+                adjRow.innerHTML = `<span>${nudge.adjusted_primary_metric_label || "Adjusted"}</span><span>${nudge.adjusted_primary_metric_value || ""}</span>`;
+                rows.appendChild(adjRow);
+                if (nudge.return_window_days) {
+                    const rwRow = document.createElement("div");
+                    rwRow.className = "detail-row";
+                    rwRow.innerHTML = `<span>Return window</span><span>${nudge.return_window_days} days</span>`;
+                    rows.appendChild(rwRow);
+                }
+                nudgePanel.appendChild(rows);
+
+                if (nudge.note) {
+                    const note = document.createElement("div");
+                    note.className = "compare-note";
+                    note.textContent = nudge.note;
+                    nudgePanel.appendChild(note);
+                }
+
+                outputEl.appendChild(nudgePanel);
             }
         };
 
