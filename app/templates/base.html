@@ -16,16 +16,17 @@
     </script>
 
     <style>
-        /* Layout for footer always at bottom */
-        html {
-            min-height: 100%;
+        /* Layout for footer always at bottom; keep body as the scroll container */
+        html,
+        body {
             height: auto;
+            min-height: 100%;
         }
 
         body {
             margin: 0;
-            min-height: 100%;
             overflow-x: hidden;
+            overflow-y: auto;
             font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
             background: #f6f4ed;
         }
@@ -39,7 +40,6 @@
         .site-main {
             flex: 1 0 auto;
             min-height: 0;
-            padding-bottom: env(safe-area-inset-bottom);
         }
 
         .page-wrapper {
@@ -49,13 +49,11 @@
         .site-footer {
             margin-top: auto;
             position: static;
-            padding-bottom: env(safe-area-inset-bottom);
         }
 
         footer.footer-note {
             text-align: center;
             padding: 20px;
-            padding-bottom: calc(20px + env(safe-area-inset-bottom));
             font-size: 0.95rem;
             color: #666;
             background: #fafafa;
@@ -89,10 +87,23 @@
             border: 1px solid #ddd;
         }
 
+        /* Debug helper (opt-in by adding class="debug-outline" to body) */
+        body.debug-outline * {
+            outline: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
         /* Mobile adjustments */
         @media (max-width: 768px) {
             .site-main {
-                padding-bottom: max(24px, env(safe-area-inset-bottom));
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+
+            .site-footer {
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+
+            footer.footer-note {
+                padding-bottom: calc(20px + env(safe-area-inset-bottom));
             }
 
             .article-title {
