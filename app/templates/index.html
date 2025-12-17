@@ -21,6 +21,7 @@
         margin: 0;
         font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
         color: var(--ink);
+        overflow-y: auto;
     }
 
     .container {
@@ -102,6 +103,10 @@
         margin: 36px 0 10px;
         display: grid;
         gap: 18px;
+    }
+
+    .home-shell {
+        padding-bottom: 72px;
     }
 
     .product-grid {
@@ -255,6 +260,10 @@
         .products {
             margin-top: 20px;
         }
+
+        .home-shell {
+            padding-bottom: 64px;
+        }
     }
 
     .below {
@@ -289,60 +298,62 @@
 {% endblock %}
 
 {% block content %}
-<div class="hero-wrap">
-    <section class="hero container">
-        <h1 class="site-title">The Real Roundup</h1>
-        <div class="subtext">
-            Daily security briefings, interactive games, and practical tools to keep your skills sharp.
-        </div>
-        <div class="cta-row">
-            <a href="/all-articles/articles" class="cta-primary">Browse all briefings</a>
-            <a href="/escape/play" class="main-btn">Play Daily Escape</a>
-            <a href="/roulette" class="main-btn">Play Timeline Roulette</a>
-            <a href="/tools" class="main-btn">Tools Hub</a>
+<div class="home-shell">
+    <div class="hero-wrap">
+        <section class="hero container">
+            <h1 class="site-title">The Real Roundup</h1>
+            <div class="subtext">
+                Daily security briefings, interactive games, and practical tools to keep your skills sharp.
+            </div>
+            <div class="cta-row">
+                <a href="/all-articles/articles" class="cta-primary">Browse all briefings</a>
+                <a href="/escape/play" class="main-btn">Play Daily Escape</a>
+                <a href="/roulette" class="main-btn">Play Timeline Roulette</a>
+                <a href="/tools" class="main-btn">Tools Hub</a>
 
-        </div>
-    </section>
+            </div>
+        </section>
+    </div>
+
+    <main class="container">
+        <section class="products">
+            <div class="product-grid">
+                <div class="product-card">
+                    <div class="product-meta">
+                        <span class="pill">Briefings</span>
+                    </div>
+                    <h3>Daily Security Briefing</h3>
+                    <p>Clear, daily cybersecurity rundown with the key incidents, CVEs, and takeaways for your org.</p>
+                    <a class="cta-inline" href="/all-articles/articles">Browse all briefings →</a>
+                </div>
+                <div class="product-card">
+                    <div class="product-meta">
+                        <span class="pill">Game</span>
+                        <span class="pill">Daily</span>
+                    </div>
+                    <h3>Daily Escape</h3>
+                    <p>Crack today’s security-themed mini escape room in just a few guesses. Fresh puzzle every day.</p>
+                    <a class="cta-inline" href="/escape/play">Play today’s Escape →</a>
+                </div>
+                <div class="product-card">
+                    <div class="product-meta">
+                        <span class="pill">Trivia</span>
+                    </div>
+                    <h3>Timeline Roulette</h3>
+                    <p>Spot the real historical event among two fakes. Keep your streak alive and climb the leaderboard.</p>
+                    <a class="cta-inline" href="/roulette">Play Timeline Roulette →</a>
+                </div>
+                <div class="product-card">
+                    <div class="product-meta">
+                        <span class="pill">Tools</span>
+                    </div>
+                    <h3>Tools Hub</h3>
+                    <p>Purpose-built utilities for your workflow—resume polishers, habit trackers, and more to come.</p>
+                    <a class="cta-inline" href="/tools">Browse tools →</a>
+                </div>
+            </div>
+        </section>
+
+    </main>
 </div>
-
-<main class="container">
-    <section class="products">
-        <div class="product-grid">
-            <div class="product-card">
-                <div class="product-meta">
-                    <span class="pill">Briefings</span>
-                </div>
-                <h3>Daily Security Briefing</h3>
-                <p>Clear, daily cybersecurity rundown with the key incidents, CVEs, and takeaways for your org.</p>
-                <a class="cta-inline" href="/all-articles/articles">Browse all briefings →</a>
-            </div>
-            <div class="product-card">
-                <div class="product-meta">
-                    <span class="pill">Game</span>
-                    <span class="pill">Daily</span>
-                </div>
-                <h3>Daily Escape</h3>
-                <p>Crack today’s security-themed mini escape room in just a few guesses. Fresh puzzle every day.</p>
-                <a class="cta-inline" href="/escape/play">Play today’s Escape →</a>
-            </div>
-            <div class="product-card">
-                <div class="product-meta">
-                    <span class="pill">Trivia</span>
-                </div>
-                <h3>Timeline Roulette</h3>
-                <p>Spot the real historical event among two fakes. Keep your streak alive and climb the leaderboard.</p>
-                <a class="cta-inline" href="/roulette">Play Timeline Roulette →</a>
-            </div>
-            <div class="product-card">
-                <div class="product-meta">
-                    <span class="pill">Tools</span>
-                </div>
-                <h3>Tools Hub</h3>
-                <p>Purpose-built utilities for your workflow—resume polishers, habit trackers, and more to come.</p>
-                <a class="cta-inline" href="/tools">Browse tools →</a>
-            </div>
-        </div>
-    </section>
-
-</main>
 {% endblock %}
