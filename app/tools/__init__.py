@@ -8,7 +8,13 @@ from uuid import uuid4
 from flask import Blueprint, abort, jsonify, render_template, request, url_for
 
 from app.extensions import db
-from app.tools.handlers import run_expense_splitter, run_resume_bullets, run_trip_planner, run_daily_phrase
+from app.tools.handlers import (
+    run_expense_splitter,
+    run_resume_bullets,
+    run_trip_planner,
+    run_daily_phrase,
+    run_decision_helper,
+)
 from app.tools.models import SharedExpenseEvent
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 
@@ -285,6 +291,16 @@ def run_tool():
             return _error_response("INVALID_REQUEST", str(exc), request_id, status=400)
         except Exception as exc:
             return _error_response("TOOL_EXECUTION_FAILED", f"Daily phrase failed: {exc}", request_id, status=500)
+
+    if tool_slug == "decision-helper":
+        try:
+            result = run_decision_helper(validated_input)
+            data = {"output": result.get("output", "")}
+            return _build_response(True, data=data, error=None, request_id=request_id), 200
+        except ValueError as exc:
+            return _error_response("INVALID_REQUEST", str(exc), request_id, status=400)
+        except Exception as exc:
+            return _error_response("TOOL_EXECUTION_FAILED", f"Decision helper failed: {exc}", request_id, status=500)
 
     if tool_slug == "expense-splitter":
         try:

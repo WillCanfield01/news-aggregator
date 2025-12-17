@@ -15,6 +15,36 @@ _client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _DEFAULT_MODEL = "gpt-4.1-mini"
 _DAILY_PHRASE_CACHE: Dict[str, Dict[str, str]] = {}
 
+def _parse_decision_options(raw: str) -> List[Dict[str, str]]:
+    lines = [line.strip() for line in (raw or "").splitlines() if line.strip()]
+    options: List[Dict[str, str]] = []
+    for line in lines:
+        # Format A: Name | pros | cons
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 2:
+            name = parts[0]
+            pros = parts[1] if len(parts) >= 2 else ""
+            cons = parts[2] if len(parts) >= 3 else ""
+            options.append({"name": name, "pros": pros, "cons": cons})
+            continue
+
+        # Format B: Name, pros: ..., cons: ...
+        match = re.match(r"^(?P<name>[^,]+),\s*pros:\s*(?P<pros>.*?)(?:,\s*cons:\s*(?P<cons>.*))?$", line, re.I)
+        if match:
+            options.append(
+                {
+                    "name": match.group("name").strip(),
+                    "pros": (match.group("pros") or "").strip(),
+                    "cons": (match.group("cons") or "").strip(),
+                }
+            )
+            continue
+
+        # Fallback: treat as name only
+        options.append({"name": line, "pros": "", "cons": ""})
+
+    return options
+
 
 def _clean_daily_phrase_value(value: Any) -> str:
     text = str(value or "").strip().strip("\"'")
@@ -520,5 +550,68 @@ def run_daily_phrase(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
         _DAILY_PHRASE_CACHE[cache_key] = data
         return data
+    except Exception as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+
+
+# ---- Decision Helper ----
+
+
+def run_decision_helper(payload: Dict[str, Any]) -> Dict[str, Any]:
+    decision = (payload.get("decision") or "").strip()
+    options_raw = payload.get("options") or ""
+    priority = (payload.get("priority") or "Balanced").strip() or "Balanced"
+    constraints = (payload.get("constraints") or "").strip()
+
+    if not decision:
+        raise ValueError('"decision" is required.')
+
+    parsed_options = _parse_decision_options(options_raw)
+    parsed_options = [opt for opt in parsed_options if opt.get("name")]
+    if len(parsed_options) < 2:
+        raise ValueError("Please provide at least two options (one per line).")
+
+    options_text = "\n".join(
+        f"- {opt['name']}\n  pros: {opt.get('pros', '') or '—'}\n  cons: {opt.get('cons', '') or '—'}"
+        for opt in parsed_options
+    )
+
+    prompt = (
+        "You are a concise decision coach.\n"
+        "Restate the decision in one line.\n"
+        "List the options with pros/cons in a compact table-like summary.\n"
+        "If and only if critical info is missing, ask up to 2 short clarifying questions; otherwise proceed.\n"
+        "Provide a clear recommendation aligned to the stated priority and constraints.\n"
+        "Add 3 quick next steps.\n"
+        "Keep it brief and scannable.\n"
+        f"Decision: {decision}\n"
+        f"Priority: {priority}\n"
+        f"Constraints: {constraints or 'None provided'}\n"
+        "Options:\n"
+        f"{options_text}"
+    )
+
+    try:
+        result = _client.chat.completions.create(
+            model=_DEFAULT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a structured decision helper. Be concise, neutral, and practical. Never output markdown tables.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=650,
+            temperature=0.25,
+            timeout=15,
+        )
+        content = (result.choices[0].message.content or "").strip()
+        output_lines = [
+            f"Decision: {decision}",
+            "",
+            "Options:",
+            content,
+        ]
+        return {"output": "\n".join(output_lines)}
     except Exception as exc:
         raise RuntimeError(f"OpenAI request failed: {exc}") from exc

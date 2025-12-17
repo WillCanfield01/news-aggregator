@@ -181,6 +181,50 @@ def get_tools_registry() -> List[ToolEntry]:
                 },
             ],
         },
+        {
+            "slug": "decision-helper",
+            "title": "Personal Decision Helper",
+            "description": "Compare options and get a clear recommendation.",
+            "category": "Productivity",
+            "is_enabled": True,
+            "output_label": "Recommendation",
+            "inputs": [
+                {
+                    "name": "decision",
+                    "label": "What decision are you making?",
+                    "type": "text",
+                    "required": True,
+                    "max_chars": 120,
+                    "placeholder": "Where should I move?",
+                },
+                {
+                    "name": "options",
+                    "label": "Options with pros/cons",
+                    "type": "textarea",
+                    "required": True,
+                    "max_chars": 3000,
+                    "placeholder": "Option A | pros | cons\nOption B, pros: ..., cons: ...",
+                },
+                {
+                    "name": "priority",
+                    "label": "Priority",
+                    "type": "select",
+                    "required": False,
+                    "max_chars": 30,
+                    "placeholder": "",
+                    "options": ["Balanced", "Lowest risk", "Highest upside", "Lowest cost", "Fastest", "Most fun"],
+                    "default": "Balanced",
+                },
+                {
+                    "name": "constraints",
+                    "label": "Constraints (optional)",
+                    "type": "textarea",
+                    "required": False,
+                    "max_chars": 1000,
+                    "placeholder": "Budget 500, must be done by Friday, no travel",
+                },
+            ],
+        },
     ]
 
 
