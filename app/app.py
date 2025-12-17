@@ -1,6 +1,7 @@
 # app/app.py
-import os, re
+import os, re, subprocess
 from datetime import datetime
+from pathlib import Path
 from flask import Flask, render_template, Response, url_for, current_app, jsonify, redirect
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
@@ -11,6 +12,24 @@ from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
 from app.tools import tools_bp, api_tools_bp
 from app.scripts.generate_timeline_round import ensure_today_round
+
+
+def _compute_asset_version() -> str:
+    explicit = os.getenv("ASSET_VERSION")
+    if explicit:
+        return explicit
+    try:
+        repo_root = Path(__file__).resolve().parent.parent
+        sha = (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=repo_root, stderr=subprocess.DEVNULL)
+            .decode()
+            .strip()
+        )
+        if sha:
+            return sha
+    except Exception:
+        pass
+    return datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
 def schedule_daily_reddit_article(app):
     def scheduled_job():
@@ -37,6 +56,8 @@ def create_app():
 
     # ---- Configs ----
     db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
+    asset_version = _compute_asset_version()
+    app.config["ASSET_VERSION"] = asset_version
 
     # Normalize to psycopg v3 driver
     if db_url.startswith("postgres://"):
@@ -55,6 +76,15 @@ def create_app():
     db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = "aggregator.login"
+
+    @app.url_defaults
+    def add_asset_version(endpoint, values):
+        if endpoint == "static" and values is not None and "v" not in values:
+            values["v"] = app.config.get("ASSET_VERSION", asset_version)
+
+    @app.context_processor
+    def inject_asset_version():
+        return {"asset_version": app.config.get("ASSET_VERSION", asset_version)}
 
     # ---- Import models so SQLAlchemy knows them, then (optionally) create tables ----
     from app.escape import models as _escape_models  # noqa: F401
