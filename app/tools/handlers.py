@@ -615,3 +615,151 @@ def run_decision_helper(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"output": "\n".join(output_lines)}
     except Exception as exc:
         raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+
+
+# ---- Worth It Calculator ----
+
+
+def _parse_money(val: str) -> float:
+    try:
+        clean = re.sub(r"[,$]", "", str(val)).strip()
+        if clean.startswith("$"):
+            clean = clean[1:]
+        amount = float(clean)
+    except Exception:
+        raise ValueError("Enter cost as a number (e.g., 25 or 25.99).")
+    if amount <= 0:
+        raise ValueError("Cost must be greater than zero.")
+    return amount
+
+
+def _parse_hours(val: str) -> float:
+    try:
+        hours = float(str(val).strip())
+    except Exception:
+        raise ValueError("Enter hours as a number (e.g., 2 or 2.5).")
+    if hours <= 0:
+        raise ValueError("Hours must be greater than zero.")
+    return hours
+
+
+def _parse_timeframe(raw: str, frequency: str) -> tuple[float, str]:
+    raw = (raw or "").strip().lower()
+    if not raw:
+        if frequency == "Weekly":
+            return 4.0, "weeks"
+        if frequency == "Monthly":
+            return 1.0, "months"
+        return 0.0, ""
+
+    match = re.match(r"^(\d+(?:\.\d+)?)(\s*(weeks?|w|months?|m))$", raw)
+    if not match:
+        raise ValueError("Timeframe must be like '4 weeks' or '3 months'.")
+    amount = float(match.group(1))
+    unit_raw = match.group(2).strip()
+    if amount <= 0:
+        raise ValueError("Timeframe must be greater than zero.")
+    if unit_raw.startswith("w"):
+        return amount, "weeks"
+    if unit_raw.startswith("m"):
+        return amount, "months"
+    raise ValueError("Timeframe must specify weeks or months.")
+
+
+def _format_currency(val: float) -> str:
+    return f"${val:,.2f}"
+
+
+def _format_hours(val: float) -> str:
+    return f"{val:,.2f}".rstrip("0").rstrip(".")
+
+
+def run_worth_it(payload: Dict[str, Any]) -> Dict[str, Any]:
+    item_name = (payload.get("item_name") or "").strip()
+    cost_raw = payload.get("cost") or ""
+    hours_raw = payload.get("hours") or ""
+    mode = (payload.get("mode") or "Time saved").strip() or "Time saved"
+    frequency = (payload.get("frequency") or "One-time").strip() or "One-time"
+    timeframe_raw = payload.get("timeframe") or ""
+    hourly_value_raw = payload.get("hourly_value") or ""
+    notes = (payload.get("notes") or "").strip()
+
+    cost = _parse_money(cost_raw)
+    hours = _parse_hours(hours_raw)
+
+    if frequency not in {"One-time", "Weekly", "Monthly"}:
+        raise ValueError("Frequency must be One-time, Weekly, or Monthly.")
+
+    timeframe_amount, timeframe_unit = _parse_timeframe(timeframe_raw, frequency)
+
+    occurrences = 1.0
+    if frequency == "Weekly":
+        occurrences = timeframe_amount if timeframe_unit in {"weeks", ""} else timeframe_amount * 4.0
+    elif frequency == "Monthly":
+        occurrences = timeframe_amount if timeframe_unit in {"months", ""} else max(timeframe_amount / 4.0, 0.0)
+
+    total_cost = cost * occurrences
+    total_hours = hours * occurrences
+    base_cph = cost / hours
+    effective_cph = total_cost / total_hours if total_hours > 0 else base_cph
+
+    hourly_value_val = None
+    verdict_line = "Break-even hourly value: " + _format_currency(effective_cph)
+    if str(hourly_value_raw).strip():
+        try:
+            hourly_value_val = _parse_money(hourly_value_raw)
+        except ValueError as exc:
+            raise ValueError(str(exc))
+        if hourly_value_val > effective_cph:
+            verdict_line = f"Worth it if your time is worth {_format_currency(hourly_value_val)}/hr (breakeven {_format_currency(effective_cph)}/hr)."
+        elif hourly_value_val < effective_cph:
+            verdict_line = f"Not worth it if your time is below {_format_currency(effective_cph)}/hr (you entered {_format_currency(hourly_value_val)}/hr)."
+        else:
+            verdict_line = f"Neutral: matches your time value at {_format_currency(hourly_value_val)}/hr."
+
+    timeframe_label = ""
+    if frequency == "Weekly":
+        timeframe_label = f"{_format_hours(timeframe_amount)} week(s)"
+    elif frequency == "Monthly":
+        timeframe_label = f"{_format_hours(timeframe_amount)} month(s)"
+
+    lines = []
+    lines.append(f"Item: {item_name or 'N/A'}")
+    lines.append(f"Mode: {mode}")
+    lines.append("")
+    lines.append("Inputs:")
+    lines.append(f"- Cost: {_format_currency(cost)}")
+    lines.append(f"- Hours per use: {_format_hours(hours)}")
+    lines.append(f"- Frequency: {frequency}" + (f" over {timeframe_label}" if timeframe_label else ""))
+    if hourly_value_val is not None:
+        lines.append(f"- Your hourly value: {_format_currency(hourly_value_val)}")
+    if notes:
+        lines.append(f"- Notes: {notes}")
+    lines.append("")
+    lines.append("Results:")
+    lines.append(f"- Cost per hour: {_format_currency(base_cph)}")
+    if frequency != "One-time":
+        lines.append(f"- Total cost over timeframe: {_format_currency(total_cost)}")
+        lines.append(f"- Total hours over timeframe: {_format_hours(total_hours)}")
+        lines.append(f"- Effective cost per hour: {_format_currency(effective_cph)}")
+    else:
+        lines.append(f"- Effective cost per hour: {_format_currency(effective_cph)}")
+    lines.append(f"Verdict: {verdict_line}")
+    lines.append("")
+    lines.append("Sanity checks:")
+    checks = []
+    checks.append(f"* Assumes {frequency.lower()} usage" + (f" for {timeframe_label}" if timeframe_label else ""))
+    if mode == "Time saved":
+        checks.append("* Treats hours as time saved")
+    else:
+        checks.append("* Treats hours as enjoyment time")
+    checks.append("* Linear scaling of cost and hours across timeframe")
+    if not str(hourly_value_raw).strip():
+        checks.append("* Verdict based on break-even hourly value")
+    else:
+        checks.append("* Verdict compared to your stated hourly value")
+    if notes:
+        checks.append(f"* Notes: {notes}")
+    lines.extend(checks)
+
+    return {"output": "\n".join(lines)}
