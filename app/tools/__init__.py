@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
@@ -16,8 +17,13 @@ from app.tools.handlers import (
     run_decision_helper,
     run_worth_it,
     run_social_post_polisher,
+    run_grocery_list_create,
+    run_grocery_list_get,
+    run_grocery_list_update,
+    run_countdown_create_share,
+    run_countdown_get,
 )
-from app.tools.models import SharedExpenseEvent
+from app.tools.models import SharedExpenseEvent, default_expiry
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 
 # UI blueprint
@@ -193,6 +199,35 @@ def trip_share_view(token: str):
     )
 
 
+@tools_bp.route("/grocery/<token>", methods=["GET"])
+def grocery_share_view(token: str):
+    tool = get_tool_by_slug("grocery-list")
+    if not tool:
+        abort(404)
+    # Render the regular tool page; the client UI loads the shared payload via /api/tools/run
+    return render_template(
+        "tools/tool_page.html",
+        tool=tool,
+        view_mode=False,
+        share_url=url_for("tools.grocery_share_view", token=token),
+        callout_message="This list is shared. Changes auto-save for anyone with the link.",
+    )
+
+
+@tools_bp.route("/countdown/<token>", methods=["GET"])
+def countdown_share_view(token: str):
+    tool = get_tool_by_slug("countdown")
+    if not tool:
+        abort(404)
+    return render_template(
+        "tools/tool_page.html",
+        tool=tool,
+        view_mode=False,
+        share_url=url_for("tools.countdown_share_view", token=token),
+        callout_message="Shared countdown. Save it locally if you want to track it on this device.",
+    )
+
+
 @tools_bp.route("/<slug>", methods=["GET"])
 def tool_page(slug: str):
     tool = get_tool_by_slug(slug)
@@ -326,6 +361,127 @@ def run_tool():
             return _error_response("TOOL_INPUT_INVALID", str(exc), request_id, status=400)
         except Exception as exc:
             return _error_response("TOOL_EXECUTION_FAILED", f"Social Post Polisher failed: {exc}", request_id, status=500)
+
+    if tool_slug == "grocery-list":
+        try:
+            # Preserve structured fields beyond the schema-defined ones (token, action, items)
+            merged_input: Dict[str, Any] = dict(validated_input)
+            for k, v in (tool_input or {}).items():
+                if k not in merged_input:
+                    merged_input[k] = v
+
+            # Rate limiting hook: integrate limiter middleware before enabling public traffic.
+            # Grocery lists can be chatty due to autosave; keep this as a future integration point.
+
+            action = (merged_input.get("action") or "create").strip().lower()
+            if action not in {"create", "get", "update"}:
+                return _error_response("TOOL_INPUT_INVALID", "Action must be create, get, or update.", request_id, status=400)
+
+            # Lightweight payload size guard (allows larger than MAX_INPUT_CHARS for lists)
+            if _aggregate_string_length(merged_input) > 60_000:
+                return _error_response("TOOL_INPUT_INVALID", "Payload too large. Try removing some items.", request_id, status=400)
+
+            if action == "create":
+                # Create a new shared token record
+                token = secrets.token_urlsafe(24)[:32]
+                created = run_grocery_list_create(merged_input, token=token)
+                payload = created.get("payload") or {}
+                event = SharedExpenseEvent(
+                    token=token,
+                    payload_json=json.dumps(payload),
+                )
+                db.session.add(event)
+                db.session.commit()
+                share_url = url_for("tools.grocery_share_view", token=token)
+                data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
+                return _build_response(True, data=data, error=None, request_id=request_id), 200
+
+            # get/update requires token
+            token = (merged_input.get("token") or "").strip()
+            if not token:
+                return _error_response("TOOL_INPUT_INVALID", "Token is required.", request_id, status=400)
+
+            event = SharedExpenseEvent.query.filter_by(token=token).first()
+            now = datetime.now(timezone.utc)
+            if not event or not event.expires_at or event.expires_at < now:
+                return _error_response("NOT_FOUND", "This grocery list link is unavailable or expired.", request_id, status=404)
+
+            current_payload = event.to_payload()
+            if current_payload.get("type") != "grocery-list":
+                return _error_response("INVALID_REQUEST", "This token does not belong to a grocery list.", request_id, status=400)
+
+            if action == "get":
+                run_grocery_list_get(merged_input)
+                share_url = url_for("tools.grocery_share_view", token=token)
+                data = {"output": {"token": token, "share_url": share_url, "payload": current_payload}}
+                return _build_response(True, data=data, error=None, request_id=request_id), 200
+
+            # update
+            updated = run_grocery_list_update(merged_input, current_payload)
+            next_payload = updated.get("payload") or {}
+            event.payload_json = json.dumps(next_payload)
+            db.session.commit()
+            share_url = url_for("tools.grocery_share_view", token=token)
+            data = {"output": {"token": token, "share_url": share_url, "payload": next_payload}}
+            return _build_response(True, data=data, error=None, request_id=request_id), 200
+        except ValueError as exc:
+            return _error_response("TOOL_INPUT_INVALID", str(exc), request_id, status=400)
+        except Exception as exc:
+            db.session.rollback()
+            return _error_response("TOOL_EXECUTION_FAILED", f"Grocery list failed: {exc}", request_id, status=500)
+
+    if tool_slug == "countdown":
+        try:
+            merged_input: Dict[str, Any] = dict(validated_input)
+            for k, v in (tool_input or {}).items():
+                if k not in merged_input:
+                    merged_input[k] = v
+
+            # Rate limiting hook: integrate limiter middleware before enabling public traffic.
+            action = (merged_input.get("action") or "create_share").strip().lower()
+            if action not in {"create_share", "get"}:
+                return _error_response("TOOL_INPUT_INVALID", "Action must be create_share or get.", request_id, status=400)
+
+            if _aggregate_string_length(merged_input) > 10_000:
+                return _error_response("TOOL_INPUT_INVALID", "Payload too large.", request_id, status=400)
+
+            if action == "create_share":
+                token = secrets.token_urlsafe(24)[:32]
+                created = run_countdown_create_share(merged_input, token=token)
+                payload = created.get("payload") or {}
+                # Keep countdowns around longer than trip shares
+                event = SharedExpenseEvent(
+                    token=token,
+                    expires_at=default_expiry(days=365),
+                    payload_json=json.dumps(payload),
+                )
+                db.session.add(event)
+                db.session.commit()
+                share_url = url_for("tools.countdown_share_view", token=token)
+                data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
+                return _build_response(True, data=data, error=None, request_id=request_id), 200
+
+            token = (merged_input.get("token") or "").strip()
+            if not token:
+                return _error_response("TOOL_INPUT_INVALID", "Token is required.", request_id, status=400)
+            run_countdown_get(merged_input)
+
+            event = SharedExpenseEvent.query.filter_by(token=token).first()
+            now = datetime.now(timezone.utc)
+            if not event or not event.expires_at or event.expires_at < now:
+                return _error_response("NOT_FOUND", "This countdown link is unavailable or expired.", request_id, status=404)
+            current_payload = event.to_payload()
+            if current_payload.get("type") != "countdown":
+                return _error_response("INVALID_REQUEST", "This token does not belong to a countdown.", request_id, status=400)
+
+            share_url = url_for("tools.countdown_share_view", token=token)
+            data = {"output": {"token": token, "share_url": share_url, "payload": current_payload}}
+            return _build_response(True, data=data, error=None, request_id=request_id), 200
+        except ValueError as exc:
+            return _error_response("TOOL_INPUT_INVALID", str(exc), request_id, status=400)
+        except Exception as exc:
+            db.session.rollback()
+            return _error_response("TOOL_EXECUTION_FAILED", f"Countdown failed: {exc}", request_id, status=500)
 
     if tool_slug == "expense-splitter":
         try:

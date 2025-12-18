@@ -771,6 +771,257 @@ User preferences:
     return {"output": output}
 
 
+# ---- Grocery List (deterministic, DB persisted via token) ----
+
+GROCERY_CATEGORIES: List[str] = [
+    "Produce",
+    "Dairy",
+    "Meat",
+    "Pantry",
+    "Frozen",
+    "Drinks",
+    "Snacks",
+    "Household",
+    "Other",
+]
+
+
+def categorize_grocery_item(text: str) -> str:
+    t = (text or "").strip().lower()
+    if not t:
+        return "Other"
+
+    def has_any(words: List[str]) -> bool:
+        return any(w in t for w in words)
+
+    if has_any(
+        [
+            "apple",
+            "banana",
+            "berries",
+            "strawberry",
+            "blueberry",
+            "raspberry",
+            "avocado",
+            "lettuce",
+            "spinach",
+            "kale",
+            "tomato",
+            "onion",
+            "garlic",
+            "potato",
+            "carrot",
+            "pepper",
+            "cucumber",
+            "broccoli",
+            "cauliflower",
+            "mushroom",
+            "orange",
+            "lemon",
+            "lime",
+            "grape",
+        ]
+    ):
+        return "Produce"
+
+    if has_any(["milk", "cheese", "yogurt", "butter", "cream", "egg", "eggs"]):
+        return "Dairy"
+
+    if has_any(["chicken", "beef", "pork", "turkey", "bacon", "sausage", "ham", "steak", "salmon", "tuna", "fish", "shrimp"]):
+        return "Meat"
+
+    if has_any(["frozen", "ice cream", "pizza", "nugget", "fries", "dumpling"]):
+        return "Frozen"
+
+    if has_any(["water", "sparkling", "soda", "coffee", "tea", "juice", "beer", "wine", "seltzer", "energy drink"]):
+        return "Drinks"
+
+    if has_any(["chips", "crackers", "cookie", "cookies", "chocolate", "nuts", "granola", "popcorn", "snack"]):
+        return "Snacks"
+
+    if has_any(
+        [
+            "paper towel",
+            "paper towels",
+            "toilet paper",
+            "detergent",
+            "dish soap",
+            "soap",
+            "shampoo",
+            "conditioner",
+            "toothpaste",
+            "trash bag",
+            "trash bags",
+            "cleaner",
+            "bleach",
+            "sponge",
+        ]
+    ):
+        return "Household"
+
+    if has_any(
+        [
+            "rice",
+            "pasta",
+            "bean",
+            "beans",
+            "lentil",
+            "lentils",
+            "flour",
+            "sugar",
+            "cereal",
+            "oat",
+            "oats",
+            "peanut butter",
+            "olive oil",
+            "oil",
+            "vinegar",
+            "spice",
+            "spices",
+            "sauce",
+            "broth",
+            "can",
+            "canned",
+        ]
+    ):
+        return "Pantry"
+
+    return "Other"
+
+
+def _normalize_grocery_text(text: Any) -> str:
+    s = str(text or "").strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def run_grocery_list_create(payload: Dict[str, Any], *, token: str) -> Dict[str, Any]:
+    name = _normalize_grocery_text(payload.get("list_name") or "")
+    if len(name) > 60:
+        raise ValueError("List name is too long (max 60 characters).")
+    if not name:
+        name = "Groceries"
+
+    now = datetime.now(timezone.utc).isoformat()
+    out_payload = {
+        "type": "grocery-list",
+        "name": name,
+        "items": [],
+        "updated_at": now,
+    }
+    return {"token": token, "payload": out_payload}
+
+
+def run_grocery_list_get(payload: Dict[str, Any]) -> Dict[str, Any]:
+    token = _normalize_grocery_text(payload.get("token") or "")
+    if not token:
+        raise ValueError("Token is required.")
+    return {"token": token}
+
+
+def run_grocery_list_update(payload: Dict[str, Any], current_payload: Dict[str, Any]) -> Dict[str, Any]:
+    token = _normalize_grocery_text(payload.get("token") or "")
+    if not token:
+        raise ValueError("Token is required.")
+
+    name = _normalize_grocery_text(payload.get("name") or payload.get("list_name") or current_payload.get("name") or "")
+    if len(name) > 60:
+        raise ValueError("List name is too long (max 60 characters).")
+    if not name:
+        name = "Groceries"
+
+    incoming_items = payload.get("items")
+    if not isinstance(incoming_items, list):
+        raise ValueError("Items must be a list.")
+    if len(incoming_items) > 300:
+        raise ValueError("Too many items (max 300).")
+
+    # Preserve created_at for existing items when possible
+    existing_by_id: Dict[str, Any] = {}
+    for it in (current_payload.get("items") or []):
+        if isinstance(it, dict) and it.get("id"):
+            existing_by_id[str(it.get("id"))] = it
+
+    normalized: List[Dict[str, Any]] = []
+    now = datetime.now(timezone.utc).isoformat()
+    for it in incoming_items:
+        if not isinstance(it, dict):
+            continue
+        item_id = _normalize_grocery_text(it.get("id") or "")
+        text = _normalize_grocery_text(it.get("text") or "")
+        checked = bool(it.get("checked"))
+        if not text:
+            continue
+        if len(text) > 80:
+            raise ValueError(f'Item "{text[:20]}..." is too long (max 80 characters).')
+        if not item_id:
+            item_id = secrets.token_hex(8)
+
+        created_at = (existing_by_id.get(item_id) or {}).get("created_at") or now
+        category = categorize_grocery_item(text)
+        normalized.append(
+            {
+                "id": item_id,
+                "text": text,
+                "category": category,
+                "checked": checked,
+                "created_at": created_at,
+            }
+        )
+
+    out_payload = dict(current_payload or {})
+    out_payload["type"] = "grocery-list"
+    out_payload["name"] = name
+    out_payload["items"] = normalized
+    out_payload["updated_at"] = now
+    return {"token": token, "payload": out_payload}
+
+
+# ---- Countdown (share payload only; math is client-side) ----
+
+COUNTDOWN_TIMEZONES = {"Local", "America/Boise", "UTC"}
+
+
+def _parse_iso_date_yyyy_mm_dd(raw: Any, *, label: str) -> str:
+    s = _normalize_grocery_text(raw)
+    if not s:
+        raise ValueError(f"{label} is required.")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        raise ValueError(f"{label} must be in YYYY-MM-DD format.")
+    return s
+
+
+def run_countdown_create_share(payload: Dict[str, Any], *, token: str) -> Dict[str, Any]:
+    name = _normalize_grocery_text(payload.get("event_name") or payload.get("name") or "")
+    if not name:
+        raise ValueError("Event name is required.")
+    if len(name) > 60:
+        raise ValueError("Event name is too long (max 60 characters).")
+
+    date = _parse_iso_date_yyyy_mm_dd(payload.get("event_date") or payload.get("date"), label="Event date")
+    tz = _normalize_grocery_text(payload.get("timezone") or "Local") or "Local"
+    if tz not in COUNTDOWN_TIMEZONES:
+        raise ValueError("Timezone must be Local, America/Boise, or UTC.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    out_payload = {
+        "type": "countdown",
+        "name": name,
+        "date": date,
+        "timezone": tz,
+        "created_at": now,
+        "updated_at": now,
+    }
+    return {"token": token, "payload": out_payload}
+
+
+def run_countdown_get(payload: Dict[str, Any]) -> Dict[str, Any]:
+    token = _normalize_grocery_text(payload.get("token") or "")
+    if not token:
+        raise ValueError("Token is required.")
+    return {"token": token}
+
+
 # ---- Worth It Calculator ----
 
 

@@ -700,6 +700,435 @@
     margin-bottom: 10px;
 }
 
+/* ---- Workout Log (client-only) ---- */
+.wl-section-title {
+    font-weight: 800;
+    margin: 14px 0 10px;
+    color: #0f172a;
+}
+
+.wl-sets {
+    margin-top: 6px;
+}
+
+.wl-table {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.wl-row {
+    display: grid;
+    grid-template-columns: 2.2fr 0.7fr 0.7fr 0.9fr 0.6fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+}
+
+.wl-head {
+    background: #f3f4f6;
+    font-weight: 800;
+    color: #111827;
+    font-size: 0.95rem;
+}
+
+.wl-item {
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+}
+
+.wl-item input,
+.wl-item select {
+    width: 100%;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 1rem;
+    background: #fff;
+}
+
+.wl-remove {
+    border: 1px solid #fee2e2;
+    background: #fef2f2;
+    color: #b91c1c;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-weight: 800;
+    cursor: pointer;
+    width: 100%;
+}
+
+.wl-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.wl-add {
+    margin-top: 10px;
+}
+
+.wl-recent {
+    margin-top: 6px;
+}
+
+.wl-list {
+    display: grid;
+    gap: 10px;
+}
+
+.wl-empty {
+    color: #6b7280;
+    font-size: 0.95rem;
+    padding: 8px 2px;
+}
+
+.wl-item-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #fff;
+}
+
+.wl-item-title {
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 4px;
+}
+
+.wl-item-sub {
+    color: #6b7280;
+    font-size: 0.95rem;
+}
+
+.wl-item-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.wl-small {
+    border: 1px solid #d7e3ff;
+    background: #eef3ff;
+    color: #1a46c7;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.wl-small.danger {
+    border-color: #fee2e2;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.wl-detail-card {
+    margin-top: 12px;
+    border: 1px dashed #d1d5db;
+    border-radius: 14px;
+    background: #f8fafc;
+    padding: 12px;
+}
+
+.wl-detail-header {
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 8px;
+}
+
+.wl-detail-close {
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-weight: 800;
+    cursor: pointer;
+    margin-bottom: 10px;
+}
+
+.wl-detail-rows {
+    display: grid;
+    gap: 8px;
+}
+
+.wl-detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.wl-detail-ex {
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.wl-detail-meta {
+    color: #475569;
+    font-weight: 700;
+}
+
+/* ---- Grocery List (shared) ---- */
+.gl-share {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px dashed #d1d5db;
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.gl-share-label {
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 8px;
+}
+
+.gl-share-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.gl-share-input {
+    flex: 1;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #fff;
+}
+
+.gl-controls {
+    margin-top: 12px;
+}
+
+.gl-note {
+    color: #6b7280;
+    font-size: 0.95rem;
+    margin-bottom: 10px;
+}
+
+.gl-add-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.gl-add-input {
+    flex: 1;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #fff;
+    font-size: 1rem;
+}
+
+.gl-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    align-items: center;
+}
+
+.gl-list {
+    margin-top: 14px;
+    display: grid;
+    gap: 12px;
+}
+
+.gl-section {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.gl-section-head {
+    background: #f3f4f6;
+    padding: 10px 12px;
+    font-weight: 900;
+    color: #0f172a;
+}
+
+.gl-item {
+    display: grid;
+    grid-template-columns: 28px 1fr 36px;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.gl-item.checked .gl-text {
+    color: #6b7280;
+    text-decoration: line-through;
+}
+
+.gl-check {
+    width: 20px;
+    height: 20px;
+}
+
+.gl-text {
+    font-weight: 700;
+    color: #0f172a;
+    word-break: break-word;
+}
+
+.gl-del {
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 10px;
+    height: 34px;
+    width: 34px;
+    font-weight: 900;
+    cursor: pointer;
+    color: #475569;
+}
+
+.gl-del:hover {
+    border-color: #fecaca;
+    color: #b91c1c;
+    background: #fef2f2;
+}
+
+.gl-empty {
+    color: #6b7280;
+    font-size: 0.98rem;
+    padding: 6px 2px;
+}
+
+/* ---- Countdown ---- */
+.cd-share {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px dashed #d1d5db;
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.cd-share-label {
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 8px;
+}
+
+.cd-share-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.cd-share-input {
+    flex: 1;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #fff;
+}
+
+.cd-card {
+    margin-top: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 18px;
+    padding: 18px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    box-shadow: 0 10px 22px rgba(17, 24, 39, 0.06);
+}
+
+.cd-title {
+    font-weight: 900;
+    color: #0f172a;
+    font-size: 1.15rem;
+    margin-bottom: 10px;
+}
+
+.cd-big {
+    font-weight: 1000;
+    font-size: 1.8rem;
+    color: #111827;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+}
+
+.cd-small {
+    color: #475569;
+    font-weight: 700;
+}
+
+.cd-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.cd-section-title {
+    margin-top: 16px;
+    font-weight: 900;
+    color: #0f172a;
+}
+
+.cd-items {
+    margin-top: 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.cd-empty {
+    color: #6b7280;
+    font-size: 0.98rem;
+    padding: 6px 2px;
+}
+
+.cd-item {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #fff;
+}
+
+.cd-item.active {
+    border-color: #a5b4fc;
+    box-shadow: 0 0 0 1px #dbeafe inset;
+}
+
+.cd-item-title {
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 4px;
+}
+
+.cd-item-sub {
+    color: #6b7280;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.cd-item-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
 @media (max-width: 640px) {
     .tools-shell {
         margin-top: 12px;
@@ -713,5 +1142,76 @@
 
     .tool-card {
         min-height: auto;
+    }
+
+    .wl-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .wl-head {
+        display: none;
+    }
+
+    .wl-item input:nth-child(1),
+    .wl-item select:nth-child(5),
+    .wl-item button:nth-child(6) {
+        grid-column: 1 / -1;
+    }
+
+    .wl-actions {
+        position: sticky;
+        bottom: 0;
+        padding: 10px 0 0;
+        background: #fff;
+        border-top: 1px solid #e5e7eb;
+    }
+
+    .wl-item-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .wl-item-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .gl-share-row,
+    .gl-add-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .gl-actions {
+        position: sticky;
+        bottom: 0;
+        padding: 10px 0 0;
+        background: #fff;
+        border-top: 1px solid #e5e7eb;
+    }
+
+    .cd-share-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .cd-actions {
+        position: sticky;
+        bottom: 0;
+        padding: 10px 0 0;
+        background: #fff;
+        border-top: 1px solid #e5e7eb;
+    }
+
+    .cd-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .cd-item-actions {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
     }
 }

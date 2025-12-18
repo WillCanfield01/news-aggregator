@@ -131,6 +131,8 @@
 
     // ----- Daily Check-In (client only) -----
     const DAILY_KEY_PREFIX = "rr_tools_daily_checkin::";
+    const WORKOUT_LOG_KEY = "rr_workout_log_v1";
+    const COUNTDOWN_KEY = "rr_countdowns_v1";
 
     function normalizeHabitName(raw = "") {
         return raw.trim().toLowerCase().replace(/\s+/g, " ");
@@ -161,6 +163,1197 @@
     function clearHabit(name) {
         const key = storageKeyForHabit(name);
         localStorage.removeItem(key);
+    }
+
+    // ----- Workout Log (client only) -----
+    function loadWorkoutStore() {
+        const raw = localStorage.getItem(WORKOUT_LOG_KEY);
+        if (!raw) return { version: 1, workouts: [] };
+        try {
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== "object") return { version: 1, workouts: [] };
+            if (!parsed.version) {
+                // migration guard
+                const workouts = Array.isArray(parsed.workouts) ? parsed.workouts : [];
+                return { version: 1, workouts };
+            }
+            if (parsed.version !== 1) return { version: 1, workouts: Array.isArray(parsed.workouts) ? parsed.workouts : [] };
+            return { version: 1, workouts: Array.isArray(parsed.workouts) ? parsed.workouts : [] };
+        } catch (e) {
+            return { version: 1, workouts: [] };
+        }
+    }
+
+    function saveWorkoutStore(store) {
+        localStorage.setItem(WORKOUT_LOG_KEY, JSON.stringify(store));
+    }
+
+    function todayISO() {
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function makeId() {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+        return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function escapeCsv(value) {
+        if (value === null || value === undefined) return "";
+        const s = String(value);
+        if (/[",\n\r]/.test(s)) {
+            return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+    }
+
+    function downloadText(filename, text, mime = "text/plain") {
+        const blob = new Blob([text], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 250);
+    }
+
+    function parsePositiveIntOrEmpty(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return null;
+        const n = Number(s);
+        if (!Number.isFinite(n)) return null;
+        const asInt = Math.trunc(n);
+        if (asInt <= 0) return null;
+        return asInt;
+    }
+
+    function parseNumberOrEmpty(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return null;
+        const n = Number(s);
+        if (!Number.isFinite(n)) return null;
+        return n;
+    }
+
+    function initWorkoutLog(form, outputEl, statusEl) {
+        const slug = form?.dataset?.toolSlug;
+        if (slug !== "workout-log") return;
+
+        const runBtn = form.querySelector("[data-run-button]") || form.querySelector("button[type='submit']");
+        if (runBtn) runBtn.style.display = "none";
+
+        const outputPre = outputEl ? outputEl.querySelector(".tool-output-pre") : null;
+        if (outputPre) outputPre.textContent = "";
+
+        const custom = document.getElementById("tool-custom-ui");
+        if (!custom) return;
+        custom.innerHTML = "";
+
+        const dateInput = form.querySelector('[name="workout_date"]');
+        const nameInput = form.querySelector('[name="workout_name"]');
+        if (dateInput && !dateInput.value) dateInput.value = todayISO();
+
+        // Build sets UI
+        const setsWrap = document.createElement("div");
+        setsWrap.className = "wl-sets";
+        const setsTitle = document.createElement("div");
+        setsTitle.className = "wl-section-title";
+        setsTitle.textContent = "Sets";
+
+        const table = document.createElement("div");
+        table.className = "wl-table";
+        const head = document.createElement("div");
+        head.className = "wl-row wl-head";
+        head.innerHTML =
+            "<div>Exercise</div><div>Sets</div><div>Reps</div><div>Weight</div><div>Unit</div><div></div>";
+        table.appendChild(head);
+
+        const body = document.createElement("div");
+        body.className = "wl-body";
+        table.appendChild(body);
+
+        function addRow(prefill) {
+            const row = document.createElement("div");
+            row.className = "wl-row wl-item";
+
+            const ex = document.createElement("input");
+            ex.type = "text";
+            ex.placeholder = "Bench press";
+            ex.value = prefill?.exercise || "";
+
+            const sets = document.createElement("input");
+            sets.type = "number";
+            sets.min = "1";
+            sets.step = "1";
+            sets.placeholder = "3";
+            sets.value = prefill?.sets ?? "";
+
+            const reps = document.createElement("input");
+            reps.type = "number";
+            reps.min = "1";
+            reps.step = "1";
+            reps.placeholder = "8";
+            reps.value = prefill?.reps ?? "";
+
+            const weight = document.createElement("input");
+            weight.type = "number";
+            weight.step = "0.5";
+            weight.min = "0";
+            weight.placeholder = "135";
+            weight.value = prefill?.weight ?? "";
+
+            const unit = document.createElement("select");
+            ["lb", "kg"].forEach((u) => {
+                const opt = document.createElement("option");
+                opt.value = u;
+                opt.textContent = u;
+                if ((prefill?.unit || "lb") === u) opt.selected = true;
+                unit.appendChild(opt);
+            });
+
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "wl-remove";
+            remove.textContent = "Remove";
+            remove.onclick = () => row.remove();
+
+            row.append(ex, sets, reps, weight, unit, remove);
+            body.appendChild(row);
+        }
+
+        addRow();
+
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "tool-run-btn wl-add";
+        addBtn.textContent = "Add row";
+        addBtn.onclick = () => addRow();
+
+        setsWrap.append(setsTitle, table, addBtn);
+
+        // Actions
+        const actions = document.createElement("div");
+        actions.className = "wl-actions";
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "tool-run-btn";
+        saveBtn.textContent = "Save workout";
+
+        const clearBtn = document.createElement("button");
+        clearBtn.type = "button";
+        clearBtn.className = "tool-clear-btn";
+        clearBtn.textContent = "Clear form";
+
+        const exportBtn = document.createElement("button");
+        exportBtn.type = "button";
+        exportBtn.className = "tool-copy-btn wl-export";
+        exportBtn.style.display = "inline-block";
+        exportBtn.textContent = "Export CSV";
+
+        actions.append(saveBtn, clearBtn, exportBtn);
+
+        // Output: recent workouts
+        const recentWrap = document.createElement("div");
+        recentWrap.className = "wl-recent";
+        const recentTitle = document.createElement("div");
+        recentTitle.className = "wl-section-title";
+        recentTitle.textContent = "Recent workouts";
+        const list = document.createElement("div");
+        list.className = "wl-list";
+        const detail = document.createElement("div");
+        detail.className = "wl-detail";
+        detail.style.display = "none";
+        recentWrap.append(recentTitle, list, detail);
+
+        function setStatus(text, type = "") {
+            if (!statusEl) return;
+            statusEl.textContent = text || "";
+            statusEl.className = "tool-status";
+            if (type) statusEl.classList.add(type);
+        }
+
+        function summarize(workout) {
+            const rows = Array.isArray(workout.rows) ? workout.rows : [];
+            const unique = new Set(rows.map((r) => (r.exercise || "").trim()).filter(Boolean));
+            const totalSets = rows.reduce((sum, r) => sum + (Number(r.sets) || 0), 0);
+            const exCount = unique.size || rows.length;
+            return `${exCount} exercises, ${totalSets} sets`;
+        }
+
+        function renderDetail(workout) {
+            detail.innerHTML = "";
+            if (!workout) {
+                detail.style.display = "none";
+                return;
+            }
+            detail.style.display = "block";
+            const header = document.createElement("div");
+            header.className = "wl-detail-header";
+            header.textContent = `${workout.date} • ${workout.name}`;
+
+            const close = document.createElement("button");
+            close.type = "button";
+            close.className = "wl-detail-close";
+            close.textContent = "Close";
+            close.onclick = () => renderDetail(null);
+
+            const rowsWrap = document.createElement("div");
+            rowsWrap.className = "wl-detail-rows";
+            (workout.rows || []).forEach((r) => {
+                const row = document.createElement("div");
+                row.className = "wl-detail-row";
+                row.innerHTML = `<div class="wl-detail-ex">${escapeHtml(r.exercise || "")}</div>
+<div class="wl-detail-meta">${escapeHtml(String(r.sets || ""))}×${escapeHtml(String(r.reps || ""))} @ ${escapeHtml(String(r.weight ?? ""))}${escapeHtml(r.unit || "")}</div>`;
+                rowsWrap.appendChild(row);
+            });
+
+            const wrap = document.createElement("div");
+            wrap.className = "wl-detail-card";
+            wrap.append(header, close, rowsWrap);
+            detail.appendChild(wrap);
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, (ch) => {
+                const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+                return map[ch] || ch;
+            });
+        }
+
+        function renderList() {
+            const store = loadWorkoutStore();
+            const workouts = Array.isArray(store.workouts) ? store.workouts : [];
+            list.innerHTML = "";
+            if (!workouts.length) {
+                const empty = document.createElement("div");
+                empty.className = "wl-empty";
+                empty.textContent = "No workouts saved yet.";
+                list.appendChild(empty);
+                renderDetail(null);
+                return;
+            }
+            workouts.slice(0, 10).forEach((w) => {
+                const item = document.createElement("div");
+                item.className = "wl-item-row";
+                const left = document.createElement("div");
+                left.className = "wl-item-left";
+                const title = document.createElement("div");
+                title.className = "wl-item-title";
+                title.textContent = `${w.date || "—"} • ${w.name || "Workout"}`;
+                const sub = document.createElement("div");
+                sub.className = "wl-item-sub";
+                sub.textContent = summarize(w);
+                left.append(title, sub);
+
+                const buttons = document.createElement("div");
+                buttons.className = "wl-item-actions";
+                const view = document.createElement("button");
+                view.type = "button";
+                view.className = "wl-small";
+                view.textContent = "View";
+                view.onclick = () => renderDetail(w);
+                const del = document.createElement("button");
+                del.type = "button";
+                del.className = "wl-small danger";
+                del.textContent = "Delete";
+                del.onclick = () => {
+                    const next = loadWorkoutStore();
+                    next.workouts = (next.workouts || []).filter((x) => x.id !== w.id);
+                    saveWorkoutStore(next);
+                    setStatus("Deleted.", "success");
+                    renderList();
+                };
+                buttons.append(view, del);
+
+                item.append(left, buttons);
+                list.appendChild(item);
+            });
+        }
+
+        function readRows() {
+            const out = [];
+            const rows = body.querySelectorAll(".wl-item");
+            rows.forEach((rowEl) => {
+                const [exerciseEl, setsEl, repsEl, weightEl, unitEl] = rowEl.querySelectorAll("input, select");
+                const exercise = (exerciseEl?.value || "").trim();
+                const sets = parsePositiveIntOrEmpty(setsEl?.value);
+                const reps = parsePositiveIntOrEmpty(repsEl?.value);
+                const weight = parseNumberOrEmpty(weightEl?.value);
+                const unit = unitEl?.value || "lb";
+                if (!exercise && !sets && !reps && (weight === null || weight === 0)) return;
+                out.push({ exercise, sets: sets || 0, reps: reps || 0, weight: weight ?? "", unit });
+            });
+            return out;
+        }
+
+        saveBtn.onclick = () => {
+            const name = (nameInput?.value || "").trim();
+            if (!name) {
+                setStatus("Workout name is required.", "error");
+                return;
+            }
+            const date = (dateInput?.value || "").trim() || todayISO();
+            const rows = readRows();
+            if (!rows.length) {
+                setStatus("Add at least one set row.", "error");
+                return;
+            }
+            const workout = {
+                id: makeId(),
+                date,
+                name,
+                created_at: new Date().toISOString(),
+                rows,
+            };
+            const store = loadWorkoutStore();
+            store.workouts = [workout, ...(store.workouts || [])];
+            saveWorkoutStore(store);
+            setStatus("Saved locally.", "success");
+            renderList();
+        };
+
+        clearBtn.onclick = () => {
+            if (nameInput) nameInput.value = "";
+            if (dateInput) dateInput.value = todayISO();
+            body.innerHTML = "";
+            addRow();
+            setStatus("Cleared.", "success");
+        };
+
+        exportBtn.onclick = () => {
+            const store = loadWorkoutStore();
+            const workouts = Array.isArray(store.workouts) ? store.workouts : [];
+            if (!workouts.length) {
+                setStatus("Nothing to export yet.", "error");
+                return;
+            }
+            const header = ["date", "workout_name", "exercise", "sets", "reps", "weight", "unit", "created_at"];
+            const lines = [header.join(",")];
+            workouts
+                .slice()
+                .reverse()
+                .forEach((w) => {
+                    (w.rows || []).forEach((r) => {
+                        const row = [
+                            escapeCsv(w.date || ""),
+                            escapeCsv(w.name || ""),
+                            escapeCsv(r.exercise || ""),
+                            escapeCsv(r.sets ?? ""),
+                            escapeCsv(r.reps ?? ""),
+                            escapeCsv(r.weight ?? ""),
+                            escapeCsv(r.unit || ""),
+                            escapeCsv(w.created_at || ""),
+                        ];
+                        lines.push(row.join(","));
+                    });
+                });
+            const csv = lines.join("\n");
+            downloadText(`workout-log-${todayISO()}.csv`, csv, "text/csv");
+            setStatus("CSV downloaded.", "success");
+        };
+
+        // Prevent any backend submission for this tool
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            setStatus("Use Save workout to store locally.", "success");
+        });
+
+        custom.append(setsWrap, actions, recentWrap);
+        renderList();
+    }
+
+    // ----- Grocery List (shared via token) -----
+    function initGroceryList(form, outputEl, statusEl) {
+        const slug = form?.dataset?.toolSlug;
+        if (slug !== "grocery-list") return;
+
+        const runBtn = form.querySelector("[data-run-button]") || form.querySelector("button[type='submit']");
+        if (runBtn) runBtn.style.display = "none";
+
+        if (outputEl) {
+            // This tool is interactive; don't use the generic output box.
+            outputEl.style.display = "none";
+        }
+
+        const custom = document.getElementById("tool-custom-ui");
+        if (!custom) return;
+        custom.innerHTML = "";
+
+        const nameField = form.querySelector('[name="list_name"]');
+
+        const setStatus = (text, type = "") => {
+            if (!statusEl) return;
+            statusEl.textContent = text || "";
+            statusEl.className = "tool-status";
+            if (type) statusEl.classList.add(type);
+        };
+
+        const parseTokenFromUrl = () => {
+            const path = window.location.pathname || "";
+            const m = path.match(/^\/tools\/grocery\/([^\/?#]+)/);
+            if (m && m[1]) return decodeURIComponent(m[1]);
+            const params = new URLSearchParams(window.location.search);
+            const from = params.get("from");
+            return from ? from.trim() : "";
+        };
+
+        const state = {
+            token: parseTokenFromUrl(),
+            shareUrl: "",
+            payload: { name: (nameField?.value || "").trim() || "Groceries", items: [] },
+            saving: false,
+            saveTimer: null,
+            lastSent: "",
+        };
+
+        const categories = ["Produce", "Dairy", "Meat", "Pantry", "Frozen", "Drinks", "Snacks", "Household", "Other"];
+
+        const shareBox = document.createElement("div");
+        shareBox.className = "gl-share";
+        shareBox.style.display = "none";
+        const shareLabel = document.createElement("div");
+        shareLabel.className = "gl-share-label";
+        shareLabel.textContent = "Share link";
+        const shareRow = document.createElement("div");
+        shareRow.className = "gl-share-row";
+        const shareInput = document.createElement("input");
+        shareInput.type = "text";
+        shareInput.readOnly = true;
+        shareInput.className = "gl-share-input";
+        shareInput.value = "";
+        const shareCopy = document.createElement("button");
+        shareCopy.type = "button";
+        shareCopy.className = "tool-run-btn gl-copy";
+        shareCopy.textContent = "Copy";
+        shareCopy.onclick = async () => {
+            if (!shareInput.value) return;
+            try {
+                await navigator.clipboard.writeText(shareInput.value);
+                shareCopy.textContent = "Copied";
+                setTimeout(() => (shareCopy.textContent = "Copy"), 1200);
+            } catch (e) {
+                shareCopy.textContent = "Copy failed";
+                setTimeout(() => (shareCopy.textContent = "Copy"), 1200);
+            }
+        };
+        shareRow.append(shareInput, shareCopy);
+        shareBox.append(shareLabel, shareRow);
+
+        const controls = document.createElement("div");
+        controls.className = "gl-controls";
+
+        const createBtn = document.createElement("button");
+        createBtn.type = "button";
+        createBtn.className = "tool-run-btn";
+        createBtn.textContent = "Create list";
+
+        const createNote = document.createElement("div");
+        createNote.className = "gl-note";
+        createNote.textContent = "Create a shared link so anyone with it can add/check items.";
+
+        const addRow = document.createElement("div");
+        addRow.className = "gl-add-row";
+        const addInput = document.createElement("input");
+        addInput.type = "text";
+        addInput.className = "gl-add-input";
+        addInput.placeholder = "Add an item (e.g., milk, bananas)…";
+        addInput.maxLength = 80;
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "tool-run-btn";
+        addBtn.textContent = "Add";
+        addRow.append(addInput, addBtn);
+
+        const actions = document.createElement("div");
+        actions.className = "gl-actions";
+        const clearCheckedBtn = document.createElement("button");
+        clearCheckedBtn.type = "button";
+        clearCheckedBtn.className = "tool-clear-btn";
+        clearCheckedBtn.textContent = "Clear checked";
+        actions.append(clearCheckedBtn);
+
+        const listWrap = document.createElement("div");
+        listWrap.className = "gl-list";
+
+        function setShare(url) {
+            state.shareUrl = url || "";
+            shareInput.value = url || "";
+            shareBox.style.display = url ? "block" : "none";
+        }
+
+        function setToken(token) {
+            state.token = token || "";
+            if (state.token) {
+                // Keep the editable page shareable by query param
+                const params = new URLSearchParams(window.location.search);
+                if (window.location.pathname === "/tools/grocery-list") {
+                    params.set("from", state.token);
+                    const next = `${window.location.pathname}?${params.toString()}`;
+                    window.history.replaceState({}, "", next);
+                }
+            }
+        }
+
+        function render() {
+            if (nameField) {
+                const current = (nameField.value || "").trim();
+                if (!current && state.payload.name) nameField.value = state.payload.name;
+            }
+
+            listWrap.innerHTML = "";
+            const items = Array.isArray(state.payload.items) ? state.payload.items : [];
+
+            const byCat = new Map();
+            categories.forEach((c) => byCat.set(c, []));
+            items.forEach((it) => {
+                const cat = categories.includes(it.category) ? it.category : "Other";
+                if (!byCat.has(cat)) byCat.set(cat, []);
+                byCat.get(cat).push(it);
+            });
+
+            categories.forEach((cat) => {
+                const catItems = byCat.get(cat) || [];
+                if (!catItems.length) return;
+                const section = document.createElement("div");
+                section.className = "gl-section";
+                const head = document.createElement("div");
+                head.className = "gl-section-head";
+                head.textContent = cat;
+                section.appendChild(head);
+
+                catItems.forEach((it) => {
+                    const row = document.createElement("div");
+                    row.className = "gl-item";
+                    const check = document.createElement("input");
+                    check.type = "checkbox";
+                    check.checked = !!it.checked;
+                    check.className = "gl-check";
+                    check.onchange = () => {
+                        it.checked = check.checked;
+                        scheduleSave();
+                        render();
+                    };
+                    const text = document.createElement("div");
+                    text.className = "gl-text";
+                    text.textContent = it.text || "";
+                    if (it.checked) row.classList.add("checked");
+                    const del = document.createElement("button");
+                    del.type = "button";
+                    del.className = "gl-del";
+                    del.textContent = "✕";
+                    del.onclick = () => {
+                        state.payload.items = (state.payload.items || []).filter((x) => x.id !== it.id);
+                        scheduleSave();
+                        render();
+                    };
+                    row.append(check, text, del);
+                    section.appendChild(row);
+                });
+
+                listWrap.appendChild(section);
+            });
+
+            if (!items.length) {
+                const empty = document.createElement("div");
+                empty.className = "gl-empty";
+                empty.textContent = state.token ? "Add your first item." : "Create a list to start adding items.";
+                listWrap.appendChild(empty);
+            }
+        }
+
+        async function api(action, extra = {}) {
+            const input = {
+                action,
+                list_name: nameField ? (nameField.value || "").trim() : state.payload.name,
+                ...extra,
+            };
+            return await runToolRequest("grocery-list", input);
+        }
+
+        async function load() {
+            if (!state.token) {
+                setShare("");
+                render();
+                return;
+            }
+            setStatus("Loading…");
+            const res = await api("get", { token: state.token });
+            if (!res.ok) {
+                setStatus(res?.error?.message || "Unable to load list.", "error");
+                return;
+            }
+            const out = res.data?.output || {};
+            setToken(out.token || state.token);
+            setShare(out.share_url || "");
+            state.payload = out.payload || state.payload;
+            if (nameField) nameField.value = state.payload.name || nameField.value;
+            setStatus("Synced.", "success");
+            render();
+        }
+
+        async function createList() {
+            setStatus("Creating…");
+            createBtn.disabled = true;
+            const res = await api("create", {});
+            createBtn.disabled = false;
+            if (!res.ok) {
+                setStatus(res?.error?.message || "Unable to create list.", "error");
+                return;
+            }
+            const out = res.data?.output || {};
+            setToken(out.token || "");
+            setShare(out.share_url || "");
+            state.payload = out.payload || state.payload;
+            if (nameField) nameField.value = state.payload.name || nameField.value;
+            setStatus("List created.", "success");
+            render();
+        }
+
+        function normalizeItemsForUpdate() {
+            const items = Array.isArray(state.payload.items) ? state.payload.items : [];
+            return items
+                .map((it) => ({
+                    id: it.id,
+                    text: String(it.text || "").trim(),
+                    checked: !!it.checked,
+                }))
+                .filter((it) => it.text);
+        }
+
+        function scheduleSave() {
+            if (!state.token) return;
+            if (state.saveTimer) clearTimeout(state.saveTimer);
+            state.saveTimer = setTimeout(saveNow, 500);
+        }
+
+        async function saveNow() {
+            if (!state.token) return;
+            const name = nameField ? (nameField.value || "").trim() : state.payload.name;
+            const items = normalizeItemsForUpdate();
+            const snapshot = JSON.stringify({ name, items });
+            if (snapshot === state.lastSent) return;
+            state.lastSent = snapshot;
+            setStatus("Saving…");
+            const res = await api("update", { token: state.token, name, items });
+            if (!res.ok) {
+                setStatus(res?.error?.message || "Save failed.", "error");
+                return;
+            }
+            const out = res.data?.output || {};
+            state.payload = out.payload || state.payload;
+            setShare(out.share_url || state.shareUrl);
+            if (nameField) nameField.value = state.payload.name || nameField.value;
+            setStatus("Saved.", "success");
+            render();
+        }
+
+        function addItem() {
+            const text = (addInput.value || "").trim();
+            if (!text) return;
+            if (!state.token) {
+                setStatus("Create the list first to get a share link.", "error");
+                return;
+            }
+            const item = {
+                id: makeId(),
+                text,
+                category: "Other",
+                checked: false,
+                created_at: new Date().toISOString(),
+            };
+            state.payload.items = [item, ...(state.payload.items || [])];
+            addInput.value = "";
+            scheduleSave();
+            render();
+        }
+
+        addBtn.onclick = addItem;
+        addInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                addItem();
+            }
+        });
+        clearCheckedBtn.onclick = () => {
+            if (!state.token) return;
+            state.payload.items = (state.payload.items || []).filter((it) => !it.checked);
+            scheduleSave();
+            render();
+        };
+        createBtn.onclick = createList;
+
+        if (nameField) {
+            nameField.addEventListener("input", () => {
+                state.payload.name = (nameField.value || "").trim();
+                scheduleSave();
+            });
+        }
+
+        // Controls visibility
+        controls.append(createNote, createBtn);
+
+        custom.append(shareBox, controls, addRow, actions, listWrap);
+
+        // If already have token, hide create CTA
+        if (state.token) {
+            createBtn.style.display = "none";
+            createNote.style.display = "none";
+            shareBox.style.display = "block";
+        }
+
+        load();
+        render();
+    }
+
+    // ----- Countdown (local + optional share) -----
+    function loadCountdownStore() {
+        const raw = localStorage.getItem(COUNTDOWN_KEY);
+        if (!raw) return { version: 1, countdowns: [] };
+        try {
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== "object") return { version: 1, countdowns: [] };
+            const countdowns = Array.isArray(parsed.countdowns) ? parsed.countdowns : [];
+            return { version: 1, countdowns };
+        } catch (e) {
+            return { version: 1, countdowns: [] };
+        }
+    }
+
+    function saveCountdownStore(store) {
+        localStorage.setItem(COUNTDOWN_KEY, JSON.stringify(store));
+    }
+
+    function parseYyyyMmDd(dateStr) {
+        const s = String(dateStr || "").trim();
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return null;
+        const y = Number(m[1]);
+        const mo = Number(m[2]);
+        const d = Number(m[3]);
+        if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+        return { y, mo, d, s };
+    }
+
+    function getTimeZoneOffsetMs(timeZone, date) {
+        const dtf = new Intl.DateTimeFormat("en-US", {
+            timeZone,
+            hour12: false,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+        });
+        const parts = dtf.formatToParts(date);
+        const lookup = {};
+        parts.forEach((p) => (lookup[p.type] = p.value));
+        const asUtc = Date.parse(
+            `${lookup.year}-${lookup.month}-${lookup.day}T${lookup.hour}:${lookup.minute}:${lookup.second}Z`
+        );
+        return asUtc - date.getTime();
+    }
+
+    function eventDateToUtcMs(dateStr, tz) {
+        const parsed = parseYyyyMmDd(dateStr);
+        if (!parsed) return null;
+        const { y, mo, d } = parsed;
+        if (tz === "UTC") {
+            return Date.parse(`${parsed.s}T00:00:00Z`);
+        }
+        if (!tz || tz === "Local") {
+            const local = new Date(`${parsed.s}T00:00:00`);
+            return local.getTime();
+        }
+        // Use midday offset to avoid DST boundary surprises
+        const noonUtc = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
+        const offset = getTimeZoneOffsetMs(tz, noonUtc);
+        const wallMidnightAsUtc = Date.UTC(y, mo - 1, d, 0, 0, 0);
+        return wallMidnightAsUtc - offset;
+    }
+
+    function computeCountdownParts(targetUtcMs, nowMs) {
+        const diffMs = targetUtcMs - nowMs;
+        if (!isFinite(diffMs) || diffMs <= 0) {
+            return { isPast: true, days: 0, hours: 0, minutes: 0, diffMs: diffMs || 0 };
+        }
+        const totalMinutes = Math.floor(diffMs / 60000);
+        const minutes = totalMinutes % 60;
+        const totalHours = Math.floor(totalMinutes / 60);
+        const hours = totalHours % 24;
+        const days = Math.floor(totalHours / 24);
+        return { isPast: false, days, hours, minutes, diffMs };
+    }
+
+    function initCountdown(form, outputEl, statusEl) {
+        const slug = form?.dataset?.toolSlug;
+        if (slug !== "countdown") return;
+
+        const runBtn = form.querySelector("[data-run-button]") || form.querySelector("button[type='submit']");
+        if (runBtn) runBtn.style.display = "none";
+
+        if (outputEl) outputEl.style.display = "none";
+        const outputPre = outputEl ? outputEl.querySelector(".tool-output-pre") : null;
+        if (outputPre) outputPre.textContent = "";
+
+        const custom = document.getElementById("tool-custom-ui");
+        if (!custom) return;
+        custom.innerHTML = "";
+
+        const nameEl = form.querySelector('[name="event_name"]');
+        const dateEl = form.querySelector('[name="event_date"]');
+        const tzEl = form.querySelector('[name="timezone"]');
+        if (dateEl) {
+            try {
+                dateEl.type = "date";
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        const setStatus = (text, type = "") => {
+            if (!statusEl) return;
+            statusEl.textContent = text || "";
+            statusEl.className = "tool-status";
+            if (type) statusEl.classList.add(type);
+        };
+
+        const parseTokenFromUrl = () => {
+            const path = window.location.pathname || "";
+            const m = path.match(/^\/tools\/countdown\/([^\/?#]+)/);
+            if (m && m[1]) return decodeURIComponent(m[1]);
+            const params = new URLSearchParams(window.location.search);
+            const from = params.get("from");
+            return from ? from.trim() : "";
+        };
+
+        const state = {
+            activeId: null,
+            shareToken: parseTokenFromUrl(),
+            shareUrl: "",
+            sharedPayload: null,
+            tickTimer: null,
+        };
+
+        const shareBox = document.createElement("div");
+        shareBox.className = "cd-share";
+        shareBox.style.display = "none";
+        const shareLabel = document.createElement("div");
+        shareLabel.className = "cd-share-label";
+        shareLabel.textContent = "Share link";
+        const shareRow = document.createElement("div");
+        shareRow.className = "cd-share-row";
+        const shareInput = document.createElement("input");
+        shareInput.type = "text";
+        shareInput.readOnly = true;
+        shareInput.className = "cd-share-input";
+        const shareCopy = document.createElement("button");
+        shareCopy.type = "button";
+        shareCopy.className = "tool-run-btn";
+        shareCopy.textContent = "Copy";
+        shareCopy.onclick = async () => {
+            if (!shareInput.value) return;
+            try {
+                await navigator.clipboard.writeText(shareInput.value);
+                shareCopy.textContent = "Copied";
+                setTimeout(() => (shareCopy.textContent = "Copy"), 1200);
+            } catch (e) {
+                shareCopy.textContent = "Copy failed";
+                setTimeout(() => (shareCopy.textContent = "Copy"), 1200);
+            }
+        };
+        shareRow.append(shareInput, shareCopy);
+        shareBox.append(shareLabel, shareRow);
+
+        const card = document.createElement("div");
+        card.className = "cd-card";
+        const cardTitle = document.createElement("div");
+        cardTitle.className = "cd-title";
+        const cardBig = document.createElement("div");
+        cardBig.className = "cd-big";
+        const cardSmall = document.createElement("div");
+        cardSmall.className = "cd-small";
+        card.append(cardTitle, cardBig, cardSmall);
+
+        const actions = document.createElement("div");
+        actions.className = "cd-actions";
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "tool-run-btn";
+        saveBtn.textContent = "Save locally";
+        const shareBtn = document.createElement("button");
+        shareBtn.type = "button";
+        shareBtn.className = "tool-copy-btn";
+        shareBtn.style.display = "inline-block";
+        shareBtn.textContent = "Create share link";
+        const clearBtn = document.createElement("button");
+        clearBtn.type = "button";
+        clearBtn.className = "tool-clear-btn";
+        clearBtn.textContent = "Clear";
+        actions.append(saveBtn, shareBtn, clearBtn);
+
+        const listWrap = document.createElement("div");
+        listWrap.className = "cd-list";
+        const listTitle = document.createElement("div");
+        listTitle.className = "cd-section-title";
+        listTitle.textContent = "Saved countdowns";
+        const list = document.createElement("div");
+        list.className = "cd-items";
+        listWrap.append(listTitle, list);
+
+        function setShare(url) {
+            state.shareUrl = url || "";
+            shareInput.value = url || "";
+            shareBox.style.display = url ? "block" : "none";
+        }
+
+        function getActiveCountdown() {
+            if (state.sharedPayload) return state.sharedPayload;
+            const store = loadCountdownStore();
+            const items = store.countdowns || [];
+            if (state.activeId) {
+                return items.find((c) => c.id === state.activeId) || null;
+            }
+            const pinned = items.find((c) => c.pinned);
+            return pinned || items[0] || null;
+        }
+
+        function renderCard() {
+            const active = getActiveCountdown();
+            const name = active?.name || (nameEl?.value || "").trim() || "Countdown";
+            const date = active?.date || (dateEl?.value || "").trim() || "";
+            const tz = active?.timezone || (tzEl?.value || "Local");
+            cardTitle.textContent = name;
+
+            const targetMs = eventDateToUtcMs(date, tz);
+            if (!date || !targetMs) {
+                cardBig.textContent = "—";
+                cardSmall.textContent = "Pick a date to start.";
+                return;
+            }
+
+            const parts = computeCountdownParts(targetMs, Date.now());
+            if (parts.isPast) {
+                cardBig.textContent = "Today";
+                cardSmall.textContent = "It’s here.";
+                return;
+            }
+
+            cardBig.textContent = `${parts.days} day${parts.days === 1 ? "" : "s"} left`;
+            cardSmall.textContent = `${parts.hours}h ${parts.minutes}m • Timezone: ${tz}`;
+        }
+
+        function scheduleTick() {
+            if (state.tickTimer) clearTimeout(state.tickTimer);
+            const now = new Date();
+            const msToNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds() + 5;
+            state.tickTimer = setTimeout(() => {
+                renderCard();
+                scheduleTick();
+            }, Math.max(500, msToNextMinute));
+        }
+
+        function renderList() {
+            const store = loadCountdownStore();
+            const items = Array.isArray(store.countdowns) ? store.countdowns : [];
+            const sorted = items.slice().sort((a, b) => {
+                const ap = a.pinned ? 1 : 0;
+                const bp = b.pinned ? 1 : 0;
+                if (ap !== bp) return bp - ap;
+                return String(a.date || "").localeCompare(String(b.date || ""));
+            });
+
+            list.innerHTML = "";
+            if (!sorted.length) {
+                const empty = document.createElement("div");
+                empty.className = "cd-empty";
+                empty.textContent = "No saved countdowns yet.";
+                list.appendChild(empty);
+                return;
+            }
+
+            sorted.forEach((c) => {
+                const row = document.createElement("div");
+                row.className = "cd-item";
+                if (c.id === state.activeId) row.classList.add("active");
+                const left = document.createElement("div");
+                left.className = "cd-item-left";
+                const t = document.createElement("div");
+                t.className = "cd-item-title";
+                t.textContent = c.name;
+                const sub = document.createElement("div");
+                sub.className = "cd-item-sub";
+                const targetMs = eventDateToUtcMs(c.date, c.timezone || "Local");
+                const p = targetMs ? computeCountdownParts(targetMs, Date.now()) : null;
+                const quick = p ? (p.isPast ? "Today" : `${p.days}d`) : "";
+                sub.textContent = `${c.date} • ${c.timezone || "Local"}${quick ? ` • ${quick}` : ""}`;
+                left.append(t, sub);
+
+                const btns = document.createElement("div");
+                btns.className = "cd-item-actions";
+                const view = document.createElement("button");
+                view.type = "button";
+                view.className = "wl-small";
+                view.textContent = "View";
+                view.onclick = () => {
+                    state.sharedPayload = null;
+                    state.activeId = c.id;
+                    renderList();
+                    renderCard();
+                    setShare("");
+                    setStatus("");
+                };
+                const pin = document.createElement("button");
+                pin.type = "button";
+                pin.className = "wl-small";
+                pin.textContent = c.pinned ? "Unpin" : "Pin";
+                pin.onclick = () => {
+                    const next = loadCountdownStore();
+                    next.countdowns = (next.countdowns || []).map((x) =>
+                        x.id === c.id ? { ...x, pinned: !x.pinned } : { ...x, pinned: false }
+                    );
+                    saveCountdownStore(next);
+                    setStatus(c.pinned ? "Unpinned." : "Pinned.", "success");
+                    renderList();
+                };
+                const del = document.createElement("button");
+                del.type = "button";
+                del.className = "wl-small danger";
+                del.textContent = "Delete";
+                del.onclick = () => {
+                    const next = loadCountdownStore();
+                    next.countdowns = (next.countdowns || []).filter((x) => x.id !== c.id);
+                    saveCountdownStore(next);
+                    if (state.activeId === c.id) state.activeId = null;
+                    setStatus("Deleted.", "success");
+                    renderList();
+                    renderCard();
+                };
+                btns.append(view, pin, del);
+                row.append(left, btns);
+                list.appendChild(row);
+            });
+        }
+
+        function saveCurrent() {
+            const name = (nameEl?.value || "").trim();
+            const date = (dateEl?.value || "").trim();
+            const tz = (tzEl?.value || "Local").trim() || "Local";
+            if (!name) {
+                setStatus("Event name is required.", "error");
+                return;
+            }
+            if (!parseYyyyMmDd(date)) {
+                setStatus("Event date must be YYYY-MM-DD.", "error");
+                return;
+            }
+            const store = loadCountdownStore();
+            const entry = {
+                id: makeId(),
+                name,
+                date,
+                timezone: tz,
+                created_at: new Date().toISOString(),
+                pinned: false,
+            };
+            store.countdowns = [entry, ...(store.countdowns || [])];
+            saveCountdownStore(store);
+            state.sharedPayload = null;
+            state.activeId = entry.id;
+            setStatus("Saved locally.", "success");
+            renderList();
+            renderCard();
+        }
+
+        async function createShareLink() {
+            const active = getActiveCountdown() || {
+                name: (nameEl?.value || "").trim(),
+                date: (dateEl?.value || "").trim(),
+                timezone: (tzEl?.value || "Local").trim() || "Local",
+            };
+            if (!active.name) {
+                setStatus("Event name is required.", "error");
+                return;
+            }
+            if (!parseYyyyMmDd(active.date)) {
+                setStatus("Event date must be YYYY-MM-DD.", "error");
+                return;
+            }
+            setStatus("Creating share link…");
+            shareBtn.disabled = true;
+            const res = await runToolRequest("countdown", {
+                action: "create_share",
+                event_name: active.name,
+                event_date: active.date,
+                timezone: active.timezone || "Local",
+            });
+            shareBtn.disabled = false;
+            if (!res.ok) {
+                setStatus(res?.error?.message || "Unable to create share link.", "error");
+                return;
+            }
+            const out = res.data?.output || {};
+            setShare(out.share_url || "");
+            setStatus("Share link created.", "success");
+        }
+
+        async function loadShared() {
+            if (!state.shareToken) return;
+            setStatus("Loading shared countdown…");
+            const res = await runToolRequest("countdown", { action: "get", token: state.shareToken });
+            if (!res.ok) {
+                setStatus(res?.error?.message || "Unable to load countdown.", "error");
+                return;
+            }
+            const out = res.data?.output || {};
+            const payload = out.payload || null;
+            if (!payload) {
+                setStatus("Countdown not found.", "error");
+                return;
+            }
+            state.sharedPayload = {
+                name: payload.name,
+                date: payload.date,
+                timezone: payload.timezone || "Local",
+            };
+            state.activeId = null;
+            setShare(out.share_url || "");
+            setStatus("Loaded.", "success");
+            renderList();
+            renderCard();
+        }
+
+        saveBtn.onclick = saveCurrent;
+        shareBtn.onclick = createShareLink;
+        clearBtn.onclick = () => {
+            if (nameEl) nameEl.value = "";
+            if (dateEl) dateEl.value = "";
+            if (tzEl) tzEl.value = "Local";
+            state.sharedPayload = null;
+            state.activeId = null;
+            setShare("");
+            setStatus("Cleared.", "success");
+            renderCard();
+        };
+
+        const liveInputs = [nameEl, dateEl, tzEl].filter(Boolean);
+        liveInputs.forEach((el) => el.addEventListener("input", renderCard));
+        liveInputs.forEach((el) => el.addEventListener("change", renderCard));
+
+        // Prevent default submit; this tool uses local save and optional share button
+        form.addEventListener("submit", (e) => e.preventDefault());
+
+        custom.append(shareBox, card, actions, listWrap);
+        renderList();
+        renderCard();
+        scheduleTick();
+        loadShared();
     }
 
     function formatDate(date) {
@@ -1482,6 +2675,11 @@
             showShare(initialShare);
         }
 
+        // Local-only tool init (no API calls)
+        initWorkoutLog(form, outputEl, statusEl);
+        initGroceryList(form, outputEl, statusEl);
+        initCountdown(form, outputEl, statusEl);
+
         if (copyBtn) {
             copyBtn.addEventListener("click", () => {
                 setViewMode(false);
@@ -1495,6 +2693,19 @@
             event.preventDefault();
             const slug = form.dataset.toolSlug;
             if (!slug) return;
+
+            if (slug === "workout-log") {
+                // handled fully client-side
+                return;
+            }
+            if (slug === "grocery-list") {
+                // handled by autosave UI
+                return;
+            }
+            if (slug === "countdown") {
+                // handled client-side (share uses explicit button)
+                return;
+            }
 
             if (lockedView) {
                 setStatus("Use Copy to new before editing this shared view.", "error");
