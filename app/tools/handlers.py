@@ -620,52 +620,6 @@ def run_decision_helper(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ---- Worth It Calculator ----
 
 
-def _parse_money(val: str) -> float:
-    try:
-        clean = re.sub(r"[,$]", "", str(val)).strip()
-        if clean.startswith("$"):
-            clean = clean[1:]
-        amount = float(clean)
-    except Exception:
-        raise ValueError("Enter cost as a number (e.g., 25 or 25.99).")
-    if amount <= 0:
-        raise ValueError("Cost must be greater than zero.")
-    return amount
-
-
-def _parse_hours(val: str) -> float:
-    try:
-        hours = float(str(val).strip())
-    except Exception:
-        raise ValueError("Enter hours as a number (e.g., 2 or 2.5).")
-    if hours <= 0:
-        raise ValueError("Hours must be greater than zero.")
-    return hours
-
-
-def _parse_timeframe(raw: str, frequency: str) -> tuple[float, str]:
-    raw = (raw or "").strip().lower()
-    if not raw:
-        if frequency == "Weekly":
-            return 4.0, "weeks"
-        if frequency == "Monthly":
-            return 1.0, "months"
-        return 0.0, ""
-
-    match = re.match(r"^(\d+(?:\.\d+)?)(\s*(weeks?|w|months?|m))$", raw)
-    if not match:
-        raise ValueError("Timeframe must be like '4 weeks' or '3 months'.")
-    amount = float(match.group(1))
-    unit_raw = match.group(2).strip()
-    if amount <= 0:
-        raise ValueError("Timeframe must be greater than zero.")
-    if unit_raw.startswith("w"):
-        return amount, "weeks"
-    if unit_raw.startswith("m"):
-        return amount, "months"
-    raise ValueError("Timeframe must specify weeks or months.")
-
-
 def _format_currency(val: float) -> str:
     return f"${val:,.2f}"
 
@@ -677,301 +631,306 @@ def _format_hours(val: float) -> str:
 def run_worth_it(payload: Dict[str, Any]) -> Dict[str, Any]:
     item_name = (payload.get("item_name") or "").strip()
     mode = (payload.get("mode") or "enjoyment").strip().lower()
-    cost_raw = payload.get("cost") or payload.get("cost_amount") or ""
     frequency = (payload.get("frequency") or "One-time").strip()
-    minutes_enjoyment_raw = payload.get("minutes_per_occurrence") or ""
-    minutes_saved_raw = payload.get("minutes_saved_per_use") or ""
-    hourly_value_raw = payload.get("hourly_value") or ""
-    target_value_raw = payload.get("target_value_per_hour") or ""
-    expected_uses_raw = payload.get("expected_uses_per_month") or ""
-    timeframe_months_raw = payload.get("timeframe_months") or payload.get("timeframe") or ""
     notes = (payload.get("notes") or "").strip()
+
+    cost_raw = payload.get("cost") or payload.get("cost_amount") or ""
+    uses_raw = payload.get("uses_per_frequency") or ""
+    timeframe_raw = payload.get("timeframe_months") or payload.get("timeframe") or ""
+
+    minutes_raw = payload.get("minutes_per_use") or ""
+    # Back-compat
+    if not str(minutes_raw).strip():
+        minutes_raw = payload.get("minutes_per_occurrence") or payload.get("minutes_saved_per_use") or ""
+
+    target_value_raw = payload.get("target_value_per_hour") or payload.get("hourly_value") or ""
+
     compare_enabled = (payload.get("compare_enabled") or "").lower() in {"yes", "true", "1", "on"}
     option_b_name = (payload.get("option_b_name") or "").strip()
-    option_b_cost = payload.get("option_b_cost") or ""
-    option_b_minutes = payload.get("option_b_minutes") or ""
+    option_b_cost_raw = payload.get("option_b_cost") or ""
+    option_b_minutes_raw = payload.get("option_b_minutes") or ""
     option_b_frequency = (payload.get("option_b_frequency") or "").strip()
-    option_b_hourly_raw = payload.get("option_b_hourly_value") or ""
-    nudge_enabled = (payload.get("nudge_enabled") or "").lower() in {"yes", "true", "1", "on"}
-    return_window_raw = payload.get("return_window_days") or ""
-    quit_chance_raw = payload.get("quit_chance_percent") or ""
-    follow_through_raw = payload.get("follow_through_percent") or ""
-    nudge_enabled = (payload.get("nudge_enabled") or "").lower() in {"yes", "true", "1", "on"}
-    return_window_raw = payload.get("return_window_days") or ""
-    quit_chance_raw = payload.get("quit_chance_percent") or ""
-    follow_through_raw = payload.get("follow_through_percent") or ""
+    option_b_target_value_raw = payload.get("option_b_hourly_value") or ""
 
-    def _parse_positive_float(value: Any, label: str, allow_zero: bool = False) -> float:
+    nudge_enabled = (payload.get("nudge_enabled") or "").lower() in {"yes", "true", "1", "on"}
+    return_window_raw = payload.get("return_window_days") or ""
+    quit_chance_raw = payload.get("quit_chance_percent") or payload.get("chance_quit_pct") or ""
+    follow_through_raw = payload.get("follow_through_percent") or payload.get("probability_use_pct") or ""
+
+    def _parse_money(value: Any, label: str) -> float:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError(f"{label} is required.")
+        clean = raw.replace(",", "")
+        clean = clean.replace("$", "")
         try:
-            num = float(str(value).replace(",", "").strip())
+            amount = float(clean)
         except Exception:
-            raise ValueError(f"{label} must be a number.")
-        if not allow_zero and num <= 0:
+            raise ValueError(f"{label} must be a number (e.g., 25 or 25.99).")
+        if amount <= 0:
             raise ValueError(f"{label} must be greater than zero.")
-        if allow_zero and num < 0:
-            raise ValueError(f"{label} cannot be negative.")
+        return amount
+
+    def _parse_positive_int(value: Any, label: str) -> int:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError(f"{label} is required.")
+        clean = raw.replace(",", "")
+        try:
+            as_float = float(clean)
+        except Exception:
+            raise ValueError(f"{label} must be an integer.")
+        as_int = int(as_float)
+        if abs(as_float - as_int) > 1e-9:
+            raise ValueError(f"{label} must be an integer.")
+        if as_int < 1:
+            raise ValueError(f"{label} must be at least 1.")
+        return as_int
+
+    def _parse_minutes(value: Any, label: str) -> float:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            raise ValueError(f"{label} is required.")
+        match = re.match(r"^(\d+(?:\.\d+)?)(?:\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$", raw)
+        if not match:
+            raise ValueError(f"{label} must be a number (minutes) like 60, or hours like 1.5h.")
+        qty = float(match.group(1))
+        if qty <= 0:
+            raise ValueError(f"{label} must be greater than zero.")
+        suffix = raw[len(match.group(1)) :].strip()
+        if suffix.startswith(("h", "hr", "hour")):
+            return qty * 60.0
+        return qty
+
+    def _parse_optional_positive_float(value: Any) -> float | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        clean = raw.replace(",", "").replace("$", "")
+        try:
+            num = float(clean)
+        except Exception:
+            raise ValueError("Value per hour must be a number.")
+        if num <= 0:
+            raise ValueError("Value per hour must be greater than zero.")
         return num
 
-    cost = _parse_positive_float(cost_raw, "Cost")
+    def _parse_timeframe_months(value: Any) -> int:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return 12
+        m = re.match(r"^(\d+)(?:\s*(months?|mo|m))?$", raw)
+        if m:
+            months = int(m.group(1))
+            if months < 1:
+                raise ValueError("Timeframe must be at least 1 month.")
+            return months
+        y = re.match(r"^(\d+)(?:\s*(years?|yr|y))$", raw)
+        if y:
+            years = int(y.group(1))
+            if years < 1:
+                raise ValueError("Timeframe must be at least 1 year.")
+            return years * 12
+        raise ValueError("Timeframe must be a number of months (e.g., 12) or years (e.g., 1y).")
+
+    if mode not in {"enjoyment", "time_saved"}:
+        raise ValueError('Mode must be "enjoyment" or "time_saved".')
 
     frequency_options = {"One-time", "Daily", "Weekly", "Biweekly", "Monthly", "Yearly"}
     if frequency not in frequency_options:
         raise ValueError("Frequency must be One-time, Daily, Weekly, Biweekly, Monthly, or Yearly.")
 
-    sessions_per_month_map = {
-        "Daily": 30.0,
-        "Weekly": 4.345,
-        "Biweekly": 2.1725,
-        "Monthly": 1.0,
-        "Yearly": 1.0 / 12.0,
-        "One-time": 0.0,
-    }
-    sessions_per_month = sessions_per_month_map.get(frequency, 0.0)
+    cost = _parse_money(cost_raw, "Cost")
+    timeframe_months = _parse_timeframe_months(timeframe_raw)
+    uses_per_frequency = _parse_positive_int(uses_raw, "Uses per frequency")
+    minutes_per_use = _parse_minutes(
+        minutes_raw,
+        "Minutes per use" if mode == "enjoyment" else "Minutes saved per use",
+    )
+    target_value_per_hour = _parse_optional_positive_float(target_value_raw) or 25.0
 
-    if str(timeframe_months_raw).strip():
-        timeframe_months = _parse_positive_float(timeframe_months_raw, "Timeframe (months)", allow_zero=False)
-    else:
-        timeframe_defaults = {
-            "Yearly": 12.0,
-            "Monthly": 1.0,
-            "Weekly": 1.0,
-            "Daily": 1.0,
-            "Biweekly": 1.0,
-            "One-time": 1.0,
-        }
-        timeframe_months = timeframe_defaults.get(frequency, 1.0)
+    days_per_month = 30.4375
+    weeks_per_month = 4.34524
+    months_per_year = 12.0
 
-    if mode not in {"enjoyment", "time_saved"}:
-        raise ValueError("Mode must be enjoyment or time_saved.")
+    timeframe_years = timeframe_months / months_per_year
+    weeks_in_timeframe = timeframe_months * weeks_per_month
+    days_in_timeframe = timeframe_months * days_per_month
 
-    share_card: Dict[str, Any]
-    details: List[Dict[str, Any]] = []
+    if frequency == "Daily":
+        periods = days_in_timeframe
+    elif frequency == "Weekly":
+        periods = weeks_in_timeframe
+    elif frequency == "Biweekly":
+        periods = weeks_in_timeframe / 2.0
+    elif frequency == "Monthly":
+        periods = float(timeframe_months)
+    elif frequency == "Yearly":
+        periods = timeframe_years
+    else:  # One-time
+        periods = 1.0
 
-    comparison = None
-    metric_a_primary = None
-    metric_a_break_even = None
+    sessions_total = uses_per_frequency * periods
+    total_minutes = minutes_per_use * sessions_total
+    total_hours = total_minutes / 60.0
 
-    nudge_data = None
+    total_cost = cost if frequency == "One-time" else cost * periods
+    cost_per_hour = total_cost / max(total_hours, 0.01)
 
-    if mode == "enjoyment":
-        if not minutes_enjoyment_raw:
-            raise ValueError("Minutes per occurrence is required.")
-        minutes_per_occurrence = _parse_positive_float(minutes_enjoyment_raw, "Minutes per occurrence")
-        target_value = (
-            _parse_positive_float(target_value_raw, "Target value per hour")
-            if str(target_value_raw).strip()
-            else 25.0
-        )
-        sessions_total = (sessions_per_month * timeframe_months) or 1.0
-        total_hours = sessions_total * (minutes_per_occurrence / 60.0)
-        cost_per_hour = cost / max(total_hours, 0.01)
-        metric_a_primary = cost_per_hour
-        total_hours_needed = cost / max(target_value, 0.01)
-        sessions_needed = total_hours_needed / max(minutes_per_occurrence / 60.0, 0.01)
-        sessions_per_month_needed = sessions_needed / max(timeframe_months, 1.0)
-        sessions_per_week_needed = sessions_per_month_needed / 4.345
-        metric_a_break_even = sessions_per_month_needed
+    required_hours = total_cost / max(target_value_per_hour, 0.01)
+    hours_per_use = minutes_per_use / 60.0
+    required_sessions = required_hours / max(hours_per_use, 0.01)
+    sessions_per_month_needed = required_sessions / max(float(timeframe_months), 0.01)
+    sessions_per_week_needed = required_sessions / max(weeks_in_timeframe, 0.01)
 
-        if cost_per_hour <= target_value:
-            verdict = "Worth it"
-            pill_class = "success"
-        elif cost_per_hour <= target_value * 1.5:
-            verdict = "Maybe"
-            pill_class = "warn"
-        else:
-            verdict = "Skip for now"
-            pill_class = "danger"
+    friendly_break_even = ""
+    if sessions_per_week_needed > 0 and sessions_per_week_needed < 1:
+        every_weeks = 1.0 / sessions_per_week_needed
+        friendly_break_even = f"≈ 1 use every {every_weeks:,.2f} weeks"
+    elif sessions_per_week_needed >= 1:
+        friendly_break_even = f"≈ {sessions_per_week_needed:,.2f} uses/week"
 
-        share_card = {
-            "title": item_name or "Is this worth it?",
-            "primary_metric_label": "Cost per hour",
-            "primary_metric_value": _format_currency(cost_per_hour),
-            "break_even_label": "Break-even usage",
-            "break_even_value": f"{sessions_per_week_needed:,.2f}/week • {sessions_per_month_needed:,.2f}/month",
-            "verdict": verdict,
-            "pill_class": pill_class,
-            "subtext": f"Target value: ${target_value:,.2f}/hr",
-        }
-
-        details = [
-            {"label": "Frequency", "value": frequency},
-            {"label": "Timeframe (months)", "value": _format_hours(timeframe_months)},
-            {"label": "Sessions total", "value": _format_hours(sessions_total)},
-            {"label": "Total hours", "value": _format_hours(total_hours)},
-            {"label": "Cost", "value": _format_currency(cost)},
-        ]
-        if notes:
-            details.append({"label": "Assumptions", "value": notes})
-
-    else:
-        # time_saved
-        if not minutes_saved_raw:
-            raise ValueError("Minutes saved per use is required.")
-        if not str(hourly_value_raw).strip():
-            raise ValueError("Hourly value is required for time_saved mode.")
-        minutes_saved_per_use = _parse_positive_float(minutes_saved_raw, "Minutes saved per use")
-        hourly_value = _parse_positive_float(hourly_value_raw, "Your hourly value")
-
-        value_per_use = (minutes_saved_per_use / 60.0) * hourly_value
-        break_even_uses = math.ceil(cost / max(value_per_use, 0.01))
-        metric_a_primary = value_per_use
-        metric_a_break_even = break_even_uses
-
-        effective_cph_saved = None
-        if str(expected_uses_raw).strip():
-            expected_uses = _parse_positive_float(expected_uses_raw, "Expected uses per month")
-            total_uses = expected_uses * timeframe_months
-            total_saved_hours = total_uses * (minutes_saved_per_use / 60.0)
-            effective_cph_saved = cost / max(total_saved_hours, 0.01)
-
-        if value_per_use >= hourly_value * 0.25 or break_even_uses <= 10:
-            verdict = "Worth it"
-            pill_class = "success"
-        elif break_even_uses <= 30 or value_per_use >= hourly_value * 0.1:
-            verdict = "Maybe"
-            pill_class = "warn"
-        else:
-            verdict = "Skip for now"
-            pill_class = "danger"
-
-        primary_label = "Value per use"
-        primary_value = _format_currency(value_per_use)
-        break_even_label = "Break-even uses"
-        break_even_value = f"{break_even_uses}"
-
-        if effective_cph_saved is not None:
-            primary_label = "Cost per hour saved"
-            primary_value = _format_currency(effective_cph_saved)
-
-        share_card = {
-            "title": item_name or "Is this worth it?",
-            "primary_metric_label": primary_label,
-            "primary_metric_value": primary_value,
-            "break_even_label": break_even_label,
-            "break_even_value": break_even_value,
-            "verdict": verdict,
-            "pill_class": pill_class,
-            "subtext": f"Value per use: {_format_currency(value_per_use)}",
-        }
-
-        details = [
-            {"label": "Frequency", "value": frequency},
-            {"label": "Timeframe (months)", "value": _format_hours(timeframe_months)},
-            {"label": "Break-even uses", "value": f"{break_even_uses}"},
-            {"label": "Minutes saved per use", "value": _format_hours(minutes_saved_per_use)},
-            {"label": "Hourly value", "value": _format_currency(hourly_value)},
-        ]
-        if effective_cph_saved is not None:
-            details.append({"label": "Cost per hour saved", "value": _format_currency(effective_cph_saved)})
-        if notes:
-            details.append({"label": "Assumptions", "value": notes})
+    adjusted = None
+    verdict_label = "Buy now" if cost_per_hour <= target_value_per_hour else "Skip for now"
+    verdict_reason = (
+        f"Base cost per hour {_format_currency(cost_per_hour)}/hr vs your value {_format_currency(target_value_per_hour)}/hr."
+    )
 
     if nudge_enabled:
-        ft = _parse_positive_float(follow_through_raw or 100, "Follow-through percent", allow_zero=True) if str(follow_through_raw).strip() else 100.0
-        quit_p = _parse_positive_float(quit_chance_raw or 0, "Quit chance percent", allow_zero=True) if str(quit_chance_raw).strip() else 0.0
-        ft = min(max(ft, 0.0), 100.0)
-        quit_p = min(max(quit_p, 0.0), 100.0)
-        expected_usage_multiplier = (ft / 100.0) * (1 - quit_p / 100.0)
-        expected_usage_multiplier = max(min(expected_usage_multiplier, 1.0), 0.05)
+        def _parse_optional_int_clamped(value: Any, label: str, *, min_value: int, max_value: int) -> int:
+            raw = str(value or "").strip()
+            if not raw:
+                return 0
+            try:
+                as_float = float(raw.replace(",", "").strip())
+            except Exception:
+                raise ValueError(f"{label} must be a number.")
+            as_int = int(as_float)
+            if abs(as_float - as_int) > 1e-9:
+                raise ValueError(f"{label} must be a whole number.")
+            return min(max(as_int, min_value), max_value)
 
-        if mode == "enjoyment":
-            adjusted_metric = cost_per_hour / expected_usage_multiplier
-            if adjusted_metric <= target_value:
-                verdict = "Worth it"
-                pill_class = "success"
-            elif adjusted_metric <= target_value * 1.5:
-                verdict = "Maybe"
-                pill_class = "warn"
-            else:
-                verdict = "Skip for now"
-                pill_class = "danger"
-            share_card["primary_metric_value"] = _format_currency(adjusted_metric)
-            share_card["verdict"] = verdict
-            share_card["pill_class"] = pill_class
-            share_card["subtext"] = f"Adjusted for follow-through • Target: ${target_value:,.2f}/hr"
-            nudge_data = {
-                "enabled": True,
-                "expected_usage_multiplier": round(expected_usage_multiplier, 3),
-                "adjusted_primary_metric_label": "Adjusted cost per hour",
-                "adjusted_primary_metric_value": _format_currency(adjusted_metric),
-                "note": f"Includes follow-through {ft:.0f}% and quit chance {quit_p:.0f}%",
-                "return_window_days": return_window_raw.strip() if str(return_window_raw).strip() else "",
-            }
-        else:
-            adjusted_break_even = math.ceil(break_even_uses / expected_usage_multiplier)
-            if adjusted_break_even <= 10 or value_per_use >= hourly_value * 0.25:
-                verdict = "Worth it"
-                pill_class = "success"
-            elif adjusted_break_even <= 30:
-                verdict = "Maybe"
-                pill_class = "warn"
-            else:
-                verdict = "Skip for now"
-                pill_class = "danger"
-            share_card["verdict"] = verdict
-            share_card["pill_class"] = pill_class
-            share_card["break_even_value"] = f"{adjusted_break_even}"
-            share_card["subtext"] = "Adjusted for follow-through"
-            nudge_data = {
-                "enabled": True,
-                "expected_usage_multiplier": round(expected_usage_multiplier, 3),
-                "adjusted_primary_metric_label": "Adjusted break-even uses",
-                "adjusted_primary_metric_value": f"{adjusted_break_even}",
-                "note": f"Includes follow-through {ft:.0f}% and quit chance {quit_p:.0f}%",
-                "return_window_days": return_window_raw.strip() if str(return_window_raw).strip() else "",
-            }
+        def _clamp_pct(val: Any, label: str) -> float:
+            raw = str(val or "").strip()
+            if not raw:
+                return 0.0
+            try:
+                pct = float(raw.replace(",", "").strip())
+            except Exception:
+                raise ValueError(f"{label} must be a number between 0 and 100.")
+            pct = min(max(pct, 0.0), 100.0)
+            return pct
 
-    # Optional comparison
-    if compare_enabled and option_b_cost and option_b_minutes:
-        try:
-            b_cost = _parse_positive_float(option_b_cost, "Option B cost")
-            b_minutes = _parse_positive_float(option_b_minutes, "Option B minutes")
-            b_freq = option_b_frequency if option_b_frequency in frequency_options else frequency
-            b_sessions_per_month = sessions_per_month_map.get(b_freq, sessions_per_month)
-            b_timeframe_months = timeframe_months
-            if mode == "enjoyment":
-                b_sessions_total = (b_sessions_per_month * b_timeframe_months) or 1.0
-                b_total_hours = b_sessions_total * (b_minutes / 60.0)
-                b_cph = b_cost / max(b_total_hours, 0.01)
-                winner = "A" if metric_a_primary is not None and metric_a_primary <= b_cph else "B"
-                diff = abs((metric_a_primary or 0) - b_cph)
-                threshold_sessions = cost / max(b_cph * (minutes_per_occurrence / 60.0) * max(timeframe_months, 0.01), 0.01)
-                threshold_per_month = threshold_sessions / max(timeframe_months, 1.0)
-                break_even_note = f"At the entered frequencies, {winner} is cheaper by ${diff:,.2f}/hr."
-                break_even_note += f" If you use A at least {threshold_per_month:,.2f} times/month, it beats B."
-                comparison = {
-                    "enabled": True,
-                    "mode": mode,
-                    "a": {"name": item_name or "Option A", "primary_metric_value": metric_a_primary},
-                    "b": {"name": option_b_name or "Option B", "primary_metric_value": b_cph},
-                    "winner": winner,
-                    "difference_per_hour": diff,
-                    "break_even_note": break_even_note,
-                }
-            else:
-                b_hourly = _parse_positive_float(option_b_hourly_raw, "Option B hourly value") if str(option_b_hourly_raw).strip() else _parse_positive_float(hourly_value_raw, "Your hourly value")
-                b_value_per_use = (b_minutes / 60.0) * b_hourly
-                b_break_even_uses = math.ceil(b_cost / max(b_value_per_use, 0.01))
-                winner = "A" if metric_a_break_even is not None and metric_a_break_even <= b_break_even_uses else "B"
-                diff = abs((metric_a_break_even or 0) - b_break_even_uses)
-                break_even_note = f"{winner} wins with fewer break-even uses (diff {diff})."
-                comparison = {
-                    "enabled": True,
-                    "mode": mode,
-                    "a": {"name": item_name or "Option A", "primary_metric_value": metric_a_break_even},
-                    "b": {"name": option_b_name or "Option B", "primary_metric_value": b_break_even_uses},
-                    "winner": winner,
-                    "difference_per_hour": diff,
-                    "break_even_note": break_even_note,
-                }
-        except ValueError:
-            comparison = None
-
-    return {
-        "output": {
-            "share_card": share_card,
-            "comparison": comparison,
-            "nudge": nudge_data,
-            "details": details,
+        p_use_pct = _clamp_pct(follow_through_raw, "Follow-through percent") if str(follow_through_raw).strip() else 100.0
+        p_quit_pct = _clamp_pct(quit_chance_raw, "Quit chance percent") if str(quit_chance_raw).strip() else 0.0
+        p_use = p_use_pct / 100.0
+        p_quit = p_quit_pct / 100.0
+        multiplier = p_use * (1.0 - p_quit)
+        multiplier = min(max(multiplier, 0.05), 1.0)
+        adjusted_hours = total_hours * multiplier
+        adjusted_cost_per_hour = total_cost / max(adjusted_hours, 0.01)
+        adjusted = {
+            "adjusted_cost_per_hour": adjusted_cost_per_hour,
+            "adjusted_display": f"{_format_currency(adjusted_cost_per_hour)}/hr",
+            "probability_use_pct": round(p_use_pct, 2),
+            "chance_quit_pct": round(p_quit_pct, 2),
+            "expected_usage_multiplier": round(multiplier, 3),
+            "return_window_days": _parse_optional_int_clamped(
+                return_window_raw,
+                "Return window days",
+                min_value=0,
+                max_value=365,
+            ),
         }
+        verdict_label = "Buy now" if adjusted_cost_per_hour <= target_value_per_hour else "Skip for now"
+        verdict_reason = (
+            f"Adjusted cost per hour {adjusted['adjusted_display']} vs your value {_format_currency(target_value_per_hour)}/hr."
+        )
+
+    primary_label = "Cost per hour" if mode == "enjoyment" else "Cost per hour saved"
+    primary_display = f"{_format_currency(cost_per_hour)}/hr"
+    primary_value = cost_per_hour
+    if adjusted:
+        primary_display = adjusted["adjusted_display"]
+        primary_value = adjusted["adjusted_cost_per_hour"]
+
+    output: Dict[str, Any] = {
+        "title": item_name or "Is this worth it?",
+        "verdict": {"label": verdict_label, "reason": verdict_reason},
+        "primary": {
+            "metric_label": primary_label,
+            "metric_value": primary_value,
+            "metric_display": primary_display,
+        },
+        "break_even": {
+            "per_week": round(sessions_per_week_needed, 4),
+            "per_month": round(sessions_per_month_needed, 4),
+            "friendly": friendly_break_even,
+        },
+        "totals": {
+            "total_cost": round(total_cost, 6),
+            "total_hours": round(total_hours, 6),
+            "sessions_total": round(sessions_total, 6),
+            "periods": round(periods, 6),
+            "frequency": frequency,
+            "timeframe_months": timeframe_months,
+        },
+        "expected": adjusted,
+        "compare": None,
     }
+
+    if mode == "time_saved":
+        value_per_use = target_value_per_hour * hours_per_use
+        break_even_uses = int(math.ceil(total_cost / max(value_per_use, 0.01)))
+        break_even_uses_per_frequency = (break_even_uses / periods) if periods > 0 else None
+        output["time_saved"] = {
+            "value_per_use": value_per_use,
+            "value_per_use_display": _format_currency(value_per_use),
+            "break_even_uses": break_even_uses,
+            "break_even_uses_per_frequency": round(break_even_uses_per_frequency, 4) if break_even_uses_per_frequency else None,
+        }
+
+    if notes:
+        output["notes"] = notes
+
+    # Optional compare (keep deterministic, assume same uses_per_frequency/timeframe for B)
+    if compare_enabled and str(option_b_cost_raw).strip() and str(option_b_minutes_raw).strip():
+        try:
+            b_cost = _parse_money(option_b_cost_raw, "Option B cost")
+            b_minutes = _parse_minutes(option_b_minutes_raw, "Option B minutes per use")
+            b_freq = option_b_frequency if option_b_frequency in frequency_options else frequency
+            if b_freq == "Daily":
+                b_periods = days_in_timeframe
+            elif b_freq == "Weekly":
+                b_periods = weeks_in_timeframe
+            elif b_freq == "Biweekly":
+                b_periods = weeks_in_timeframe / 2.0
+            elif b_freq == "Monthly":
+                b_periods = float(timeframe_months)
+            elif b_freq == "Yearly":
+                b_periods = timeframe_years
+            else:
+                b_periods = 1.0
+
+            b_sessions_total = uses_per_frequency * b_periods
+            b_total_cost = b_cost if b_freq == "One-time" else b_cost * b_periods
+            b_total_hours = (b_minutes * b_sessions_total) / 60.0
+            b_cph = b_total_cost / max(b_total_hours, 0.01)
+
+            a_name = item_name or "Option A"
+            b_name = option_b_name or "Option B"
+            winner = "A" if cost_per_hour <= b_cph else "B"
+            diff = abs(cost_per_hour - b_cph)
+            output["compare"] = {
+                "enabled": True,
+                "mode": mode,
+                "a": {"name": a_name, "cost_per_hour": cost_per_hour, "display": f"{_format_currency(cost_per_hour)}/hr"},
+                "b": {"name": b_name, "cost_per_hour": b_cph, "display": f"{_format_currency(b_cph)}/hr"},
+                "winner": winner,
+                "difference_per_hour": diff,
+                "note": f"Assumes the same uses-per-frequency for A and B ({uses_per_frequency}).",
+            }
+        except ValueError:
+            output["compare"] = None
+
+    return {"output": output}

@@ -82,9 +82,12 @@ def _validate_input_against_schema(tool: Dict[str, Any], payload: Dict[str, Any]
         incoming = payload.get(name)
 
         if incoming is None or incoming == "":
-            if required:
+            if default_value is not None and default_value != "":
+                incoming = str(default_value)
+            elif required:
                 raise ValueError(f'"{name}" is required.')
-            incoming = default_value or ""
+            else:
+                incoming = ""
 
         if field_type in {"text", "textarea", "select"}:
             if not isinstance(incoming, str):
@@ -309,7 +312,7 @@ def run_tool():
             data = {"output": result.get("output", "")}
             return _build_response(True, data=data, error=None, request_id=request_id), 200
         except ValueError as exc:
-            return _error_response("INVALID_REQUEST", str(exc), request_id, status=400)
+            return _error_response("TOOL_INPUT_INVALID", str(exc), request_id, status=400)
         except Exception as exc:
             return _error_response("TOOL_EXECUTION_FAILED", f"Is This Worth It failed: {exc}", request_id, status=500)
 

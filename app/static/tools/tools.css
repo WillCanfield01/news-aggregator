@@ -465,6 +465,10 @@
     box-shadow: 0 8px 18px rgba(17, 24, 39, 0.05);
 }
 
+.result-card .chip-row {
+    margin-top: 10px;
+}
+
 .result-title {
     font-weight: 700;
     font-size: 1.05rem;

@@ -906,12 +906,193 @@
             }
         };
 
-        const renderOutput = (data) => {
+        const clearOutputCards = () => {
             if (!outputEl) return;
-            // clear previous cards
-            const oldCard = outputEl.querySelector(".result-card");
-            if (oldCard) oldCard.remove();
+            outputEl.querySelectorAll(".result-card, .compare-panel, .nudge-panel").forEach((el) => el.remove());
+        };
+
+        const pillClassForVerdict = (label) => {
+            const normalized = String(label || "").toLowerCase();
+            if (normalized.includes("buy") || normalized.includes("worth")) return "success";
+            if (normalized.includes("maybe")) return "warn";
+            if (normalized.includes("skip") || normalized.includes("not")) return "danger";
+            return "warn";
+        };
+
+        const formatNumber = (val, decimals = 2) => {
+            const num = typeof val === "number" ? val : Number(val);
+            if (!isFinite(num)) return "";
+            return num.toFixed(decimals).replace(/\.00$/, "");
+        };
+
+        const renderWorthIt = (data) => {
+            clearOutputCards();
             if (outputPre) outputPre.textContent = "";
+
+            const card = document.createElement("div");
+            card.className = "result-card";
+
+            const title = document.createElement("div");
+            title.className = "result-title";
+            title.textContent = data.title || "Result";
+            card.appendChild(title);
+
+            const primary = document.createElement("div");
+            primary.className = "result-primary";
+            const primaryLabel = document.createElement("div");
+            primaryLabel.className = "result-primary-label";
+            primaryLabel.textContent = data.primary?.metric_label || "Primary metric";
+            const primaryValue = document.createElement("div");
+            primaryValue.className = "result-primary-value";
+            primaryValue.textContent = data.primary?.metric_display || "";
+            primary.appendChild(primaryLabel);
+            primary.appendChild(primaryValue);
+            card.appendChild(primary);
+
+            const breakEven = document.createElement("div");
+            breakEven.className = "result-secondary";
+            const breakLabel = document.createElement("div");
+            breakLabel.textContent = "Break-even usage";
+            const perWeek = formatNumber(data.break_even?.per_week, 2);
+            const perMonth = formatNumber(data.break_even?.per_month, 2);
+            const breakValue = document.createElement("div");
+            breakValue.className = "result-secondary-value";
+            breakValue.textContent = `${perWeek}/week • ${perMonth}/month`;
+            breakEven.appendChild(breakLabel);
+            breakEven.appendChild(breakValue);
+            card.appendChild(breakEven);
+
+            if (data.break_even?.friendly) {
+                const sub = document.createElement("div");
+                sub.className = "result-subtext";
+                sub.textContent = data.break_even.friendly;
+                card.appendChild(sub);
+            }
+
+            const verdict = document.createElement("div");
+            verdict.className = "pill";
+            verdict.classList.add(pillClassForVerdict(data.verdict?.label));
+            verdict.textContent = data.verdict?.label || "";
+            card.appendChild(verdict);
+
+            if (data.verdict?.reason) {
+                const sub = document.createElement("div");
+                sub.className = "result-subtext";
+                sub.textContent = data.verdict.reason;
+                card.appendChild(sub);
+            }
+
+            if (data.expected && data.expected.adjusted_display) {
+                const adj = document.createElement("div");
+                adj.className = "result-subtext";
+                const ft = data.expected.probability_use_pct;
+                const quit = data.expected.chance_quit_pct;
+                const bits = [];
+                if (typeof ft === "number") bits.push(`${ft}% follow-through`);
+                if (typeof quit === "number") bits.push(`${quit}% quit chance`);
+                adj.textContent = `Adjusted: ${data.expected.adjusted_display}${bits.length ? ` (${bits.join(", ")})` : ""}`;
+                card.appendChild(adj);
+            }
+
+            const chipRow = document.createElement("div");
+            chipRow.className = "chip-row";
+            const chips = [];
+            const totals = data.totals || {};
+            if (totals.frequency) chips.push(`Frequency: ${totals.frequency}`);
+            if (totals.timeframe_months) chips.push(`Timeframe: ${totals.timeframe_months} mo`);
+            if (totals.sessions_total !== undefined) chips.push(`Uses: ${formatNumber(totals.sessions_total, 0)}`);
+            if (totals.total_hours !== undefined) chips.push(`Hours: ${formatNumber(totals.total_hours, 1)}`);
+            if (totals.total_cost !== undefined) chips.push(`Total: $${formatNumber(totals.total_cost, 2)}`);
+            chips.forEach((text) => {
+                const c = document.createElement("div");
+                c.className = "chip";
+                c.textContent = text;
+                chipRow.appendChild(c);
+            });
+            card.appendChild(chipRow);
+
+            // Optional time_saved extras
+            if (data.time_saved) {
+                const rows = document.createElement("div");
+                rows.className = "detail-rows";
+                const items = [
+                    ["Value per use", data.time_saved.value_per_use_display],
+                    ["Break-even uses", String(data.time_saved.break_even_uses ?? "")],
+                ];
+                if (data.time_saved.break_even_uses_per_frequency !== null && data.time_saved.break_even_uses_per_frequency !== undefined) {
+                    items.push(["Break-even uses / period", String(data.time_saved.break_even_uses_per_frequency)]);
+                }
+                items.forEach(([label, value]) => {
+                    if (!value) return;
+                    const r = document.createElement("div");
+                    r.className = "detail-row";
+                    const l = document.createElement("span");
+                    l.textContent = label;
+                    const v = document.createElement("span");
+                    v.textContent = value;
+                    r.append(l, v);
+                    rows.appendChild(r);
+                });
+                card.appendChild(rows);
+            }
+
+            outputEl.appendChild(card);
+
+            // Optional compare panel (if present)
+            if (data.compare && data.compare.enabled) {
+                const compare = document.createElement("div");
+                compare.className = "compare-panel";
+                const titleRow = document.createElement("div");
+                titleRow.className = "compare-title";
+                titleRow.textContent = "Option A vs B";
+                compare.appendChild(titleRow);
+
+                const grid = document.createElement("div");
+                grid.className = "result-grid";
+                const aCol = document.createElement("div");
+                aCol.className = "compare-col";
+                if (data.compare.winner === "A") aCol.classList.add("winner");
+                const aName = document.createElement("div");
+                aName.className = "compare-name";
+                aName.textContent = data.compare.a?.name || "Option A";
+                const aMetric = document.createElement("div");
+                aMetric.className = "compare-metric";
+                aMetric.textContent = data.compare.a?.display || "";
+                aCol.append(aName, aMetric);
+
+                const bCol = document.createElement("div");
+                bCol.className = "compare-col";
+                if (data.compare.winner === "B") bCol.classList.add("winner");
+                const bName = document.createElement("div");
+                bName.className = "compare-name";
+                bName.textContent = data.compare.b?.name || "Option B";
+                const bMetric = document.createElement("div");
+                bMetric.className = "compare-metric";
+                bMetric.textContent = data.compare.b?.display || "";
+                bCol.append(bName, bMetric);
+
+                grid.append(aCol, bCol);
+                compare.appendChild(grid);
+
+                const note = document.createElement("div");
+                note.className = "compare-note";
+                const diff = typeof data.compare.difference_per_hour === "number" ? `$${formatNumber(data.compare.difference_per_hour, 2)}/hr` : "";
+                note.textContent = diff ? `Difference: ${diff}. ${data.compare.note || ""}` : (data.compare.note || "");
+                compare.appendChild(note);
+                outputEl.appendChild(compare);
+            }
+        };
+
+        const renderOutput = (data, slug) => {
+            if (!outputEl) return;
+            clearOutputCards();
+            if (outputPre) outputPre.textContent = "";
+
+            const isWorthItCard = slug === "worth-it" && data && typeof data === "object" && data.primary && data.primary.metric_display;
+            if (isWorthItCard) {
+                renderWorthIt(data);
+                return;
+            }
 
             const isShareCard = data && typeof data === "object" && data.share_card;
             if (!isShareCard) {
@@ -1065,6 +1246,55 @@
             }
         };
 
+        const initWorthItFormUX = () => {
+            const slug = form.dataset.toolSlug;
+            if (slug !== "worth-it") return;
+
+            const modeEl = form.querySelector('[name="mode"]');
+            const freqEl = form.querySelector('[name="frequency"]');
+            const minutesEl = form.querySelector('[name="minutes_per_use"]');
+            const usesEl = form.querySelector('[name="uses_per_frequency"]');
+
+            const setFieldLabel = (inputEl, text) => {
+                if (!inputEl) return;
+                const wrapper = inputEl.closest(".tool-field");
+                if (!wrapper) return;
+                const labelEl = wrapper.querySelector("label");
+                if (!labelEl) return;
+                const star = inputEl.required ? "*" : "";
+                labelEl.textContent = `${text}${star}`;
+            };
+
+            const apply = () => {
+                const mode = modeEl ? modeEl.value : "enjoyment";
+                const freq = freqEl ? freqEl.value : "One-time";
+
+                if (minutesEl) {
+                    if (mode === "time_saved") {
+                        setFieldLabel(minutesEl, "Minutes saved per use");
+                        minutesEl.placeholder = "10";
+                    } else {
+                        setFieldLabel(minutesEl, "Minutes of enjoyment per use");
+                        minutesEl.placeholder = "60";
+                    }
+                }
+
+                if (usesEl) {
+                    setFieldLabel(usesEl, "Uses per frequency");
+                    if (freq === "Daily") usesEl.placeholder = "1 (times per day)";
+                    else if (freq === "Weekly") usesEl.placeholder = "3 (times per week)";
+                    else if (freq === "Biweekly") usesEl.placeholder = "6 (times per 2 weeks)";
+                    else if (freq === "Monthly") usesEl.placeholder = "12 (times per month)";
+                    else if (freq === "Yearly") usesEl.placeholder = "180 (times per year)";
+                    else usesEl.placeholder = "50 (total uses)";
+                }
+            };
+
+            if (modeEl) modeEl.addEventListener("change", apply);
+            if (freqEl) freqEl.addEventListener("change", apply);
+            apply();
+        };
+
         const showShare = (url) => {
             if (!shareBlock || !shareUrlEl) return;
             const full = url.startsWith("http") ? url : `${window.location.origin}${url}`;
@@ -1100,6 +1330,7 @@
                 }
             });
             applyConditionalVisibility();
+            initWorthItFormUX();
         }
 
         if (viewMode) {
@@ -1117,6 +1348,8 @@
                 setStatus("Copied to new. Edit and re-run to generate a fresh link.", "success");
             });
         }
+
+        initWorthItFormUX();
 
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -1152,7 +1385,7 @@
                     return;
                 }
                 const output = response.data?.output || "No output returned.";
-                renderOutput(output);
+                renderOutput(output, slug);
                 if (response.data?.share_url) {
                     showShare(response.data.share_url);
                 }
@@ -1175,7 +1408,7 @@
             }
 
             const output = response.data?.output || "No output returned.";
-            renderOutput(output);
+            renderOutput(output, slug);
             if (response.data?.share_url) {
                 showShare(response.data.share_url);
             }
