@@ -1083,6 +1083,139 @@
             }
         };
 
+        const renderSocialPostPolisher = (data) => {
+            clearOutputCards();
+            if (outputPre) outputPre.textContent = "";
+
+            const card = document.createElement("div");
+            card.className = "result-card sp-result";
+
+            const title = document.createElement("div");
+            title.className = "result-title";
+            title.textContent = "Polished Post";
+            card.appendChild(title);
+
+            const meta = document.createElement("div");
+            meta.className = "sp-meta";
+            const platform = data.platform ? `Platform: ${data.platform}` : "";
+            const counts =
+                typeof data.original_length === "number" && typeof data.polished_length === "number"
+                    ? `Chars: ${data.original_length} → ${data.polished_length}`
+                    : "";
+            meta.textContent = [platform, counts].filter(Boolean).join(" • ");
+            card.appendChild(meta);
+
+            const box = document.createElement("div");
+            box.className = "sp-copybox";
+            const textEl = document.createElement("pre");
+            textEl.className = "sp-text";
+            textEl.textContent = data.polished_post || "";
+            box.appendChild(textEl);
+
+            const actions = document.createElement("div");
+            actions.className = "sp-actions";
+            const copyBtn = document.createElement("button");
+            copyBtn.type = "button";
+            copyBtn.className = "tool-run-btn sp-copy-btn";
+            copyBtn.textContent = "Copy";
+            copyBtn.onclick = async () => {
+                const text = data.polished_post || "";
+                if (!text) return;
+                try {
+                    await navigator.clipboard.writeText(text);
+                    copyBtn.textContent = "Copied";
+                    setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+                } catch (e) {
+                    copyBtn.textContent = "Copy failed";
+                    setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+                }
+            };
+            actions.appendChild(copyBtn);
+            card.appendChild(box);
+            card.appendChild(actions);
+
+            // Secondary: what changed
+            const changesCard = document.createElement("div");
+            changesCard.className = "compare-panel sp-secondary";
+            const cTitle = document.createElement("div");
+            cTitle.className = "compare-title";
+            cTitle.textContent = "What Changed";
+            changesCard.appendChild(cTitle);
+
+            const changes = data.summary?.changes || [];
+            if (Array.isArray(changes) && changes.length) {
+                const ul = document.createElement("ul");
+                ul.className = "sp-changes";
+                changes.slice(0, 6).forEach((c) => {
+                    const li = document.createElement("li");
+                    li.textContent = String(c);
+                    ul.appendChild(li);
+                });
+                changesCard.appendChild(ul);
+            } else {
+                const empty = document.createElement("div");
+                empty.className = "compare-note";
+                empty.textContent = "Tightened wording and improved readability.";
+                changesCard.appendChild(empty);
+            }
+
+            // Alternate versions (optional)
+            const alt = data.alt_versions || {};
+            const altShort = (alt.short || "").trim();
+            const altHook = (alt.hook_first || "").trim();
+            if (altShort || altHook) {
+                const toggle = document.createElement("button");
+                toggle.type = "button";
+                toggle.className = "tool-clear-btn sp-toggle";
+                toggle.textContent = "Show alternate versions";
+
+                const panel = document.createElement("div");
+                panel.className = "sp-alt";
+                panel.style.display = "none";
+
+                const addAlt = (label, text) => {
+                    const section = document.createElement("div");
+                    section.className = "sp-alt-section";
+                    const h = document.createElement("div");
+                    h.className = "sp-alt-title";
+                    h.textContent = label;
+                    const pre = document.createElement("pre");
+                    pre.className = "sp-text sp-alt-text";
+                    pre.textContent = text;
+                    const btn = document.createElement("button");
+                    btn.type = "button";
+                    btn.className = "tool-run-btn sp-copy-btn";
+                    btn.textContent = "Copy";
+                    btn.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(text);
+                            btn.textContent = "Copied";
+                            setTimeout(() => (btn.textContent = "Copy"), 1200);
+                        } catch (e) {
+                            btn.textContent = "Copy failed";
+                            setTimeout(() => (btn.textContent = "Copy"), 1200);
+                        }
+                    };
+                    section.append(h, pre, btn);
+                    panel.appendChild(section);
+                };
+
+                if (altShort) addAlt("Short version", altShort);
+                if (altHook) addAlt("Hook-first version", altHook);
+
+                toggle.onclick = () => {
+                    const isHidden = panel.style.display === "none";
+                    panel.style.display = isHidden ? "block" : "none";
+                    toggle.textContent = isHidden ? "Hide alternate versions" : "Show alternate versions";
+                };
+
+                changesCard.append(toggle, panel);
+            }
+
+            outputEl.appendChild(card);
+            outputEl.appendChild(changesCard);
+        };
+
         const renderOutput = (data, slug) => {
             if (!outputEl) return;
             clearOutputCards();
@@ -1091,6 +1224,13 @@
             const isWorthItCard = slug === "worth-it" && data && typeof data === "object" && data.primary && data.primary.metric_display;
             if (isWorthItCard) {
                 renderWorthIt(data);
+                return;
+            }
+
+            const isSocialPostPolisher =
+                slug === "social-post-polisher" && data && typeof data === "object" && typeof data.polished_post === "string";
+            if (isSocialPostPolisher) {
+                renderSocialPostPolisher(data);
                 return;
             }
 

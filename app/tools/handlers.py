@@ -617,6 +617,160 @@ def run_decision_helper(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError(f"OpenAI request failed: {exc}") from exc
 
 
+# ---- Social Post Polisher ----
+
+
+def _extract_json_object(text: str) -> str | None:
+    """Best-effort extraction of a top-level JSON object from model output."""
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    candidate = text[start : end + 1].strip()
+    return candidate if candidate.startswith("{") and candidate.endswith("}") else None
+
+
+def _clamp_list(items: Any, *, max_items: int) -> List[str]:
+    if not isinstance(items, list):
+        return []
+    out: List[str] = []
+    for it in items:
+        if isinstance(it, str):
+            s = it.strip()
+            if s:
+                out.append(s)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def run_social_post_polisher(payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw_post = (payload.get("raw_post") or "").strip()
+    platform = (payload.get("platform") or "LinkedIn").strip()
+    tone = (payload.get("tone") or "Professional").strip()
+    length_pref = (payload.get("length") or "Slightly shorter").strip()
+    call_to_action = (payload.get("call_to_action") or "No").strip()
+
+    if len(raw_post) < 20:
+        raise ValueError("Please paste at least 20 characters so there’s something to polish.")
+
+    platform_options = {"LinkedIn", "X (Twitter)", "Instagram", "Threads"}
+    if platform not in platform_options:
+        raise ValueError("Platform must be LinkedIn, X (Twitter), Instagram, or Threads.")
+
+    tone_options = {"Professional", "Casual", "Confident", "Friendly"}
+    if tone not in tone_options:
+        raise ValueError("Tone must be Professional, Casual, Confident, or Friendly.")
+
+    length_options = {"Keep similar length", "Slightly shorter", "Much shorter"}
+    if length_pref not in length_options:
+        raise ValueError("Length preference must be Keep similar length, Slightly shorter, or Much shorter.")
+
+    cta_options = {"Yes", "No"}
+    if call_to_action not in cta_options:
+        raise ValueError("Include a call to action must be Yes or No.")
+
+    allow_emojis = platform in {"Instagram", "Threads"}
+    allow_hashtags = platform in {"LinkedIn", "Instagram"}
+    x_limit_hint = 280 if platform == "X (Twitter)" else None
+
+    prompt = f"""
+Rewrite the user's post for {platform} to improve clarity and flow, while preserving their voice.
+
+Hard rules:
+- Do NOT add emojis unless platform is Instagram or Threads. (If allowed, max 2 and only if it fits the voice.)
+- Do NOT add hashtags unless platform is LinkedIn or Instagram. (If used, max 3 and keep them at the very end.)
+- Avoid marketing language and hype. No “game-changer”, “revolutionary”, “unlock”, “leverage”, etc.
+- Remove filler. Tighten sentences. Keep it human.
+- Break long paragraphs into short readable blocks.
+- Do not invent facts. Do not add claims the user did not imply.
+
+User preferences:
+- Tone: {tone}
+- Length preference: {length_pref}
+- Include call to action: {call_to_action} (If Yes, keep it subtle and 1 line max.)
+""".strip()
+
+    if x_limit_hint:
+        prompt += f"\n- For X, aim for <= {x_limit_hint} characters when possible."
+
+    prompt += "\n\nReturn JSON only (no markdown, no extra text) with this exact shape:\n"
+    prompt += """{
+  "polished_post": "string",
+  "summary": { "changes": ["string", "string", "string"] },
+  "alt_versions": { "short": "string or empty", "hook_first": "string or empty" }
+}"""
+    prompt += "\n\nUser draft:\n" + raw_post
+
+    try:
+        result = _client.chat.completions.create(
+            model=_DEFAULT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise social post editor. Output must be valid JSON only.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=700,
+            temperature=0.35,
+            timeout=15,
+        )
+        content = (result.choices[0].message.content or "").strip()
+    except Exception as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+
+    parsed: Dict[str, Any] | None = None
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        extracted = _extract_json_object(content)
+        if extracted:
+            try:
+                parsed = json.loads(extracted)
+            except Exception:
+                parsed = None
+
+    if not isinstance(parsed, dict):
+        parsed = {}
+
+    polished_post = (parsed.get("polished_post") or "").strip()
+    if not polished_post:
+        # Fallback: treat full content as polished post (still structured output)
+        polished_post = content
+
+    summary_changes = _clamp_list((parsed.get("summary") or {}).get("changes") if isinstance(parsed.get("summary"), dict) else None, max_items=5)
+
+    alt_versions = parsed.get("alt_versions") if isinstance(parsed.get("alt_versions"), dict) else {}
+    alt_short = (alt_versions.get("short") or "").strip() if isinstance(alt_versions, dict) else ""
+    alt_hook_first = (alt_versions.get("hook_first") or "").strip() if isinstance(alt_versions, dict) else ""
+
+    # Light deterministic cleanup to reduce "AI-ish" extras
+    if not allow_emojis:
+        polished_post = re.sub(r"[\U0001F300-\U0001FAFF]", "", polished_post)
+        alt_short = re.sub(r"[\U0001F300-\U0001FAFF]", "", alt_short)
+        alt_hook_first = re.sub(r"[\U0001F300-\U0001FAFF]", "", alt_hook_first)
+    if not allow_hashtags:
+        polished_post = re.sub(r"(?:^|\s)#[A-Za-z0-9_]+", "", polished_post).strip()
+        alt_short = re.sub(r"(?:^|\s)#[A-Za-z0-9_]+", "", alt_short).strip()
+        alt_hook_first = re.sub(r"(?:^|\s)#[A-Za-z0-9_]+", "", alt_hook_first).strip()
+
+    output = {
+        "platform": platform,
+        "original_length": len(raw_post),
+        "polished_length": len(polished_post),
+        "summary": {"changes": summary_changes},
+        "polished_post": polished_post,
+        "alt_versions": {
+            "short": alt_short,
+            "hook_first": alt_hook_first,
+        },
+    }
+    return {"output": output}
+
+
 # ---- Worth It Calculator ----
 
 

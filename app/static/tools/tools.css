@@ -621,6 +621,85 @@
     background: #f5f7ff;
 }
 
+.sp-meta {
+    color: #6b7280;
+    font-size: 0.95rem;
+    margin-bottom: 10px;
+}
+
+.sp-copybox {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f9fafb;
+    padding: 12px;
+}
+
+.sp-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+        "Segoe UI Emoji";
+    font-size: 1rem;
+    line-height: 1.5;
+    color: #0f172a;
+}
+
+.sp-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.sp-copy-btn {
+    padding: 8px 12px;
+    border-radius: 10px;
+}
+
+.sp-secondary {
+    margin-top: 12px;
+}
+
+.sp-changes {
+    margin: 0;
+    padding-left: 18px;
+    color: #334155;
+    font-size: 0.98rem;
+}
+
+.sp-changes li {
+    margin: 6px 0;
+}
+
+.sp-toggle {
+    margin-top: 10px;
+}
+
+.sp-alt {
+    margin-top: 10px;
+    display: grid;
+    gap: 12px;
+}
+
+.sp-alt-section {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 10px;
+}
+
+.sp-alt-title {
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #0f172a;
+}
+
+.sp-alt-text {
+    margin-bottom: 10px;
+}
+
 @media (max-width: 640px) {
     .tools-shell {
         margin-top: 12px;
