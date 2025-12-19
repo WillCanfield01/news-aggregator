@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Roulette Admin{% endblock %}
+{% block content %}
+<section class="container" style="max-width:680px;margin:2rem auto;padding:0 1rem;">
+    <h1 style="margin-bottom:12px;">Timeline Roulette Admin</h1>
+    {% if not admin_enabled %}
+    <p style="color:#b91c1c;">Admin token not configured.</p>
+    {% else %}
+    <div style="display:flex;flex-direction:column;gap:12px;">
+        <label style="display:flex;flex-direction:column;gap:6px;">
+            <span>Admin token</span>
+            <input id="token" type="password" autocomplete="off" style="padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:1rem;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;">
+            <span>Force level</span>
+            <select id="force" style="padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:1rem;">
+                <option value="0">0 (no-op if exists)</option>
+                <option value="1">1 (update in place)</option>
+                <option value="2">2 (clear guesses and update)</option>
+            </select>
+        </label>
+        <button id="regenBtn" style="padding:12px;border:none;border-radius:10px;background:#1f4b99;color:#fff;font-weight:700;cursor:pointer;">Regen now</button>
+        <div id="statusArea" style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;">
+            <div id="statusText">Idle.</div>
+            <div id="progressBar" style="margin-top:8px;width:100%;height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden;display:none;">
+                <div id="progressFill" style="height:100%;width:0%;background:#1f4b99;"></div>
+            </div>
+            <div id="jobId" style="margin-top:6px;font-size:0.95rem;color:#6b7280;"></div>
+        </div>
+    </div>
+    {% endif %}
+</section>
+<script>
+(() => {
+    const btn = document.getElementById("regenBtn");
+    const tokenInput = document.getElementById("token");
+    const forceInput = document.getElementById("force");
+    const statusText = document.getElementById("statusText");
+    const progressBar = document.getElementById("progressBar");
+    const progressFill = document.getElementById("progressFill");
+    const jobIdEl = document.getElementById("jobId");
+    let pollTimer = null;
+
+    function setStatus(text, percent) {
+        statusText.textContent = text;
+        if (percent !== undefined && percent !== null) {
+            progressBar.style.display = "block";
+            progressFill.style.width = `${percent}%`;
+        }
+    }
+
+    async function pollStatus(url, token) {
+        if (pollTimer) clearTimeout(pollTimer);
+        try {
+            const res = await fetch(url, { headers: { "X-Admin-Token": token } });
+            if (!res.ok) throw new Error("Status fetch failed");
+            const data = await res.json();
+            const { status, progress, message, job_id } = data;
+            jobIdEl.textContent = job_id ? `Job #${job_id}` : "";
+            setStatus(`${status}${message ? ` — ${message}` : ""}`, progress?.percent ?? 0);
+            if (status === "done" || status === "error") {
+                return;
+            }
+            pollTimer = setTimeout(() => pollStatus(url, token), 1000);
+        } catch (e) {
+            setStatus("Error fetching status", 0);
+        }
+    }
+
+    async function startRegen() {
+        const token = tokenInput.value.trim();
+        const force = forceInput.value;
+        if (!token) {
+            setStatus("Token required");
+            return;
+        }
+        if (pollTimer) clearTimeout(pollTimer);
+        setStatus("Queuing...", 0);
+        jobIdEl.textContent = "";
+        try {
+            const res = await fetch(`/roulette/admin/regen?force=${encodeURIComponent(force)}`, {
+                method: "POST",
+                headers: { "X-Admin-Token": token, "Content-Type": "application/json" },
+            });
+            if (res.status === 401) {
+                setStatus("Unauthorized", 0);
+                return;
+            }
+            if (res.status === 409) {
+                const data = await res.json();
+                setStatus(`Already running (job ${data.job_id || ""})`, 0);
+                if (data.status_url) pollStatus(data.status_url, token);
+                return;
+            }
+            if (res.status !== 202) {
+                setStatus("Failed to queue job", 0);
+                return;
+            }
+            const data = await res.json();
+            setStatus("Queued", 0);
+            jobIdEl.textContent = data.job_id ? `Job #${data.job_id}` : "";
+            if (data.status_url) {
+                pollStatus(data.status_url, token);
+            }
+        } catch (e) {
+            setStatus("Error queuing job", 0);
+        }
+    }
+
+    if (btn) btn.addEventListener("click", startRegen);
+})();
+</script>
+{% endblock %}

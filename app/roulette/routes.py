@@ -37,6 +37,7 @@ except Exception:  # pragma: no cover
 
 from . import roulette_bp
 from .models import TimelineGuess, TimelineRound, TimelineStreak, RouletteSession, RouletteRegenJob
+from .admin_jobs import enqueue_job, job_status_payload, get_running_job, start_worker
 
 # reuse generators
 from app.scripts.generate_timeline_round import (
@@ -195,81 +196,20 @@ def _admin_auth_or_abort():
 # Regen background runner
 # -------------------------------------------------------------------------
 def run_regen_job(job_id: int):
-    job = RouletteRegenJob.query.filter_by(id=job_id).first()
-    if not job:
-        return
-    start_ts = time.time()
-    try:
-        job.status = "running"
-        job.started_at = datetime.utcnow()
-        job.progress = 5
-        db.session.commit()
-
-        # Step 1: kickoff
-        job.progress = 20
-        db.session.commit()
-        if time.time() - start_ts > 90:
-            raise TimeoutError("time budget exceeded")
-
-        # Step 2: generate round (single round capped)
-        ensure_today_round(force=job.force if job.force in (0, 1, 2) else 0)
-        job.rounds_generated = 1
-        job.puzzles_generated = 3
-        job.progress = 70
-        db.session.commit()
-        if time.time() - start_ts > 90:
-            raise TimeoutError("time budget exceeded")
-
-        # Step 3: finalize
-        job.progress = 100
-        job.status = "done"
-        job.finished_at = datetime.utcnow()
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        job = RouletteRegenJob.query.filter_by(id=job_id).first()
-        if job:
-            job.status = "error"
-            job.error_message = str(e)[:500]
-            job.finished_at = datetime.utcnow()
-            job.progress = min(job.progress or 0, 99)
-            db.session.commit()
+    # kept for backward compatibility; new runner lives in admin_jobs.py
+    from .admin_jobs import _run_job as _r
+    _r(job_id)
 
 
 def _regen_worker(app):
-    with app.app_context():
-        while True:
-            try:
-                with _process_lock:
-                    job = (
-                        db.session.query(RouletteRegenJob)
-                        .with_for_update(skip_locked=True)
-                        .filter(RouletteRegenJob.status == "queued")
-                        .order_by(RouletteRegenJob.created_at.asc())
-                        .first()
-                    )
-                    if not job:
-                        db.session.commit()
-                        time.sleep(5)
-                        continue
-                    job.status = "running"
-                    job.started_at = datetime.utcnow()
-                    job.progress = 5
-                    db.session.commit()
-                    run_regen_job(job.id)
-            except Exception:
-                db.session.rollback()
-            time.sleep(2)
+    # compatibility shim; real worker runs in admin_jobs.start_worker
+    from .admin_jobs import _worker as _w
+    _w(app)
 
 
 def start_regen_worker(app):
-    global _runner_started
-    with _runner_lock:
-        if _runner_started:
-            return
-        _runner_started = True
-        t = threading.Thread(target=_regen_worker, args=(app,), daemon=True)
-        t.start()
+    from .admin_jobs import start_worker as _s
+    _s(app)
 
 
 @roulette_bp.post("/roulette/session/reset")
@@ -583,6 +523,13 @@ def play_today():
     )
 
 
+@roulette_bp.get("/roulette/admin")
+def roulette_admin_page():
+    if not _ADMIN_TOKEN:
+        abort(404)
+    return render_template("roulette/admin.html", admin_enabled=bool(_ADMIN_TOKEN))
+
+
 @roulette_bp.post("/roulette/guess")
 def submit_guess():
     r = _today_round_or_404()
@@ -810,6 +757,18 @@ def session_next():
 @roulette_bp.route("/roulette/admin/regen", methods=["GET", "POST"])
 def admin_regen():
     _admin_auth_or_abort()
+    running = get_running_job()
+    if running:
+        return (
+            jsonify(
+                {
+                    "error": "already_running",
+                    "job_id": running.id,
+                    "status_url": url_for("roulette.regen_status", job_id=running.id, _external=True),
+                }
+            ),
+            409,
+        )
     force_raw = request.args.get("force", "0")
     try:
         force = int(force_raw)
@@ -818,14 +777,7 @@ def admin_regen():
     if force not in (0, 1, 2):
         force = 0
 
-    job = RouletteRegenJob(
-        status="queued",
-        progress=0,
-        force=force,
-        requested_by_ip=request.headers.get("X-Forwarded-For", request.remote_addr),
-    )
-    db.session.add(job)
-    db.session.commit()
+    job = enqueue_job(force, request.headers.get("X-Forwarded-For", request.remote_addr))
     return (
         jsonify(
             {
@@ -842,15 +794,4 @@ def admin_regen():
 def regen_status(job_id: int):
     _admin_auth_or_abort()
     job = RouletteRegenJob.query.filter_by(id=job_id).first_or_404()
-    return jsonify(
-        {
-            "job_id": job.id,
-            "status": job.status,
-            "progress": job.progress,
-            "error_message": job.error_message,
-            "started_at": job.started_at.isoformat() if job.started_at else None,
-            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
-            "rounds_generated": job.rounds_generated,
-            "puzzles_generated": job.puzzles_generated,
-        }
-    )
+    return jsonify(job_status_payload(job))
