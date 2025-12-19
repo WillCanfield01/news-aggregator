@@ -1052,7 +1052,7 @@ def _search_unsplash(query: str, rng: random.Random, used: set[str]) -> Tuple[Op
                 continue
             used.add(valid)
             u = r.get("user", {}) or {}
-                attr = f"{u.get('name','Unsplash')} - https://unsplash.com/@{u.get('username','unsplash')}"
+            attr = f"{u.get('name','Unsplash')} - https://unsplash.com/@{u.get('username','unsplash')}"
             return valid, attr
     except Exception:
         return None, None
