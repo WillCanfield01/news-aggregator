@@ -130,6 +130,20 @@
       flex-wrap: wrap;
     }
 
+    .pill-btn {
+      background: #1b2742;
+      color: #cfe2ff;
+    }
+
+    .chooser {
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      box-shadow: 0 10px 30px var(--shadow);
+    }
+
     .timer {
       font-weight: 800;
       letter-spacing: 0.4px;
@@ -543,6 +557,18 @@
 
 <body>
   <div class="wrap">
+    <div id="modeChooser" class="chooser" style="display:none;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:800;font-size:18px;">Choose difficulty</div>
+          <div class="muted">Easy gives you a little more time on reaction steps.</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" data-mode-choice="easy">Easy</button>
+          <button class="btn pill-btn" data-mode-choice="normal">Normal</button>
+        </div>
+      </div>
+    </div>
     <header>
       <div>
         <div class="brand">Daily Escape</div>
@@ -550,6 +576,7 @@
       </div>
       <div class="row">
         <button id="muteBtn" class="btn" style="background:#263a5f;color:#cfe2ff">🔇 Sound</button>
+        <button id="modePill" class="btn pill-btn" aria-label="Toggle difficulty mode">Mode: Normal</button>
         <a href="/escape/leaderboard" class="btn" style="background:#1cf29f;">Leaderboard</a>
         <a href="/" class="btn" style="background:#cfe2ff;">Back to Homepage</a>
       </div>
@@ -594,6 +621,40 @@
       const $ = (s) => document.querySelector(s);
       const todayISO = () => new Date().toISOString().slice(0, 10);
       const qs = new URLSearchParams(location.search);
+      const MODE_KEY = "rr_escape_mode_v1";
+      const EASY_MULT = 1.3;
+      const VALID_MODES = new Set(["easy", "normal"]);
+
+      const parseMode = (raw) => {
+        if (!raw) return null;
+        const m = String(raw).toLowerCase();
+        return VALID_MODES.has(m) ? m : null;
+      };
+
+      const buildModeUrl = (mode) => {
+        const params = new URLSearchParams(location.search);
+        params.set("mode", mode);
+        return `${location.pathname}?${params.toString()}`;
+      };
+
+      function resolveModePreference() {
+        const qMode = parseMode(qs.get("mode"));
+        if (qMode) {
+          localStorage.setItem(MODE_KEY, qMode);
+          return { mode: qMode, source: "query" };
+        }
+        const saved = parseMode(localStorage.getItem(MODE_KEY));
+        if (saved) {
+          const params = new URLSearchParams(location.search);
+          params.set("mode", saved);
+          // Keep URL shareable without pushing history
+          history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+          return { mode: saved, source: "storage" };
+        }
+        return { mode: "normal", source: null };
+      }
+
+      const modePref = resolveModePreference();
 
       // Mulberry32: simple seeded PRNG
       function m32(seed) { return function () { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -605,12 +666,72 @@
         current: 0,
         startedMs: null,
         soundOn: (localStorage.getItem("escape_sound") || "on") === "on",
-        answers: {} // puzzleId -> string
+        answers: {}, // puzzleId -> string
+        difficultyMode: modePref.mode,
+        needsModeChoice: !modePref.source
       };
+
+      function getDifficultyMode() {
+        return state.difficultyMode === "easy" ? "easy" : "normal";
+      }
+
+      function applyDifficulty(config) {
+        const mode = getDifficultyMode();
+        const scale = (num, invert) => {
+          if (mode !== "easy") return num;
+          return invert ? num / EASY_MULT : num * EASY_MULT;
+        };
+        const recur = (val, invert = false) => {
+          if (typeof val === "number") return Math.round(scale(val, invert));
+          if (Array.isArray(val)) return val.map((v) => recur(v, invert));
+          if (val && typeof val === "object" && "value" in val && typeof val.value === "number") {
+            return Math.round(scale(val.value, !!val.smallerIsEasier));
+          }
+          if (val && typeof val === "object") {
+            const out = Array.isArray(val) ? [] : {};
+            for (const [k, v] of Object.entries(val)) out[k] = recur(v, invert);
+            return out;
+          }
+          return val;
+        };
+        return recur(config);
+      }
+
+      // Global UI flash timing (scaled in easy mode)
+      const uiTiming = applyDifficulty({ flashMs: 220 });
+
+      function persistMode(mode, { reload = false, replace = false } = {}) {
+        const m = parseMode(mode) || "normal";
+        localStorage.setItem(MODE_KEY, m);
+        state.difficultyMode = m;
+        state.needsModeChoice = false;
+        const target = buildModeUrl(m);
+        if (reload) {
+          if (replace) location.replace(target);
+          else location.href = target;
+          return;
+        }
+        history[replace ? "replaceState" : "pushState"](null, "", target);
+        updateModeUI();
+      }
+
+      function updateModeUI() {
+        const pill = $("#modePill");
+        if (pill) {
+          const mode = getDifficultyMode();
+          pill.textContent = `Mode: ${mode === "easy" ? "Easy" : "Normal"}`;
+          pill.setAttribute("aria-pressed", mode === "easy" ? "true" : "false");
+        }
+        const chooser = $("#modeChooser");
+        if (chooser) {
+          chooser.style.display = state.needsModeChoice ? "block" : "none";
+        }
+      }
 
       document.addEventListener("DOMContentLoaded", init);
 
       async function init() {
+        setupModeControls();
         await fetchMinis();
         // header
         $("#todayMeta").textContent = `${state.dateKey} • ${state.theme || 'Daily Escape'}`;
@@ -620,6 +741,32 @@
           localStorage.setItem("escape_sound", state.soundOn ? "on" : "off");
           $("#muteBtn").textContent = state.soundOn ? "🔊 Sound" : "🔇 Sound";
         };
+      }
+
+      function setupModeControls() {
+        const picker = $("#modeChooser");
+        if (picker) {
+          state.needsModeChoice = !modePref.source;
+          picker.style.display = state.needsModeChoice ? "block" : "none";
+          picker.querySelectorAll("[data-mode-choice]").forEach(btn => {
+            btn.onclick = () => {
+              const mode = parseMode(btn.dataset.modeChoice);
+              if (!mode) return;
+              // Reload so the adjusted config and seed stay consistent
+              persistMode(mode, { reload: true });
+            };
+          });
+        }
+
+        const pill = $("#modePill");
+        if (pill) {
+          pill.onclick = () => {
+            const next = getDifficultyMode() === "easy" ? "normal" : "easy";
+            // Reload to reset puzzle state cleanly
+            persistMode(next, { reload: true });
+          };
+        }
+        updateModeUI();
       }
 
       async function fetchMinis() {
@@ -774,7 +921,7 @@
         return [$("#gameA"), $("#gameB"), $("#gameC")][state.current];
       }
 
-      function flash(el, color = "#68f2a1") { el.style.boxShadow = `0 0 0 2px ${color}`; setTimeout(() => el.style.boxShadow = "", 220); }
+      function flash(el, color = "#68f2a1") { el.style.boxShadow = `0 0 0 2px ${color}`; setTimeout(() => el.style.boxShadow = "", uiTiming.flashMs); }
 
       // ---------- Minis ----------
       function mountVaultFrenzy(host, mini) {
@@ -784,7 +931,17 @@
           rows: (ui.grid && ui.grid.rows) || ui.grid_rows || 4,
           cols: (ui.grid && ui.grid.cols) || ui.grid_cols || 4
         };
-        const tempo = ui.tempo_ms || 520;
+        const tempoBase = Number(ui.tempo_ms || 520);
+        const flashOnBase = Math.floor(tempoBase * 0.6);
+        // Timing knobs are scaled by applyDifficulty (EASY_MULT) to widen reaction windows in easy mode.
+        const vfTiming = applyDifficulty({
+          tempoMs: tempoBase, // cadence between flashes; slower playback = easier to follow
+          flashOnMs: flashOnBase, // highlight duration per flash
+          decoyEchoGapMs: Math.floor(flashOnBase * 0.8), // delay before a decoy repeats its double-flash
+          reactionFlashMs: 120, // brief flash on mis-ordered taps
+          inputEnableBufferMs: 30, // small buffer before taps are accepted after playback
+          autoPlayDelayMs: 200 // lead-in before the first autoplay
+        });
 
         // ---- USE SERVER DATA (deterministic + refreshes after regen)
         // true_indices define the exact ordered solution; decoys can be shown anywhere.
@@ -904,7 +1061,7 @@
           const need = trueSeq[picks.length - 1];
           if (rc !== need) {
             cell.classList.add("flash");
-            setTimeout(() => cell.classList.remove("flash"), 120);
+            setTimeout(() => cell.classList.remove("flash"), vfTiming.reactionFlashMs);
           }
 
           if (picks.length === trueSeq.length) goBtn.disabled = false;
@@ -957,24 +1114,24 @@
 
           cells.forEach(c => setFlash(c, "#000", false));
           let t = 0;
-          const onMs = Math.floor(tempo * 0.6);
+          const onMs = vfTiming.flashOnMs;
 
           events.forEach(ev => {
             const cell = cells[ev.r * g.cols + ev.c];
             const show = () => flashCell(cell, ev.isDecoy ? "#ff6b6b" : "#6bf2a9", onMs);
             setTimeout(() => {
               show();
-              if (ev.dbl) setTimeout(show, Math.floor(onMs * 0.8));
+              if (ev.dbl) setTimeout(show, vfTiming.decoyEchoGapMs);
             }, t);
-            t += tempo;
+            t += vfTiming.tempoMs;
           });
 
           // enable input after the final flash
-          setTimeout(() => { inputEnabled = true; }, t + 30);
+          setTimeout(() => { inputEnabled = true; }, t + vfTiming.inputEnableBufferMs);
         }
 
         // auto-play once so the player sees the pattern
-        setTimeout(() => startPlayback(false), 200);
+        setTimeout(() => startPlayback(false), vfTiming.autoPlayDelayMs);
       }
 
       function mountPhantomDoors(host, mini) {
@@ -984,7 +1141,15 @@
         const rounds = Math.max(1, Number(ui.rounds || 3));
         const shuffles = (ui.shuffles || []).map(a => a.slice());
         const phantoms = (ui.phantoms || Array(rounds).fill(-1)).slice();
-        const tempo = Number(ui.tempo_ms || 600);
+        const tempoBase = Number(ui.tempo_ms || 600);
+        // Stretch reveal timings in easy mode to widen the decision window.
+        const pdTiming = applyDifficulty({
+          replayStepMs: Math.max(220, Math.floor(tempoBase * 0.55)), // spacing between symbol flashes
+          phantomFadeMs: 200, // fade duration when a phantom is tapped
+          reactionFlashMs: 140, // brief flash window on incorrect picks
+          successFlashMs: 260, // linger on correct door taps
+          startDelayMs: 220 // delay before the first auto replay
+        });
 
         // Raw answer string -> numbers
         const stored = (mini.solution && mini.solution.answer)
@@ -1110,23 +1275,23 @@
               if (!inputEnabled) return;
 
               if (isPhantom) {
-                d.style.transition = "opacity 200ms ease";
+                d.style.transition = `opacity ${pdTiming.phantomFadeMs}ms ease`;
                 d.style.opacity = "0.28";
-                d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
+                d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), pdTiming.reactionFlashMs);
                 return;
               }
 
               if (symIdx === wantSymIdx) {
                 picksSym.push(symIdx);
                 d.style.boxShadow = "0 0 12px rgba(80,255,180,.9)";
-                setTimeout(() => (d.style.boxShadow = ""), 260);
+                setTimeout(() => (d.style.boxShadow = ""), pdTiming.successFlashMs);
 
                 round++;
                 goBtn.disabled = picksSym.length !== rounds;
                 if (round < rounds) { renderCorridor(); updateProg(); }
                 else { updateProg(); }
               } else {
-                d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 140);
+                d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), pdTiming.reactionFlashMs);
               }
             };
 
@@ -1145,12 +1310,12 @@
             const el = document.createElement("div");
             el.textContent = symbols[i] ?? "?";
             el.style.padding = "2px 6px"; el.style.borderRadius = "8px";
-            el.style.opacity = ".16"; el.style.transition = "opacity 140ms ease";
+            el.style.opacity = ".16"; el.style.transition = `opacity ${pdTiming.reactionFlashMs}ms ease`;
             seqWrap.appendChild(el);
             return el;
           });
           let t = 0;
-          items.forEach((el) => { setTimeout(() => { el.style.opacity = "1"; }, t); t += Math.max(220, Math.floor(tempo * 0.55)); });
+          items.forEach((el) => { setTimeout(() => { el.style.opacity = "1"; }, t); t += pdTiming.replayStepMs; });
         }
 
         const startRound = () => { replaySequence(); inputEnabled = true; round = 0; picksSym = []; lockedRound = false; renderCorridor(); updateProg(); };
@@ -1170,7 +1335,7 @@
 
         renderCorridor();
         updateProg();
-        setTimeout(startRound, 220);
+        setTimeout(startRound, pdTiming.startDelayMs);
       }
 
       // C • Pressure Chamber  — survival mode (keep all valves under for 10s)
@@ -1178,7 +1343,7 @@
         const ui = mini.ui || mini.ui_spec || {};
         // Limit to at most 3 valves (ignore any extras the server sends)
         const MAX_VALVES = 3;
-        const valves = (ui.valves || [
+        const rawValves = (ui.valves || [
           { label: "A", base: 0.22, var: 0.08, reset_ms: 900, phase: 0.00 },
           { label: "B", base: 0.27, var: 0.09, reset_ms: 800, phase: 0.20 },
           { label: "C", base: 0.19, var: 0.07, reset_ms: 1100, phase: 0.50 },
@@ -1189,7 +1354,21 @@
         const threshold = Number(ui.threshold || 1.0);
 
         // NEW: 10-second survival timer
-        const SURVIVE_MS = Number(ui.survive_ms || 10000);
+        const baseSurviveMs = Number(ui.survive_ms || 10000);
+        // Slow the pressure rise + shorten the survive window slightly in easy mode.
+        const pcTiming = applyDifficulty({
+          surviveMs: { value: baseSurviveMs, smallerIsEasier: true }, // smaller target duration is easier
+          valveResetMs: rawValves.map(v => Number(v.reset_ms || 900)), // reset_ms controls refill speed (larger = slower)
+          tapFlashMs: 120, // small success flash on valve taps
+          failFlashMs: 200 // shake duration on overflow
+        });
+        const valves = rawValves.map((v, idx) => ({
+          ...v,
+          reset_ms: (pcTiming.valveResetMs && pcTiming.valveResetMs[idx] != null)
+            ? pcTiming.valveResetMs[idx]
+            : Number(v.reset_ms || 900)
+        }));
+        const SURVIVE_MS = pcTiming.surviveMs;
 
         // ---- UI scaffolding ----
         const header = document.createElement("div");
@@ -1260,7 +1439,7 @@
             levels[i] = Math.max(0, levels[i] - drop);
             // visual thump
             fill.style.boxShadow = "0 0 10px rgba(120,220,255,.6) inset";
-            setTimeout(() => (fill.style.boxShadow = ""), 120);
+            setTimeout(() => (fill.style.boxShadow = ""), pcTiming.tapFlashMs);
           };
 
           bars.push(fill);
@@ -1291,7 +1470,7 @@
           header.textContent = "overflowed — try again";
           // shake the whole area a bit
           host.classList.add("flash");
-          setTimeout(() => host.classList.remove("flash"), 200);
+          setTimeout(() => host.classList.remove("flash"), pcTiming.failFlashMs);
         }
 
         function win() {
