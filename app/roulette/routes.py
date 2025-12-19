@@ -45,6 +45,12 @@ from app.scripts.generate_timeline_round import (
     _http_get_json,
     _headline_from_text,
     _blurb_from_text,
+    pick_image_for_choice,
+    _validate_image_url,
+    _guess_event_type,
+    _category_for_text,
+    _guess_location,
+    _guess_entity,
 )
 
 
@@ -215,21 +221,60 @@ def _choice_cards(today_round: TimelineRound, include_blurb: bool = False) -> li
 
 def _build_text_round(today_round: TimelineRound) -> dict:
     cards, correct_idx = _shuffle_cards(_choice_cards(today_round, include_blurb=False))
+    date_label = today_round.round_date.strftime("%B %d")
     return {
         "type": "text",
-        "prompt": "Three headlines. Pick the real one.",
-        "date_label": today_round.round_date.strftime("%B %d"),
+        "prompt": "Three headlines. One is real.",
+        "subhead": f"Pick the real headline. Based on an event from {date_label}.",
+        "date_label": date_label,
         "cards": cards,
         "correct_index": correct_idx,
         "source_url": today_round.real_source_url,
     }
 
 def _build_image_round(today_round: TimelineRound) -> dict:
-    cards, correct_idx = _shuffle_cards(_choice_cards(today_round, include_blurb=False))
+    date_label = today_round.round_date.strftime("%B %d")
+    # build fresh image-only cards to avoid reusing headline puzzle images
+    def _choice_meta(text: str) -> dict:
+        ev_type, ev_cat = _guess_event_type(text)
+        domain_guess = _infer_domain(text)
+        category = ev_cat or _category_for_text(text, domain_guess)
+        return {
+            "text": text,
+            "domain": domain_guess,
+            "category": category,
+            "event_type": ev_type or category,
+            "location": _guess_location(text),
+            "entity": _guess_entity(text),
+            "year": _extract_year_hint(text),
+        }
+
+    used_urls: set[str] = set(
+        u for u in [
+            _validate_image_url(getattr(today_round, "real_img_url", None)),
+            _validate_image_url(getattr(today_round, "fake1_img_url", None)),
+            _validate_image_url(getattr(today_round, "fake2_img_url", None)),
+        ] if u
+    )
+    seed_base = int(datetime.now(_TZ).strftime("%Y%m%d"))
+    rng = random.Random(seed_base + 101)
+    real_meta = _choice_meta(today_round.real_title)
+    fake1_meta = _choice_meta(today_round.fake1_title)
+    fake2_meta = _choice_meta(today_round.fake2_title)
+    real_img, _, _ = pick_image_for_choice(real_meta, rng, used_urls, None, mode="real")
+    f1_img, _, _ = pick_image_for_choice(fake1_meta, rng, used_urls, None, mode="decoy", seed=seed_base + 211)
+    f2_img, _, _ = pick_image_for_choice(fake2_meta, rng, used_urls, None, mode="decoy", seed=seed_base + 223)
+
+    cards, correct_idx = _shuffle_cards([
+        {"orig_idx": 0, "title": "", "blurb": "", "image_url": real_img, "raw_text": today_round.real_title},
+        {"orig_idx": 1, "title": "", "blurb": "", "image_url": f1_img, "raw_text": today_round.fake1_title},
+        {"orig_idx": 2, "title": "", "blurb": "", "image_url": f2_img, "raw_text": today_round.fake2_title},
+    ])
     return {
         "type": "image",
-        "prompt": "Three photos. Pick the one that matches a real event.",
-        "date_label": today_round.round_date.strftime("%B %d"),
+        "prompt": "Three photos. One is real.",
+        "subhead": f"Pick the photo that matches a real event. Based on {date_label}.",
+        "date_label": date_label,
         "cards": cards,
         "correct_index": correct_idx,
         "source_url": today_round.real_source_url,
@@ -392,7 +437,8 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
     ])
     return {
         "type": "quote",
-        "prompt": "One quote is real. Pick it.",
+        "prompt": "One quote is real.",
+        "subhead": "Two are decoys. Pick the real line.",
         "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,

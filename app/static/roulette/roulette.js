@@ -2,6 +2,7 @@
   const cardsEl = document.getElementById("cards");
   const promptEl = document.getElementById("prompt");
   const dateNoteEl = document.getElementById("dateNote");
+  const subheadEl = document.getElementById("subhead");
   const resultEl = document.getElementById("result");
   const sourceLink = document.getElementById("sourceLink");
   const nextBtn = document.getElementById("nextBtn");
@@ -21,9 +22,8 @@
 
   function setHeader(payload) {
     promptEl.textContent = payload.prompt || "Pick the real event.";
-    dateNoteEl.textContent = payload.date_label
-      ? `Based on an event from ${payload.date_label}.`
-      : "";
+    subheadEl.textContent = payload.subhead || "";
+    dateNoteEl.textContent = payload.date_label ? payload.date_label : "";
   }
 
   function renderCards(payload) {
@@ -58,8 +58,17 @@
             </div>
           </div>
         `;
+      } else if (type === "image") {
+        cardEl.classList.add("is-image");
+        cardEl.innerHTML = `
+          <div class="choice-media">
+            <div class="image-frame">
+              <img src="${escapeHtml(card.image_url || "")}" alt="" loading="lazy">
+            </div>
+          </div>
+        `;
       } else {
-        cardEl.classList.add(type === "image" ? "is-image" : "is-headline");
+        cardEl.classList.add("is-headline");
         const blurb = card.blurb || "";
         cardEl.innerHTML = `
           <div class="choice-media">

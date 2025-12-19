@@ -41,6 +41,12 @@
   font-size: 1rem;
 }
 
+.roulette-date {
+  margin: 0 0 16px;
+  color: var(--roulette-muted);
+  font-size: 0.95rem;
+}
+
 .meta-row {
   display: flex;
   gap: 8px;
@@ -162,11 +168,8 @@
   margin: 0;
   font-size: 1.05rem;
   line-height: 1.3;
-  min-height: 2.6em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  min-height: 0;
+  overflow-wrap: anywhere;
 }
 
 .choice-blurb {
@@ -174,11 +177,7 @@
   color: var(--roulette-muted);
   font-size: 0.95rem;
   line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-height: 0;
+  overflow-wrap: anywhere;
 }
 
 .choice-card.is-quote .choice-title,
@@ -188,6 +187,10 @@
   -webkit-box-orient: initial;
   min-height: 0;
   max-height: none;
+}
+
+.choice-card.is-image .choice-body {
+  display: none;
 }
 
 .result-row {
