@@ -2,6 +2,24 @@ from datetime import datetime, date
 from app.extensions import db
 import uuid
 
+
+class RouletteRegenJob(db.Model):
+    __tablename__ = "roulette_regen_jobs"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="queued")  # queued|running|done|error
+    progress = db.Column(db.Integer, nullable=False, default=0)
+    error_message = db.Column(db.Text, nullable=True)
+    force = db.Column(db.Integer, nullable=False, default=0)
+    requested_by_ip = db.Column(db.String(64), nullable=True)
+    rounds_generated = db.Column(db.Integer, nullable=False, default=0)
+    puzzles_generated = db.Column(db.Integer, nullable=False, default=0)
+
+
 class TimelineRound(db.Model):
     __tablename__ = "timeline_rounds"
     __table_args__ = {"extend_existing": True}  # <-- important

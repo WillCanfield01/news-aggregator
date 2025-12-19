@@ -186,7 +186,7 @@ def _today_local_date():
 
 
 def _http_get_json(url: str, headers: dict | None = None, params: dict | None = None) -> dict:
-    r = requests.get(url, headers=headers or {}, params=params or {}, timeout=15)
+    r = requests.get(url, headers=headers or {}, params=params or {}, timeout=(5, 45))
     r.raise_for_status()
     return r.json()
 
@@ -566,7 +566,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
                 OAI_URL,
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
                 json=payload,
-                timeout=12,
+                timeout=(5, 45),
             )
             r.raise_for_status()
             return (r.json()["choices"][0]["message"]["content"] or "").strip()
@@ -779,7 +779,7 @@ def _openai_image(prompt: str) -> Optional[str]:
                 "n": 1,
                 "response_format": "b64_json",
             },
-            timeout=10,
+            timeout=(5, 45),
         )
         r.raise_for_status()
         data = r.json()

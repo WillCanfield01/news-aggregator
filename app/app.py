@@ -97,6 +97,7 @@ def create_app():
     from app.aggregator import aggregator_bp, start_background_tasks
     from app.reddit_articles import bp as reddit_bp
     from app.roulette import roulette_bp
+    from app.roulette.routes import start_regen_worker
     app.register_blueprint(aggregator_bp)
     app.register_blueprint(reddit_bp)
     app.register_blueprint(create_escape_bp(), url_prefix="/escape")
@@ -196,6 +197,7 @@ def create_app():
     # ---- Start background work AFTER app is created ----
     with app.app_context():
         start_background_tasks()
+        start_regen_worker(app)
         schedule_daily_reddit_article(app)
         schedule_daily_generation(app)
         schedule_daily_timeline(app)
