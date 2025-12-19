@@ -1,0 +1,12 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Minimal horizon with distant hills'>
+  <defs>
+    <linearGradient id='g2' x1='0' y1='0' x2='1' y2='0'>
+      <stop offset='0%' stop-color='#203240'/>
+      <stop offset='100%' stop-color='#35505f'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#g2)'/>
+  <path d='M0 126 C70 108 140 140 210 124 C260 112 290 120 320 114 L320 180 L0 180 Z' fill='#d3dce5' opacity='0.92'/>
+  <rect x='40' y='140' width='60' height='8' rx='4' fill='#c0c8d2'/>
+  <rect x='220' y='136' width='50' height='10' rx='4' fill='#c0c8d2'/>
+</svg>

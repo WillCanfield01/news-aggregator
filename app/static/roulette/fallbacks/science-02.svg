@@ -1,0 +1,19 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Telescope pointed at the night sky'>
+  <defs>
+    <linearGradient id='s2' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0%' stop-color='#132a4d'/>
+      <stop offset='100%' stop-color='#1f3f73'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#s2)'/>
+  <circle cx='52' cy='42' r='5' fill='#c7e2ff'/>
+  <circle cx='88' cy='28' r='4' fill='#c7e2ff'/>
+  <circle cx='270' cy='34' r='7' fill='#c7e2ff'/>
+  <rect x='140' y='86' width='88' height='18' rx='8' fill='#d7e5f0'/>
+  <rect x='220' y='80' width='14' height='30' rx='5' fill='#9fb5cc'/>
+  <rect x='122' y='90' width='22' height='14' rx='5' fill='#9fb5cc'/>
+  <polygon points='90,150 122,98 134,104 106,156' fill='#8aa1bb'/>
+  <rect x='102' y='150' width='42' height='14' fill='#6f86a4'/>
+  <line x1='160' y1='104' x2='228' y2='64' stroke='#c7d8ea' stroke-width='6' stroke-linecap='round'/>
+  <circle cx='240' cy='56' r='12' fill='#e7f2ff'/>
+</svg>

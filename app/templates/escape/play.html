@@ -135,13 +135,53 @@
       color: #cfe2ff;
     }
 
-    .chooser {
-      margin-bottom: 12px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 12px;
+    body.mode-locked {
+      overflow: hidden;
+    }
+
+    #escapeApp.is-gated {
+      pointer-events: none;
+      user-select: none;
+      filter: blur(1px);
+    }
+
+    .mode-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(6, 10, 24, 0.72);
+      backdrop-filter: blur(8px);
+      z-index: 999;
+      padding: 18px;
+    }
+
+    .mode-overlay.active {
+      display: flex;
+    }
+
+    .mode-card {
+      width: min(480px, 94vw);
       background: linear-gradient(180deg, var(--panel), var(--panel2));
-      box-shadow: 0 10px 30px var(--shadow);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 18px 50px var(--shadow);
+      padding: 18px;
+      text-align: center;
+    }
+
+    .mode-card h2 {
+      margin: 0 0 6px 0;
+      font-size: clamp(19px, 3vw, 22px);
+    }
+
+    .mode-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 14px;
+      flex-wrap: wrap;
     }
 
     .timer {
@@ -556,19 +596,18 @@
 </head>
 
 <body>
-  <div class="wrap">
-    <div id="modeChooser" class="chooser" style="display:none;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
-        <div>
-          <div style="font-weight:800;font-size:18px;">Choose difficulty</div>
-          <div class="muted">Easy gives you a little more time on reaction steps.</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn" data-mode-choice="easy">Easy</button>
-          <button class="btn pill-btn" data-mode-choice="normal">Normal</button>
-        </div>
+  <div id="modeOverlay" class="mode-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="modeTitle">
+    <div class="mode-card">
+      <h2 id="modeTitle">Choose difficulty</h2>
+      <p class="muted" style="margin:0 0 10px 0;">Easy gives you a little more time on reaction steps.</p>
+      <div class="mode-actions">
+        <button class="btn" data-mode-choice="easy">Easy</button>
+        <button class="btn pill-btn" data-mode-choice="normal">Normal</button>
       </div>
     </div>
+  </div>
+
+  <div id="escapeApp" class="wrap">
     <header>
       <div>
         <div class="brand">Daily Escape</div>
@@ -668,7 +707,8 @@
         soundOn: (localStorage.getItem("escape_sound") || "on") === "on",
         answers: {}, // puzzleId -> string
         difficultyMode: modePref.mode,
-        needsModeChoice: !modePref.source
+        needsModeChoice: !modePref.source,
+        gateOpen: false
       };
 
       function getDifficultyMode() {
@@ -698,7 +738,7 @@
       }
 
       // Global UI flash timing (scaled in easy mode)
-      const uiTiming = applyDifficulty({ flashMs: 220 });
+      const getUiTiming = () => applyDifficulty({ flashMs: 220 });
 
       function persistMode(mode, { reload = false, replace = false } = {}) {
         const m = parseMode(mode) || "normal";
@@ -722,16 +762,23 @@
           pill.textContent = `Mode: ${mode === "easy" ? "Easy" : "Normal"}`;
           pill.setAttribute("aria-pressed", mode === "easy" ? "true" : "false");
         }
-        const chooser = $("#modeChooser");
-        if (chooser) {
-          chooser.style.display = state.needsModeChoice ? "block" : "none";
+      }
+
+      document.addEventListener("DOMContentLoaded", bootstrap);
+
+      function bootstrap() {
+        setupModeControls();
+        if (state.needsModeChoice) {
+          showModeGate();
+        } else {
+          initEscapeApp();
         }
       }
 
-      document.addEventListener("DOMContentLoaded", init);
-
-      async function init() {
-        setupModeControls();
+      let appInitStarted = false;
+      async function initEscapeApp() {
+        if (appInitStarted) return;
+        appInitStarted = true;
         await fetchMinis();
         // header
         $("#todayMeta").textContent = `${state.dateKey} • ${state.theme || 'Daily Escape'}`;
@@ -741,20 +788,14 @@
           localStorage.setItem("escape_sound", state.soundOn ? "on" : "off");
           $("#muteBtn").textContent = state.soundOn ? "🔊 Sound" : "🔇 Sound";
         };
+        updateModeUI();
       }
 
       function setupModeControls() {
-        const picker = $("#modeChooser");
-        if (picker) {
-          state.needsModeChoice = !modePref.source;
-          picker.style.display = state.needsModeChoice ? "block" : "none";
-          picker.querySelectorAll("[data-mode-choice]").forEach(btn => {
-            btn.onclick = () => {
-              const mode = parseMode(btn.dataset.modeChoice);
-              if (!mode) return;
-              // Reload so the adjusted config and seed stay consistent
-              persistMode(mode, { reload: true });
-            };
+        const overlay = $("#modeOverlay");
+        if (overlay) {
+          overlay.querySelectorAll("[data-mode-choice]").forEach(btn => {
+            btn.onclick = () => handleGateChoice(btn.dataset.modeChoice);
           });
         }
 
@@ -768,6 +809,74 @@
         }
         updateModeUI();
       }
+
+      function handleGateChoice(mode) {
+        const m = parseMode(mode);
+        if (!m) return;
+        state.needsModeChoice = false;
+        persistMode(m, { reload: false, replace: true });
+        hideModeGate();
+        initEscapeApp();
+      }
+
+      function showModeGate() {
+        const overlay = $("#modeOverlay");
+        const appShell = document.getElementById("escapeApp");
+        state.gateOpen = true;
+        if (overlay) {
+          overlay.classList.add("active");
+          overlay.removeAttribute("hidden");
+          const first = overlay.querySelector("[data-mode-choice]");
+          if (first) first.focus();
+        }
+        if (appShell) {
+          appShell.classList.add("is-gated");
+          appShell.setAttribute("aria-hidden", "true");
+        }
+        document.body.classList.add("mode-locked");
+      }
+
+      function hideModeGate() {
+        const overlay = $("#modeOverlay");
+        const appShell = document.getElementById("escapeApp");
+        state.gateOpen = false;
+        if (overlay) {
+          overlay.classList.remove("active");
+          overlay.setAttribute("hidden", "true");
+        }
+        if (appShell) {
+          appShell.classList.remove("is-gated");
+          appShell.removeAttribute("aria-hidden");
+        }
+        document.body.classList.remove("mode-locked");
+      }
+
+      document.addEventListener("keydown", (ev) => {
+        if (!state.gateOpen) return;
+        const overlay = $("#modeOverlay");
+        if (!overlay || !overlay.classList.contains("active")) return;
+        const buttons = Array.from(overlay.querySelectorAll("[data-mode-choice]"));
+        if (ev.key === "Escape") {
+          if (!state.needsModeChoice) {
+            ev.preventDefault();
+            hideModeGate();
+          }
+          return;
+        }
+        if (ev.key === "Tab" && buttons.length) {
+          ev.preventDefault();
+          const dir = ev.shiftKey ? -1 : 1;
+          const active = document.activeElement;
+          const idx = buttons.indexOf(active);
+          const next = buttons[(idx + dir + buttons.length) % buttons.length];
+          if (next) next.focus();
+          return;
+        }
+        if (ev.key === "Enter" && ev.target && ev.target.dataset && ev.target.dataset.modeChoice) {
+          ev.preventDefault();
+          handleGateChoice(ev.target.dataset.modeChoice);
+        }
+      });
 
       async function fetchMinis() {
         const res = await fetch(`/escape/api/today?format=minis&date=${encodeURIComponent(state.dateKey)}`);
@@ -921,7 +1030,7 @@
         return [$("#gameA"), $("#gameB"), $("#gameC")][state.current];
       }
 
-      function flash(el, color = "#68f2a1") { el.style.boxShadow = `0 0 0 2px ${color}`; setTimeout(() => el.style.boxShadow = "", uiTiming.flashMs); }
+      function flash(el, color = "#68f2a1") { const t = getUiTiming(); el.style.boxShadow = `0 0 0 2px ${color}`; setTimeout(() => el.style.boxShadow = "", t.flashMs); }
 
       // ---------- Minis ----------
       function mountVaultFrenzy(host, mini) {

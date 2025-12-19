@@ -41,9 +41,9 @@ from app.scripts.generate_timeline_round import (
     OPENAI_API_KEY,
     OAI_MODEL,
     OAI_URL,
-    UNSPLASH_ACCESS_KEY,
-    _openai_image,
     _http_get_json,
+    _headline_from_text,
+    _blurb_from_text,
 )
 
 
@@ -186,123 +186,48 @@ def reset_session():
 # -------------------------------------------------------------------------
 # Round builders
 # -------------------------------------------------------------------------
-def _shuffle_cards(real_text: str, fake1: str, fake2: str, real_img: str | None, fake1_img: str | None, fake2_img: str | None) -> tuple[list[dict], int]:
-    cards = [
-        {"orig_idx": 0, "text": real_text, "img": real_img},
-        {"orig_idx": 1, "text": fake1, "img": fake1_img},
-        {"orig_idx": 2, "text": fake2, "img": fake2_img},
-    ]
+def _shuffle_cards(cards: list[dict]) -> tuple[list[dict], int]:
     random.shuffle(cards)
-    correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
+    correct_shuffled_idx = next(i for i, c in enumerate(cards) if c.get("orig_idx") == 0)
     return cards, correct_shuffled_idx
 
+
+def _choice_cards(today_round: TimelineRound) -> list[dict]:
+    """
+    Build base card payloads from today's round with headline + blurb + image.
+    """
+    def _one(idx: int, text: str, img: str | None, icon_name: str | None) -> dict:
+        return {
+            "orig_idx": idx,
+            "title": _headline_from_text(text, 6, 14),
+            "blurb": _blurb_from_text(text, 12, 22),
+            "image_url": img or _icon_url_or_fallback(icon_name),
+            "raw_text": text,
+        }
+
+    return [
+        _one(0, today_round.real_title, getattr(today_round, "real_img_url", None), getattr(today_round, "real_icon", None)),
+        _one(1, today_round.fake1_title, getattr(today_round, "fake1_img_url", None), getattr(today_round, "fake1_icon", None)),
+        _one(2, today_round.fake2_title, getattr(today_round, "fake2_img_url", None), getattr(today_round, "fake2_icon", None)),
+    ]
+
 def _build_text_round(today_round: TimelineRound) -> dict:
-    cards, correct_idx = _shuffle_cards(
-        today_round.real_title,
-        today_round.fake1_title,
-        today_round.fake2_title,
-        getattr(today_round, "real_img_url", None),
-        getattr(today_round, "fake1_img_url", None),
-        getattr(today_round, "fake2_img_url", None),
-    )
+    cards, correct_idx = _shuffle_cards(_choice_cards(today_round))
     return {
         "type": "text",
-        "prompt": f"Two are fakes. One really happened on {today_round.round_date.strftime('%B %d')}. Pick the real one.",
+        "prompt": "Three headlines. One is real. Pick the real event.",
+        "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,
         "source_url": today_round.real_source_url,
     }
 
 def _build_image_round(today_round: TimelineRound) -> dict:
-    # Real image strictly from Unsplash (if not already present)
-    real_img = getattr(today_round, "real_img_url", None) or _icon_url_or_fallback(getattr(today_round, "real_icon", None))
-    if not real_img and UNSPLASH_ACCESS_KEY:
-        try:
-            j = _http_get_json(
-                "https://api.unsplash.com/search/photos",
-                params={
-                    "query": today_round.real_title,
-                    "orientation": "landscape",
-                    "per_page": 8,
-                    "page": random.randint(1, 4),
-                    "order_by": "relevant",
-                    "content_filter": "high",
-                },
-                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-            )
-            # Prefer a higher-res URL
-            for r in j.get("results", []):
-                urls = r.get("urls", {}) or {}
-                url = urls.get("full") or urls.get("regular") or urls.get("small")
-                if url:
-                    real_img = url
-                    break
-        except Exception:
-            real_img = None
-    # Fallback real image via OpenAI if Unsplash missing/failed
-    if not real_img and OPENAI_API_KEY:
-        real_img = _openai_image(f"wide-angle realistic photograph, full subject in frame, news photo about: {today_round.real_title}")
-    if not real_img:
-        real_img = _icon_url_or_fallback(getattr(today_round, "real_icon", None))
-
-    # AI decoys: generate images with OpenAI; minimal/blank captions
-    ai_cards = []
-    topics = [
-        "city street scene mid-2000s",
-        "concert crowd at night",
-        "museum interior with arches",
-        "harbor sunrise with ships",
-        "soccer stadium stands",
-        "busy train platform",
-        "civic building facade",
-        "evening skyline with water",
-    ]
-    used_imgs: set[str] = set([real_img] if real_img else [])
-    for i in range(2):
-        prompt_topic = random.choice(topics)
-        img_url = None
-        if OPENAI_API_KEY:
-            img_url = _openai_image(
-                f"photojournalism style, realistic photo, natural lighting, no text, {prompt_topic}, different from: {today_round.real_title}"
-            )
-        if (not img_url or img_url in used_imgs) and UNSPLASH_ACCESS_KEY:
-            try:
-                j = _http_get_json(
-                    "https://api.unsplash.com/search/photos",
-                    params={
-                        "query": prompt_topic,
-                        "orientation": "landscape",
-                        "per_page": 3,
-                        "page": random.randint(1, 3),
-                        "order_by": "relevant",
-                        "content_filter": "high",
-                    },
-                    headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-                )
-                if j.get("results"):
-                    for res in j["results"]:
-                        urls = res.get("urls", {}) or {}
-                        cand = urls.get("full") or urls.get("regular") or urls.get("small")
-                        if cand and cand not in used_imgs:
-                            img_url = cand
-                            break
-            except Exception:
-                img_url = None
-        img_url = img_url or _icon_url_or_fallback("star.svg")
-        used_imgs.add(img_url)
-        ai_cards.append({"text": "", "img": img_url})
-
-    cards, correct_idx = _shuffle_cards(
-        "",  # no caption for real
-        ai_cards[0]["text"],
-        ai_cards[1]["text"],
-        real_img,
-        ai_cards[0]["img"],
-        ai_cards[1]["img"],
-    )
+    cards, correct_idx = _shuffle_cards(_choice_cards(today_round))
     return {
         "type": "image",
-        "prompt": "One photo is real. Two are AI. Pick the real one.",
+        "prompt": "Three photos with headlines. Which one matches a real event?",
+        "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,
         "source_url": today_round.real_source_url,
@@ -350,6 +275,20 @@ def _clean_quote_text(text: str) -> str:
     t = (text or "").strip()
     t = t.strip("\"'“”‘’ ")
     return t
+
+
+def _quote_images() -> list[str]:
+    static_dir = Path(current_app.static_folder) / "roulette" / "fallbacks"
+    preferred = ["culture-01.svg", "general-01.svg", "culture-02.svg", "general-02.svg"]
+    urls: list[str] = []
+    for name in preferred:
+        if (static_dir / name).exists():
+            urls.append(url_for("static", filename=f"roulette/fallbacks/{name}"))
+    if not urls:
+        urls.append(_icon_url_or_fallback("star.svg"))
+    while len(urls) < 3:
+        urls.append(urls[-1])
+    return urls[:3]
 
 def _build_quote_round(today_round: TimelineRound) -> dict:
     real_quote, real_attr = _fetch_today_quote()
@@ -410,17 +349,34 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
     fakes.append(fake1)
     fake2 = _clean_quote_text(_ai_quote([real_quote, fake1])) or "An artist speaks on creativity in a brief line."
 
-    cards, correct_idx = _shuffle_cards(
-        real_quote or "A historical quote recorded for this date.",
-        fake1,
-        fake2,
-        None,
-        None,
-        None,
-    )
+    images = _quote_images()
+    cards, correct_idx = _shuffle_cards([
+        {
+            "orig_idx": 0,
+            "title": _headline_from_text(real_quote or "A historical quote recorded for this date.", 6, 18),
+            "blurb": real_attr or "",
+            "image_url": images[0],
+            "raw_text": real_quote or "",
+        },
+        {
+            "orig_idx": 1,
+            "title": _headline_from_text(fake1, 6, 18),
+            "blurb": "",
+            "image_url": images[1],
+            "raw_text": fake1,
+        },
+        {
+            "orig_idx": 2,
+            "title": _headline_from_text(fake2, 6, 18),
+            "blurb": "",
+            "image_url": images[2],
+            "raw_text": fake2,
+        },
+    ])
     return {
         "type": "quote",
-        "prompt": "One quote is real. Two are AI. Pick the real one.",
+        "prompt": "One quote is real. Two are decoys. Pick the real line.",
+        "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,
         "source_url": today_round.real_source_url,
@@ -435,34 +391,7 @@ def play_today():
     r = _today_round_or_404()
 
     # Build shuffled card set; remember where the real one lands (index 0 == real)
-    def _image_or_icon(url: str | None, icon_name: str | None) -> str:
-        if url:
-            return url
-        return _icon_url_or_fallback(icon_name)
-
-    cards = [
-        {
-            "orig_idx": 0,
-            "text": r.real_title,
-            "label": "A",
-            "img": _image_or_icon(getattr(r, "real_img_url", None), r.real_icon),
-        },
-        {
-            "orig_idx": 1,
-            "text": r.fake1_title,
-            "label": "B",
-            "img": _image_or_icon(getattr(r, "fake1_img_url", None), r.fake1_icon),
-        },
-        {
-            "orig_idx": 2,
-            "text": r.fake2_title,
-            "label": "C",
-            "img": _image_or_icon(getattr(r, "fake2_img_url", None), r.fake2_icon),
-        },
-    ]
-
-    random.shuffle(cards)
-    correct_shuffled_idx = next(i for i, c in enumerate(cards) if c["orig_idx"] == 0)
+    cards, correct_shuffled_idx = _shuffle_cards(_choice_cards(r))
 
     # Stats for today
     total = (

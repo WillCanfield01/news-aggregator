@@ -6,6 +6,7 @@ import re
 import random
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Tuple, Dict, Any, Optional
 from flask import current_app
 from app.roulette.models import TimelineRound, TimelineGuess
@@ -14,7 +15,6 @@ import requests
 from sqlalchemy import select
 
 from app.extensions import db
-from app.roulette.models import TimelineRound
 try:
     from app.roulette.icon_ai import pick_icon_for_text  # optional
 except Exception:  # pragma: no cover
@@ -221,6 +221,28 @@ def _normalize_choice(text: str, min_words: int, max_words: int) -> str:
 def _strip_years(text: str) -> str:
     return re.sub(r"\b(19|20)\d{2}\b", "", text or "")
 
+
+def _headline_from_text(text: str, min_words: int = 6, max_words: int = 14) -> str:
+    """
+    Build a clean headline-style line without trailing punctuation.
+    """
+    words = _words(text)
+    if not words:
+        return ""
+    trimmed = words[:max_words]
+    if len(trimmed) < min_words and len(words) >= min_words:
+        trimmed = words[:min_words]
+    headline = " ".join(trimmed)
+    headline = re.sub(r"[.?!,:;]+$", "", headline).strip()
+    return _sentence_case(headline)
+
+
+def _blurb_from_text(text: str, min_words: int = 12, max_words: int = 22) -> str:
+    """
+    Return a concise, single-sentence blurb with a soft clamp.
+    """
+    return _normalize_choice(text, min_words, max_words)
+
 def _mostly_year_swap(a: str, b: str) -> bool:
     ta = [w for w in _words(_strip_years(a).lower()) if w]
     tb = [w for w in _words(_strip_years(b).lower()) if w]
@@ -330,7 +352,7 @@ def _domain_flair(domain: str, year_hint: Optional[int] = None) -> list[str]:
     modern = {
         "tech": [
             "after hype on launch week",
-            "as fans queued online",
+            "as fans lined up early",
             "during a big live stream",
             "with creators posting reactions",
         ],
@@ -356,7 +378,7 @@ def _domain_flair(domain: str, year_hint: Optional[int] = None) -> list[str]:
             "after a buzzy premiere",
             "as watch parties popped up",
             "while fans quoted scenes",
-            "during a viral trailer drop",
+            "during a talked-about trailer drop",
         ],
         "sports": [
             "during a heated season",
@@ -474,7 +496,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "general": ["a national celebration", "a civic ceremony", "a community milestone", "a public event", "a major exhibit"],
     }
     modern_subjects = {
-        "tech": ["an app launch", "a device update", "an AI feature", "a cloud rollout", "a streaming upgrade"],
+        "tech": ["an app launch", "a device update", "a smart feature rollout", "a cloud rollout", "a streaming upgrade"],
         "social_media": ["a hashtag challenge", "a video trend", "a live stream format", "a creator payout push", "a viral filter"],
         "gaming": ["a multiplayer update", "an esports upset", "a crossover reveal", "a record game launch", "a fan-favorite DLC"],
         "music": ["a surprise album", "a festival headliner set", "a chart single", "a viral remix", "a tour kickoff"],
@@ -503,7 +525,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "social_media": ["takes over feeds", "picks up momentum", "spreads across platforms", "sparks quick reactions", "draws big creator posts"],
         "gaming": ["fills servers fast", "tops player charts", "shakes up rankings", "packs esports streams", "sparks lore debates"],
         "music": ["tops playlists", "sells out dates", "goes viral on clips", "gets heavy play", "trends on radio"],
-        "film_tv": ["wins fan polls", "drives binge nights", "gets quoted online", "lands strong reviews", "spawns memes"],
+        "film_tv": ["wins fan polls", "drives binge nights", "gets quoted in recaps", "lands strong reviews", "spawns memes"],
         "sports": classic_actions["sports"],
         "internet_culture": ["dominates forums", "spreads through memes", "fills comment sections", "inspires parody threads", "hits front pages"],
         "travel": classic_actions["travel"],
@@ -518,7 +540,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "film_tv": ["covered by entertainment reporters", "picked up by major outlets", "featured in reviews"],
         "sports": ["leading sports coverage", "highlighted across sports news", "remembered that season"],
         "travel": ["covered by local media", "making regional news", "mentioned in travel roundups"],
-        "culture": ["earning local headlines", "featured in cultural news", "noted in community reports"],
+        "culture": ["earning local headlines", "covered by cultural desks", "noted in community reports"],
         "business": ["covered by business press", "reported across outlets", "featured in market news"],
         "science": ["reported by science desks", "covered in academic news", "earning coverage in journals"],
         "general": ["covered by major outlets", "drawing wide news attention", "remembered in summaries"],
@@ -530,7 +552,7 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         "music": classic_reacts["music"],
         "film_tv": classic_reacts["film_tv"],
         "sports": classic_reacts["sports"],
-        "internet_culture": ["covered by major blogs", "highlighted in online roundups", "landing in weekly recaps"],
+        "internet_culture": ["covered by major blogs", "highlighted in weekend roundups", "landing in weekly recaps"],
         "travel": classic_reacts["travel"],
         "culture": classic_reacts["culture"],
         "business": classic_reacts["business"],
@@ -567,40 +589,6 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     while len(candidates) < 2:
         candidates.append(build_fake())
     return candidates[0], candidates[1]
-
-def _unsplash_for(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Return (small_image_url, attribution_text) for a search query, or (None, None) if not available.
-    """
-    if not UNSPLASH_ACCESS_KEY:
-        return None, None
-
-    # Build a gentle query from keywords
-    q = " ".join(w for w in re.findall(r"[A-Za-z]{3,}", text.lower()) if w not in {
-        "the","and","for","with","from","into","across","over","under","in","on","at","to",
-        "of","by","an","a","is","are","was","were","becomes","formed","opens","announces",
-        "first","second","third","city","national","world","major","new","old"
-    })[:6] or ["history", "archive"]
-
-    url = "https://api.unsplash.com/search/photos"
-    try:
-        j = _http_get_json(
-            url,
-            params={"query": q, "orientation": "squarish", "per_page": 1},
-            headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-        )
-        if j.get("results"):
-            r = j["results"][0]
-            img = r["urls"]["small"]
-            user = r["user"]
-            name = user.get("name", "Unsplash photographer")
-            username = user.get("username", "")
-            attr = f"{name} — https://unsplash.com/@{username}"
-            return img, attr
-    except Exception:
-        pass
-    return None, None
-
 
 def _pick_real_event() -> Tuple[str, str, Optional[int]]:
     today = _today_local_date()
@@ -660,7 +648,7 @@ def _pick_real_event() -> Tuple[str, str, Optional[int]]:
     month_name = today.strftime("%B")
     return pick, month_name, pick_year
 
-# --- replace _openai_image with this ---
+# Optional image generation helper retained for compatibility (not user-facing).
 def _openai_image(prompt: str) -> Optional[str]:
     """
     Generate a small image and return a browser-safe data URL.
@@ -680,7 +668,6 @@ def _openai_image(prompt: str) -> Optional[str]:
                 "prompt": f"highly realistic wide-angle photograph, full scene in frame, natural lighting, no text or logos, {prompt}",
                 "size": "1024x1024",
                 "n": 1,
-                # IMPORTANT: most responses are base64 now
                 "response_format": "b64_json",
             },
             timeout=10,
@@ -691,10 +678,8 @@ def _openai_image(prompt: str) -> Optional[str]:
             return None
         b64 = data["data"][0].get("b64_json")
         if not b64:
-            # backward compatibility if a URL ever appears
             url = data["data"][0].get("url")
             return url or None
-        # return embeddable data URL (works in <img src>)
         return f"data:image/png;base64,{b64}"
     except Exception:
         return None
@@ -703,6 +688,193 @@ def _openai_image(prompt: str) -> Optional[str]:
 FALLBACK_ICON_URL = "/static/roulette/icons/star.svg"
 # 1x1 transparent pixel to avoid broken imgs if static path fails
 PLACEHOLDER_IMG = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+
+FALLBACK_IMAGE_MAP: Dict[str, list[str]] = {
+    "politics": ["politics-01.svg", "politics-02.svg"],
+    "science": ["science-01.svg", "science-02.svg"],
+    "sports": ["sports-01.svg", "sports-02.svg"],
+    "business": ["business-01.svg", "business-02.svg"],
+    "culture": ["culture-01.svg", "culture-02.svg"],
+    "weather": ["weather-01.svg", "weather-02.svg"],
+    "general": ["general-01.svg", "general-02.svg"],
+}
+
+LOCATION_KEYWORDS = {
+    "new york": "New York",
+    "los angeles": "Los Angeles",
+    "washington": "Washington",
+    "boston": "Boston",
+    "chicago": "Chicago",
+    "miami": "Miami",
+    "seattle": "Seattle",
+    "denver": "Denver",
+    "dallas": "Dallas",
+    "houston": "Houston",
+    "austin": "Austin",
+    "san francisco": "San Francisco",
+    "london": "London",
+    "paris": "Paris",
+    "berlin": "Berlin",
+    "rome": "Rome",
+    "madrid": "Madrid",
+    "lisbon": "Lisbon",
+    "oslo": "Oslo",
+    "stockholm": "Stockholm",
+    "vienna": "Vienna",
+    "prague": "Prague",
+    "toronto": "Toronto",
+    "vancouver": "Vancouver",
+    "mexico city": "Mexico City",
+    "sydney": "Sydney",
+    "melbourne": "Melbourne",
+    "tokyo": "Tokyo",
+    "seoul": "Seoul",
+    "singapore": "Singapore",
+    "cape town": "Cape Town",
+}
+
+EVENT_TYPE_KEYWORDS = [
+    ("election", "politics", ["election", "vote", "ballot", "referendum", "runoff", "polls"]),
+    ("treaty", "politics", ["treaty", "accord", "agreement", "pact", "summit"]),
+    ("protest", "politics", ["protest", "march", "rally", "demonstration", "sit-in"]),
+    ("launch", "science", ["launch", "rocket", "spacecraft", "capsule", "satellite", "mission"]),
+    ("museum opening", "culture", ["museum", "exhibit", "gallery", "exhibition", "art show"]),
+    ("concert", "culture", ["concert", "festival", "tour", "performance", "orchestra", "stage"]),
+    ("tournament", "sports", ["championship", "final", "tournament", "cup", "league", "marathon", "race", "match", "season opener"]),
+    ("stadium", "sports", ["stadium", "arena", "ballpark", "court", "pitch"]),
+    ("acquisition", "business", ["acquisition", "merger", "ipo", "earnings", "revenue", "shares", "stock", "deal"]),
+    ("storm", "weather", ["hurricane", "storm", "typhoon", "cyclone", "tropical", "flood", "wildfire", "blizzard", "tornado"]),
+    ("earthquake", "weather", ["earthquake", "aftershock", "quake"]),
+    ("research", "science", ["research", "experiment", "lab", "telescope", "observatory"]),
+]
+
+CATEGORY_KEYWORDS = {
+    "weather": ["storm", "hurricane", "flood", "wildfire", "earthquake", "blaze", "tornado", "typhoon", "cyclone", "mudslide"],
+    "politics": ["election", "parliament", "president", "senate", "treaty", "accord", "government", "minister", "campaign"],
+    "sports": ["match", "tournament", "league", "cup", "final", "olympics", "stadium", "championship", "season opener"],
+    "science": ["launch", "space", "satellite", "telescope", "mission", "laboratory", "research", "experiment", "observatory"],
+    "business": ["market", "merger", "acquisition", "ipo", "earnings", "deal", "shares", "company", "startup"],
+    "culture": ["museum", "gallery", "concert", "festival", "exhibit", "premiere", "theater", "parade", "exhibition"],
+}
+
+
+def _category_for_domain(domain: str) -> str:
+    mapping = {
+        "tech": "business",
+        "social_media": "business",
+        "gaming": "culture",
+        "music": "culture",
+        "film_tv": "culture",
+        "sports": "sports",
+        "travel": "culture",
+        "culture": "culture",
+        "business": "business",
+        "science": "science",
+        "internet_culture": "culture",
+        "general": "general",
+    }
+    return mapping.get(domain, "general")
+
+
+def _category_for_text(text: str, domain: str) -> str:
+    lc = (text or "").lower()
+    for cat, words in CATEGORY_KEYWORDS.items():
+        if any(w in lc for w in words):
+            return cat
+    return _category_for_domain(domain)
+
+
+def _guess_location(text: str) -> Optional[str]:
+    lc = (text or "").lower()
+    for key, val in LOCATION_KEYWORDS.items():
+        if key in lc:
+            return val
+    m = re.search(r"\b(?:in|at|near|outside|across)\s+([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){0,2})", text or "")
+    if m:
+        guess = m.group(1).strip()
+        if len(guess.split()) <= 3:
+            return guess
+    return None
+
+
+def _guess_entity(text: str) -> Optional[str]:
+    stop = {"the", "a", "an", "this", "that", "its", "their"}
+    months = {m.lower() for m in ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]}
+    candidates = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})", text or "")
+    for cand in candidates:
+        lc = cand.lower()
+        if lc in stop or lc in months:
+            continue
+        if lc in LOCATION_KEYWORDS:
+            continue
+        if len(cand) < 3:
+            continue
+        return cand.strip()
+    return None
+
+
+def _guess_event_type(text: str) -> Tuple[Optional[str], Optional[str]]:
+    lc = (text or "").lower()
+    for label, category, keywords in EVENT_TYPE_KEYWORDS:
+        if any(w in lc for w in keywords):
+            return label, category
+    return None, None
+
+
+def _build_image_queries(choice: dict) -> list[str]:
+    entity = choice.get("entity")
+    location = choice.get("location")
+    event_type = choice.get("event_type")
+    category = choice.get("category")
+    year = choice.get("year")
+    queries: list[str] = []
+
+    combo = " ".join(p for p in [entity, location, event_type] if p)
+    if combo:
+        queries.append(f"{combo} {year}" if year else combo)
+    if location and event_type:
+        queries.append(f"{location} {event_type}")
+    if event_type:
+        queries.append(f"{event_type} news photo")
+    if category:
+        queries.append(f"{category} event photo")
+    # drop empties / duplicates
+    seen: set[str] = set()
+    final: list[str] = []
+    for q in queries:
+        q = (q or "").strip()
+        if not q or q.lower() in seen:
+            continue
+        seen.add(q.lower())
+        final.append(q)
+    return final
+
+
+def _validate_image_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    if url.startswith("data:image"):
+        return url
+    if url.startswith("/static/"):
+        try:
+            static_root = Path(current_app.static_folder)
+        except Exception:
+            static_root = None
+        rel = url.lstrip("/")
+        if static_root and (static_root / rel).exists():
+            return url
+        return None
+    if not url.startswith("https://"):
+        return None
+    try:
+        r = requests.head(url, allow_redirects=True, timeout=6)
+        ctype = r.headers.get("Content-Type", "").lower()
+        if r.status_code == 200 and "image" in ctype:
+            return url
+    except Exception:
+        return None
+    return None
+
 
 def _recent_image_urls(limit: int = 15) -> set[str]:
     """
@@ -722,62 +894,80 @@ def _recent_image_urls(limit: int = 15) -> set[str]:
         urls: set[str] = set()
         for row in rows:
             for url in row:
-                if url:
-                    urls.add(url)
+                valid = _validate_image_url(url)
+                if valid:
+                    urls.add(valid)
         return urls
     except Exception:
         return set()
 
-# --- replace _image_for with this ---
-def _image_for(text: str, used: set[str]) -> Tuple[str, str]:
-    """
-    Pick an image for `text`. Prefer Unsplash (fast), then OpenAI, then a visible local fallback.
-    Deduplicate within a round using `used`.
-    """
-    # 1) Unsplash (prefer speed & reliability)
-    if UNSPLASH_ACCESS_KEY:
-        words = re.findall(r"[A-Za-z]{3,}", (text or "").lower())
-        stop = {"the","and","for","with","from","into","across","over","under","in","on","at","to","of","by","an","a","is","are","was","were"}
-        core = [w for w in words if w not in stop][:6] or ["history","archive","museum","document"]
-        q = " ".join(core)
-        try:
-            j = _http_get_json(
-                "https://api.unsplash.com/search/photos",
-                params={
-                    "query": q,
-                    "orientation": "landscape",
-                    "per_page": 8,
-                    "page": random.randint(1, 4),
-                    "content_filter": "high",
-                    "order_by": "relevant",
-                },
-                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-            )
-            for r in j.get("results", []):
-                urls = r.get("urls", {}) or {}
-                img = urls.get("regular") or urls.get("full") or urls.get("small")
-                if not img:
-                    continue
-                if img in used:
-                    continue
-                used.add(img)
-                u = r.get("user", {}) or {}
-                attr = f"{u.get('name','Unsplash')} — https://unsplash.com/@{u.get('username','unsplash')}"
-                return img, attr
-        except Exception:
-            pass
 
-    # 2) OpenAI image (now base64 data-url capable)
-    if OPENAI_API_KEY:
-        u = _openai_image(f"wide-angle realistic photograph, full subject visible, natural lighting, photojournalism feel, about: {text}")
-        if u and u not in used:
-            used.add(u)
-            return u, "OpenAI generated"
+def _fallback_image_for_category(category: str, used: set[str], rng: random.Random) -> str:
+    names = FALLBACK_IMAGE_MAP.get(category) or FALLBACK_IMAGE_MAP["general"]
+    pool = list(names)
+    rng.shuffle(pool)
+    for name in pool:
+        url = f"/static/roulette/fallbacks/{name}"
+        if url in used:
+            continue
+        used.add(url)
+        return url
+    used.add(FALLBACK_ICON_URL)
+    return FALLBACK_ICON_URL
 
-    # 3) Guaranteed visible fallback (never blank)
-    if FALLBACK_ICON_URL not in used:
-        used.add(FALLBACK_ICON_URL)
-    return FALLBACK_ICON_URL or PLACEHOLDER_IMG, ""
+
+def _search_unsplash(query: str, rng: random.Random, used: set[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not UNSPLASH_ACCESS_KEY or not query:
+        return None, None
+    page = 1 + rng.randint(0, 2)
+    try:
+        j = _http_get_json(
+            "https://api.unsplash.com/search/photos",
+            params={
+                "query": query,
+                "orientation": "landscape",
+                "per_page": 8,
+                "page": page,
+                "content_filter": "high",
+                "order_by": "relevant",
+            },
+            headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+        )
+        for r in j.get("results", []):
+            urls = r.get("urls", {}) or {}
+            img = urls.get("regular") or urls.get("full") or urls.get("small")
+            if not img or img in used:
+                continue
+            valid = _validate_image_url(img)
+            if not valid or valid in used:
+                continue
+            used.add(valid)
+            u = r.get("user", {}) or {}
+            attr = f"{u.get('name','Unsplash')} — https://unsplash.com/@{u.get('username','unsplash')}"
+            return valid, attr
+    except Exception:
+        return None, None
+    return None, None
+
+
+def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], existing_url: str | None = None) -> Tuple[str, str, Optional[str]]:
+    """
+    Pick an image for a choice, honoring existing URLs when valid.
+    Returns (url, source_type, attribution).
+    """
+    existing_valid = _validate_image_url(existing_url)
+    if existing_valid and existing_valid not in used:
+        used.add(existing_valid)
+        return existing_valid, "cached", None
+
+    queries = _build_image_queries(choice)
+    for q in queries:
+        found, attr = _search_unsplash(q, rng, used)
+        if found:
+            return found, "search", attr
+
+    fallback = _fallback_image_for_category(choice.get("category") or "general", used, rng)
+    return fallback, "fallback", None
 
 def ensure_today_round(force: int = 0) -> bool:
     """
@@ -802,10 +992,10 @@ def ensure_today_round(force: int = 0) -> bool:
     real_soft = _soften_real_title(real_raw)
     domain = _infer_domain(real_soft)
 
-    real_soft = _normalize_choice(real_soft, 20, 25)
+    real_soft = _normalize_choice(real_soft, 14, 22)
     real_len = _wlen(real_soft)
-    fake_min = max(20, real_len - 5)
-    fake_max = min(25, real_len + 5)
+    fake_min = max(14, real_len - 3)
+    fake_max = min(22, real_len + 3)
 
     year_hint = real_year or _extract_year_hint(real_raw) or _extract_year_hint(real_soft)
     fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max, year_hint=year_hint)
@@ -875,14 +1065,67 @@ def ensure_today_round(force: int = 0) -> bool:
     f1_icon   = pick_icon_for_text(fake1)
     f2_icon   = pick_icon_for_text(fake2)
 
+    def _choice_meta(text: str) -> dict:
+        ev_type, ev_cat = _guess_event_type(text)
+        domain_guess = _infer_domain(text)
+        category = ev_cat or _category_for_text(text, domain_guess)
+        return {
+            "text": text,
+            "domain": domain_guess,
+            "category": category,
+            "event_type": ev_type or category,
+            "location": _guess_location(text),
+            "entity": _guess_entity(text),
+            "year": year_hint,
+        }
+
+    real_meta = _choice_meta(real_soft)
+    fake1_meta = _choice_meta(fake1)
+    fake2_meta = _choice_meta(fake2)
+
     # seed with recent picks to avoid showing yesterday's photos again
-    used_urls: set[str] = _recent_image_urls(limit=5)
-    real_img, real_attr = _image_for(real_soft, used_urls)
-    f1_img,  f1_attr    = _image_for(fake1, used_urls)
-    f2_img,  f2_attr    = _image_for(fake2, used_urls)
+    used_urls: set[str] = _recent_image_urls(limit=8)
+
+    existing_imgs = {
+        "real": _validate_image_url(getattr(existing, "real_img_url", None)) if existing else None,
+        "fake1": _validate_image_url(getattr(existing, "fake1_img_url", None)) if existing else None,
+        "fake2": _validate_image_url(getattr(existing, "fake2_img_url", None)) if existing else None,
+    }
+    existing_attrs = {
+        "real": getattr(existing, "real_img_attr", None) if existing else None,
+        "fake1": getattr(existing, "fake1_img_attr", None) if existing else None,
+        "fake2": getattr(existing, "fake2_img_attr", None) if existing else None,
+    }
+
+    # avoid duplicates when reusing cached images
+    already: set[str] = set()
+    for key in ("real", "fake1", "fake2"):
+        url = existing_imgs[key]
+        if url and url not in already:
+            already.add(url)
+        else:
+            existing_imgs[key] = None
+    used_urls |= already
+
+    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")))
+    real_img, real_src, real_attr_new = pick_image_for_choice(real_meta, rng, used_urls, existing_imgs["real"])
+    f1_img, _, f1_attr_new = pick_image_for_choice(fake1_meta, rng, used_urls, existing_imgs["fake1"])
+    f2_img, _, f2_attr_new = pick_image_for_choice(fake2_meta, rng, used_urls, existing_imgs["fake2"])
+
+    # If the real pick fell back, keep all three on consistent fallbacks for credibility
+    if real_src == "fallback":
+        used_urls = {real_img}
+        f1_img = _fallback_image_for_category(fake1_meta["category"], used_urls, rng)
+        f2_img = _fallback_image_for_category(fake2_meta["category"], used_urls, rng)
+        f1_attr_new = None
+        f2_attr_new = None
+
     real_img = real_img or FALLBACK_ICON_URL or PLACEHOLDER_IMG
     f1_img = f1_img or FALLBACK_ICON_URL or PLACEHOLDER_IMG
     f2_img = f2_img or FALLBACK_ICON_URL or PLACEHOLDER_IMG
+    real_attr = real_attr_new or existing_attrs["real"] or ""
+    f1_attr = f1_attr_new or existing_attrs["fake1"] or ""
+    f2_attr = f2_attr_new or existing_attrs["fake2"] or ""
     img_attr = real_attr or f1_attr or f2_attr or ""
 
     try:
@@ -911,8 +1154,8 @@ def ensure_today_round(force: int = 0) -> bool:
 
             existing.real_img_attr  = img_attr
             # keep compatibility fields if they exist
-            if hasattr(existing, "fake1_img_attr"): existing.fake1_img_attr = None
-            if hasattr(existing, "fake2_img_attr"): existing.fake2_img_attr = None
+            if hasattr(existing, "fake1_img_attr"): existing.fake1_img_attr = f1_attr or None
+            if hasattr(existing, "fake2_img_attr"): existing.fake2_img_attr = f2_attr or None
 
         else:
             # CREATE if missing
@@ -930,8 +1173,8 @@ def ensure_today_round(force: int = 0) -> bool:
                 fake1_img_url=f1_img,
                 fake2_img_url=f2_img,
                 real_img_attr=img_attr,
-                fake1_img_attr=None,
-                fake2_img_attr=None,
+                fake1_img_attr=f1_attr or None,
+                fake2_img_attr=f2_attr or None,
             )
             db.session.add(round_row)
 

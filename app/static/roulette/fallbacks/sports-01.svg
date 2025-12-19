@@ -1,0 +1,15 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Stadium field lines'>
+  <defs>
+    <linearGradient id='sp1' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='#0b4029'/>
+      <stop offset='100%' stop-color='#1b7c46'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#sp1)'/>
+  <rect x='22' y='34' width='276' height='112' rx='18' fill='rgba(255,255,255,0.08)'/>
+  <line x1='160' y1='34' x2='160' y2='146' stroke='#d8e9d7' stroke-width='3'/>
+  <circle cx='160' cy='90' r='26' fill='none' stroke='#d8e9d7' stroke-width='3'/>
+  <rect x='22' y='64' width='32' height='52' rx='6' fill='none' stroke='#d8e9d7' stroke-width='3'/>
+  <rect x='266' y='64' width='32' height='52' rx='6' fill='none' stroke='#d8e9d7' stroke-width='3'/>
+  <circle cx='160' cy='90' r='4' fill='#d8e9d7'/>
+</svg>

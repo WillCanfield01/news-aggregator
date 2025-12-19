@@ -1,0 +1,14 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Storm clouds over waves'>
+  <defs>
+    <linearGradient id='w1' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0%' stop-color='#1c2735'/>
+      <stop offset='100%' stop-color='#3a4c62'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#w1)'/>
+  <ellipse cx='110' cy='70' rx='70' ry='36' fill='#d8dde5'/>
+  <ellipse cx='190' cy='64' rx='80' ry='34' fill='#cbd3dd'/>
+  <ellipse cx='240' cy='78' rx='70' ry='28' fill='#d8dde5'/>
+  <rect y='120' width='320' height='60' fill='#7aa0bd'/>
+  <path d='M0 128 C40 140 80 116 120 128 C160 140 200 116 240 128 C280 140 300 120 320 126 L320 180 L0 180 Z' fill='#648aa8'/>
+</svg>

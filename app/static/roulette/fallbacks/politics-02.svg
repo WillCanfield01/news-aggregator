@@ -1,0 +1,17 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Courthouse silhouette at dusk'>
+  <defs>
+    <linearGradient id='p2' x1='0' y1='0' x2='1' y2='0'>
+      <stop offset='0%' stop-color='#14344b'/>
+      <stop offset='100%' stop-color='#1f5c7a'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#p2)'/>
+  <rect y='122' width='320' height='58' fill='#e6e9ef' opacity='0.9'/>
+  <polygon points='30,122 160,56 290,122' fill='#d8dee8'/>
+  <rect x='60' y='96' width='24' height='84' fill='#cfd7e4'/>
+  <rect x='112' y='96' width='24' height='84' fill='#cfd7e4'/>
+  <rect x='164' y='96' width='24' height='84' fill='#cfd7e4'/>
+  <rect x='216' y='96' width='24' height='84' fill='#cfd7e4'/>
+  <rect x='46' y='116' width='228' height='8' fill='#b9c6d8'/>
+  <rect x='46' y='132' width='228' height='8' fill='#b2c0d3'/>
+</svg>

@@ -1,0 +1,19 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Satellite and stars'>
+  <defs>
+    <linearGradient id='s1' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0%' stop-color='#0b3b48'/>
+      <stop offset='100%' stop-color='#17657a'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#s1)'/>
+  <circle cx='240' cy='56' r='18' fill='#e4f4ff' opacity='0.85'/>
+  <circle cx='70' cy='46' r='6' fill='#c2e8ff'/>
+  <circle cx='110' cy='28' r='4' fill='#c2e8ff'/>
+  <circle cx='36' cy='78' r='5' fill='#c2e8ff'/>
+  <rect x='104' y='94' width='118' height='22' rx='6' fill='#cfdfe8'/>
+  <rect x='80' y='88' width='20' height='34' rx='3' fill='#9ac7d9'/>
+  <rect x='226' y='88' width='20' height='34' rx='3' fill='#9ac7d9'/>
+  <rect x='150' y='98' width='28' height='16' rx='3' fill='#83b9ce'/>
+  <line x1='120' y1='140' x2='200' y2='120' stroke='#9ac7d9' stroke-width='6' stroke-linecap='round'/>
+  <line x1='128' y1='148' x2='206' y2='128' stroke='#d8e7f0' stroke-width='4' stroke-linecap='round'/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180' role='img' aria-label='Rainy sky with lightning'>
+  <defs>
+    <linearGradient id='w2' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='#102033'/>
+      <stop offset='100%' stop-color='#1f3a55'/>
+    </linearGradient>
+  </defs>
+  <rect width='320' height='180' fill='url(#w2)'/>
+  <ellipse cx='120' cy='64' rx='78' ry='32' fill='#cfd6de'/>
+  <ellipse cx='210' cy='64' rx='82' ry='30' fill='#d9dfe8'/>
+  <polygon points='170,100 146,140 168,134 148,176 188,122 166,128 188,96' fill='#f6d64a'/>
+  <line x1='52' y1='110' x2='52' y2='150' stroke='#c8d5e3' stroke-width='4' stroke-linecap='round'/>
+  <line x1='82' y1='114' x2='82' y2='154' stroke='#c8d5e3' stroke-width='4' stroke-linecap='round'/>
+  <line x1='240' y1='112' x2='240' y2='150' stroke='#c8d5e3' stroke-width='4' stroke-linecap='round'/>
+</svg>
