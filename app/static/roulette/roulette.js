@@ -32,6 +32,7 @@
     resultEl.classList.remove("is-visible");
     resultEl.textContent = "";
     state.locked = false;
+    const type = payload.type;
 
     payload.cards.forEach((card, idx) => {
       const cardEl = document.createElement("article");
@@ -41,18 +42,38 @@
       cardEl.dataset.idx = idx;
       cardEl.setAttribute("aria-pressed", "false");
 
-      cardEl.innerHTML = `
-        <div class="choice-media">
-          <div class="image-frame">
-            <img src="${escapeHtml(card.image_url || "")}" alt="" loading="lazy">
+      if (type === "quote") {
+        cardEl.classList.add("is-quote");
+        cardEl.innerHTML = `
+          <div class="choice-media">
+            <div class="image-frame">
+              <img src="${escapeHtml(card.image_url || "")}" alt="" loading="lazy">
+            </div>
           </div>
-        </div>
-        <div class="choice-body">
-          <div class="choice-meta">Choice ${idx + 1}</div>
-          <h3 class="choice-title">${escapeHtml(card.title || "")}</h3>
-          <p class="choice-blurb">${escapeHtml(card.blurb || "")}</p>
-        </div>
-      `;
+          <div class="choice-body quote-body">
+            <div class="choice-meta">Choice ${idx + 1}</div>
+            <div class="quote-block">
+              <p class="quote-text">${escapeHtml(card.quote || card.title || "")}</p>
+              <div class="quote-author">&#8212; ${escapeHtml(card.author || "Unknown")}</div>
+            </div>
+          </div>
+        `;
+      } else {
+        cardEl.classList.add(type === "image" ? "is-image" : "is-headline");
+        const blurb = card.blurb || "";
+        cardEl.innerHTML = `
+          <div class="choice-media">
+            <div class="image-frame">
+              <img src="${escapeHtml(card.image_url || "")}" alt="" loading="lazy">
+            </div>
+          </div>
+          <div class="choice-body">
+            <div class="choice-meta">Choice ${idx + 1}</div>
+            <h3 class="choice-title">${escapeHtml(card.title || "")}</h3>
+            ${blurb ? `<p class="choice-blurb">${escapeHtml(blurb)}</p>` : ""}
+          </div>
+        `;
+      }
 
       const select = () => handleGuess(idx, payload.correct_index);
       cardEl.addEventListener("click", select);
@@ -105,7 +126,7 @@
       });
       const data = await res.json();
       if (data.ok) {
-        const msg = data.is_correct ? "You got it." : "Good try — the real pick is highlighted.";
+        const msg = data.is_correct ? "You got it." : "Good try - the real pick is highlighted.";
         resultEl.textContent = msg;
         resultEl.classList.add("is-visible");
         state.score = data.score;
@@ -159,7 +180,7 @@
         const line = document.createElement("div");
         line.className = "recap-line";
         const mark = i === r.payload.correct_index ? "✅" : i === r.guess ? "✕" : "•";
-        const text = c.title || c.raw_text || `Choice ${i + 1}`;
+        const text = c.quote || c.title || c.raw_text || `Choice ${i + 1}`;
         line.textContent = `${mark} ${text}`;
         block.appendChild(line);
       });

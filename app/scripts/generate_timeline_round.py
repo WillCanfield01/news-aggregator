@@ -69,6 +69,115 @@ BANNED_JARGON = {
     "laboratory", "pioneers", "researchers", "data processing",
 }
 
+QUOTE_LIBRARY: list[dict[str, str]] = [
+    {"text": "The future depends on what you do today.", "author": "Mahatma Gandhi"},
+    {"text": "Success is walking from failure to failure with no loss of enthusiasm.", "author": "Winston Churchill"},
+    {"text": "We are what we repeatedly do. Excellence, then, is not an act but a habit.", "author": "Aristotle"},
+    {"text": "It always seems impossible until it is done.", "author": "Nelson Mandela"},
+    {"text": "The most difficult thing is the decision to act, the rest is merely tenacity.", "author": "Amelia Earhart"},
+    {"text": "I am not afraid of storms, for I am learning how to sail my ship.", "author": "Louisa May Alcott"},
+    {"text": "If you can dream it, you can do it.", "author": "Walt Disney"},
+    {"text": "You miss one hundred percent of the shots you never take.", "author": "Wayne Gretzky"},
+    {"text": "Do what you can, with what you have, where you are.", "author": "Theodore Roosevelt"},
+    {"text": "Courage is grace under pressure.", "author": "Ernest Hemingway"},
+    {"text": "In the middle of difficulty lies opportunity.", "author": "Albert Einstein"},
+    {"text": "The secret of getting ahead is getting started.", "author": "Mark Twain"},
+    {"text": "Dream big and dare to fail.", "author": "Norman Vaughan"},
+    {"text": "The best way out is always through.", "author": "Robert Frost"},
+    {"text": "Quality is not an act, it is a habit.", "author": "Aristotle"},
+    {"text": "Well done is better than well said.", "author": "Benjamin Franklin"},
+    {"text": "The future starts today, not tomorrow.", "author": "Pope John Paul II"},
+    {"text": "Turn your wounds into wisdom.", "author": "Oprah Winfrey"},
+    {"text": "Action is the foundational key to all success.", "author": "Pablo Picasso"},
+    {"text": "Small deeds done are better than great deeds planned.", "author": "Peter Marshall"},
+    {"text": "Success is the sum of small efforts, repeated day in and day out.", "author": "Robert Collier"},
+    {"text": "The journey of a thousand miles begins with a single step.", "author": "Lao Tzu"},
+    {"text": "Discipline is choosing between what you want now and what you want most.", "author": "Abraham Lincoln"},
+    {"text": "Luck is a dividend of sweat. The more you sweat, the luckier you get.", "author": "Ray Kroc"},
+    {"text": "Champions keep playing until they get it right.", "author": "Billie Jean King"},
+    {"text": "I've failed over and over and that is why I succeed.", "author": "Michael Jordan"},
+    {"text": "The harder the conflict, the more glorious the triumph.", "author": "Thomas Paine"},
+    {"text": "Strive not to be a success, but rather to be of value.", "author": "Albert Einstein"},
+    {"text": "Nothing will work unless you do.", "author": "Maya Angelou"},
+    {"text": "Act as if what you do makes a difference. It does.", "author": "William James"},
+    {"text": "What you do today can improve all your tomorrows.", "author": "Ralph Marston"},
+    {"text": "Make each day your masterpiece.", "author": "John Wooden"},
+    {"text": "Fortune favors the bold.", "author": "Virgil"},
+    {"text": "The best revenge is massive success.", "author": "Frank Sinatra"},
+    {"text": "Talent wins games, but teamwork wins championships.", "author": "Michael Jordan"},
+    {"text": "If you want to lift yourself up, lift up someone else.", "author": "Booker T. Washington"},
+    {"text": "Do not wait to strike till the iron is hot; make it hot by striking.", "author": "William Butler Yeats"},
+    {"text": "Either you run the day or the day runs you.", "author": "Jim Rohn"},
+    {"text": "If there is no struggle, there is no progress.", "author": "Frederick Douglass"},
+    {"text": "Inspiration exists, but it has to find you working.", "author": "Pablo Picasso"},
+    {"text": "Great things are done by a series of small things brought together.", "author": "Vincent van Gogh"},
+    {"text": "Success usually comes to those who are too busy to be looking for it.", "author": "Henry David Thoreau"},
+    {"text": "The only way around is through.", "author": "Robert Frost"},
+    {"text": "You are never too old to set another goal or to dream a new dream.", "author": "C. S. Lewis"},
+    {"text": "Pressure is a privilege.", "author": "Billie Jean King"},
+    {"text": "Opportunities multiply as they are seized.", "author": "Sun Tzu"},
+    {"text": "Energy and persistence conquer all things.", "author": "Benjamin Franklin"},
+    {"text": "Keep your face always toward the sunshine, and shadows will fall behind you.", "author": "Walt Whitman"},
+    {"text": "Progress lies not in enhancing what is, but in advancing toward what will be.", "author": "Khalil Gibran"},
+    {"text": "Success is never accidental.", "author": "Jack Welch"},
+    {"text": "Decide what you want, and then act as if it were impossible to fail.", "author": "Brian Tracy"},
+    {"text": "Victory belongs to the most persevering.", "author": "Napoleon Bonaparte"},
+    {"text": "Perfection is not attainable, but if we chase perfection we can catch excellence.", "author": "Vince Lombardi"},
+    {"text": "You must do the thing you think you cannot do.", "author": "Eleanor Roosevelt"},
+    {"text": "A goal without a plan is just a wish.", "author": "Antoine de Saint-Exupery"},
+    {"text": "Never confuse a single defeat with a final defeat.", "author": "F. Scott Fitzgerald"},
+    {"text": "The way to get started is to quit talking and begin doing.", "author": "Walt Disney"},
+    {"text": "Big results require big ambitions.", "author": "Heraclitus"},
+    {"text": "If you are working on something exciting that you really care about, you don't have to be pushed. The vision pulls you.", "author": "Steve Jobs"},
+    {"text": "Hard work beats talent when talent doesn't work hard.", "author": "Kevin Durant"},
+    {"text": "Don't wait. The time will never be just right.", "author": "Napoleon Hill"},
+    {"text": "We become what we think about.", "author": "Earl Nightingale"},
+    {"text": "Stay hungry, stay foolish.", "author": "Steve Jobs"},
+    {"text": "Rise above the storm and you will find the sunshine.", "author": "Mario Fernandez"},
+    {"text": "I am always doing that which I cannot do, in order that I may learn how to do it.", "author": "Pablo Picasso"},
+    {"text": "The only place where success comes before work is in the dictionary.", "author": "Vidal Sassoon"},
+    {"text": "Do not pray for an easy life, pray for the strength to endure a difficult one.", "author": "Bruce Lee"},
+    {"text": "Motivation is what gets you started. Habit is what keeps you going.", "author": "Jim Ryun"},
+    {"text": "Champions take chances when there are no chances.", "author": "Jack Dempsey"},
+    {"text": "Vision without execution is just hallucination.", "author": "Henry Ford"},
+    {"text": "Some people want it to happen, some wish it would happen, others make it happen.", "author": "Michael Jordan"},
+    {"text": "The reward for work well done is the opportunity to do more.", "author": "Jonas Salk"},
+    {"text": "I find that the harder I work, the more luck I seem to have.", "author": "Thomas Jefferson"},
+    {"text": "Do not be afraid to give up the good to go for the great.", "author": "John D. Rockefeller"},
+    {"text": "Never let the fear of striking out keep you from playing the game.", "author": "Babe Ruth"},
+    {"text": "Success is liking yourself, liking what you do, and liking how you do it.", "author": "Maya Angelou"},
+    {"text": "No pressure, no diamonds.", "author": "Thomas Carlyle"},
+    {"text": "Fear is a reaction. Courage is a decision.", "author": "Winston Churchill"},
+    {"text": "Luck is what happens when preparation meets opportunity.", "author": "Seneca"},
+    {"text": "Do one thing every day that scares you.", "author": "Eleanor Roosevelt"},
+    {"text": "You can waste your lives drawing lines. Or you can live your life crossing them.", "author": "Shonda Rhimes"},
+    {"text": "The difference between the impossible and the possible lies in a person's determination.", "author": "Tommy Lasorda"},
+    {"text": "Life shrinks or expands in proportion to one's courage.", "author": "Anais Nin"},
+    {"text": "He who is not courageous enough to take risks will accomplish nothing in life.", "author": "Muhammad Ali"},
+    {"text": "Believe you can and you're halfway there.", "author": "Theodore Roosevelt"},
+    {"text": "You can't build a reputation on what you are going to do.", "author": "Henry Ford"},
+    {"text": "Success is a science; if you have the conditions, you get the result.", "author": "Oscar Wilde"},
+    {"text": "Give light and people will find the way.", "author": "Ella Baker"},
+    {"text": "There are no shortcuts to any place worth going.", "author": "Beverly Sills"},
+    {"text": "When you reach the end of your rope, tie a knot in it and hang on.", "author": "Franklin D. Roosevelt"},
+    {"text": "Never allow a person to tell you no who doesn't have the power to say yes.", "author": "Eleanor Roosevelt"},
+    {"text": "The only real mistake is the one from which we learn nothing.", "author": "Henry Ford"},
+    {"text": "Patience, persistence and perspiration make an unbeatable combination for success.", "author": "Napoleon Hill"},
+    {"text": "A river cuts through rock not because of its power, but because of its persistence.", "author": "James Watkins"},
+    {"text": "Success is doing ordinary things extraordinarily well.", "author": "Jim Rohn"},
+    {"text": "Great works are performed not by strength but by perseverance.", "author": "Samuel Johnson"},
+    {"text": "Our greatest glory is not in never falling, but in rising every time we fall.", "author": "Confucius"},
+    {"text": "Start where you are. Use what you have. Do what you can.", "author": "Arthur Ashe"},
+    {"text": "We can do anything we want to if we stick to it long enough.", "author": "Helen Keller"},
+    {"text": "Don't watch the clock; do what it does. Keep going.", "author": "Sam Levenson"},
+    {"text": "Once you choose hope, anything's possible.", "author": "Christopher Reeve"},
+    {"text": "Hold yourself responsible for a higher standard than anybody expects of you.", "author": "Henry Ward Beecher"},
+    {"text": "If you fell down yesterday, stand up today.", "author": "H. G. Wells"},
+    {"text": "Stay patient and trust your journey.", "author": "Kobe Bryant"},
+    {"text": "When something is important enough, you do it even if the odds are not in your favor.", "author": "Elon Musk"},
+    {"text": "The pain you feel today will be the strength you feel tomorrow.", "author": "Ritu Ghatourey"},
+    {"text": "The best dreams happen when you are awake.", "author": "Cherie Gilderbloom"},
+]
 
 # --------------------------- utilities ---------------------------
 
@@ -94,7 +203,7 @@ def _soften_real_title(title: str) -> str:
     t = str(title).strip()
     t = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", t, flags=re.MULTILINE)  # strip code fences
 
-    # collapse very large counts like 12,345 or 2000000 → “thousands”
+    # collapse very large counts like 12,345 or 2000000 -> "thousands"
     t = re.sub(r"\b(\d{1,3}(?:,\d{3}){1,}|\d{5,})\b", "thousands", t)
 
     # normalize doubled determiners that sometimes sneak in
@@ -943,16 +1052,35 @@ def _search_unsplash(query: str, rng: random.Random, used: set[str]) -> Tuple[Op
                 continue
             used.add(valid)
             u = r.get("user", {}) or {}
-            attr = f"{u.get('name','Unsplash')} — https://unsplash.com/@{u.get('username','unsplash')}"
+                attr = f"{u.get('name','Unsplash')} - https://unsplash.com/@{u.get('username','unsplash')}"
             return valid, attr
     except Exception:
         return None, None
     return None, None
 
 
-def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], existing_url: str | None = None) -> Tuple[str, str, Optional[str]]:
+def _generate_decoy_image(choice: dict, rng: random.Random, used: set[str], seed: int | None = None) -> Tuple[Optional[str], Optional[str]]:
+    prompt_seed = seed or rng.randint(10_000, 99_999)
+    if OPENAI_API_KEY:
+        prompt = (
+            "documentary style photograph, natural lighting, wide frame, no text or graphics, "
+            f"news photo of: {choice.get('text','')}. seed {prompt_seed}"
+        )
+        cand = _openai_image(prompt)
+        valid = _validate_image_url(cand)
+        if valid and valid not in used:
+            used.add(valid)
+            return valid, None
+    found, attr = _search_unsplash(choice.get("text", ""), rng, used)
+    if found:
+        return found, attr
+    return None, None
+
+
+def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], existing_url: str | None = None, mode: str = "real", seed: int | None = None) -> Tuple[str, str, Optional[str]]:
     """
     Pick an image for a choice, honoring existing URLs when valid.
+    mode: "real" uses Unsplash-first; "decoy" prefers generated decoys.
     Returns (url, source_type, attribution).
     """
     existing_valid = _validate_image_url(existing_url)
@@ -960,12 +1088,26 @@ def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], exis
         used.add(existing_valid)
         return existing_valid, "cached", None
 
-    queries = _build_image_queries(choice)
-    for q in queries:
-        found, attr = _search_unsplash(q, rng, used)
+    if mode == "real":
+        queries = _build_image_queries(choice)
+        for q in queries:
+            found, attr = _search_unsplash(q, rng, used)
+            if found:
+                return found, "search", attr
+        # one last pass with the raw text
+        found, attr = _search_unsplash(choice.get("text", ""), rng, used)
         if found:
             return found, "search", attr
+        fallback = _fallback_image_for_category(choice.get("category") or "general", used, rng)
+        return fallback, "fallback", None
 
+    # decoys: try generated, then unsplash, then fallback
+    url, attr = _generate_decoy_image(choice, rng, used, seed)
+    if url:
+        return url, "generated", attr
+    found, attr = _search_unsplash(choice.get("text", ""), rng, used)
+    if found:
+        return found, "search", attr
     fallback = _fallback_image_for_category(choice.get("category") or "general", used, rng)
     return fallback, "fallback", None
 
@@ -1107,10 +1249,11 @@ def ensure_today_round(force: int = 0) -> bool:
             existing_imgs[key] = None
     used_urls |= already
 
-    rng = random.Random(int(datetime.now(TZ).strftime("%Y%m%d")))
-    real_img, real_src, real_attr_new = pick_image_for_choice(real_meta, rng, used_urls, existing_imgs["real"])
-    f1_img, _, f1_attr_new = pick_image_for_choice(fake1_meta, rng, used_urls, existing_imgs["fake1"])
-    f2_img, _, f2_attr_new = pick_image_for_choice(fake2_meta, rng, used_urls, existing_imgs["fake2"])
+    seed_base = int(datetime.now(TZ).strftime("%Y%m%d"))
+    rng = random.Random(seed_base)
+    real_img, real_src, real_attr_new = pick_image_for_choice(real_meta, rng, used_urls, existing_imgs["real"], mode="real")
+    f1_img, _, f1_attr_new = pick_image_for_choice(fake1_meta, rng, used_urls, existing_imgs["fake1"], mode="decoy", seed=seed_base + 11)
+    f2_img, _, f2_attr_new = pick_image_for_choice(fake2_meta, rng, used_urls, existing_imgs["fake2"], mode="decoy", seed=seed_base + 19)
 
     # If the real pick fell back, keep all three on consistent fallbacks for credibility
     if real_src == "fallback":

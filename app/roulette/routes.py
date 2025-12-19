@@ -41,6 +41,7 @@ from app.scripts.generate_timeline_round import (
     OPENAI_API_KEY,
     OAI_MODEL,
     OAI_URL,
+    QUOTE_LIBRARY,
     _http_get_json,
     _headline_from_text,
     _blurb_from_text,
@@ -192,15 +193,16 @@ def _shuffle_cards(cards: list[dict]) -> tuple[list[dict], int]:
     return cards, correct_shuffled_idx
 
 
-def _choice_cards(today_round: TimelineRound) -> list[dict]:
+def _choice_cards(today_round: TimelineRound, include_blurb: bool = False) -> list[dict]:
     """
     Build base card payloads from today's round with headline + blurb + image.
     """
     def _one(idx: int, text: str, img: str | None, icon_name: str | None) -> dict:
+        blurb = _blurb_from_text(text, 12, 22) if include_blurb else ""
         return {
             "orig_idx": idx,
             "title": _headline_from_text(text, 6, 14),
-            "blurb": _blurb_from_text(text, 12, 22),
+            "blurb": blurb,
             "image_url": img or _icon_url_or_fallback(icon_name),
             "raw_text": text,
         }
@@ -212,10 +214,10 @@ def _choice_cards(today_round: TimelineRound) -> list[dict]:
     ]
 
 def _build_text_round(today_round: TimelineRound) -> dict:
-    cards, correct_idx = _shuffle_cards(_choice_cards(today_round))
+    cards, correct_idx = _shuffle_cards(_choice_cards(today_round, include_blurb=False))
     return {
         "type": "text",
-        "prompt": "Three headlines. One is real. Pick the real event.",
+        "prompt": "Three headlines. Pick the real one.",
         "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,
@@ -223,10 +225,10 @@ def _build_text_round(today_round: TimelineRound) -> dict:
     }
 
 def _build_image_round(today_round: TimelineRound) -> dict:
-    cards, correct_idx = _shuffle_cards(_choice_cards(today_round))
+    cards, correct_idx = _shuffle_cards(_choice_cards(today_round, include_blurb=False))
     return {
         "type": "image",
-        "prompt": "Three photos with headlines. Which one matches a real event?",
+        "prompt": "Three photos. Pick the one that matches a real event.",
         "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,
@@ -290,92 +292,107 @@ def _quote_images() -> list[str]:
         urls.append(urls[-1])
     return urls[:3]
 
+
+def _quote_pool() -> list[dict]:
+    return QUOTE_LIBRARY
+
+
+def _pick_real_quote(seed: int, avoid_authors: set[str]) -> tuple[str, str]:
+    rng = random.Random(seed)
+    pool = list(_quote_pool())
+    rng.shuffle(pool)
+    for item in pool:
+        author = (item.get("author") or "").strip()
+        if author and author not in avoid_authors:
+            return (item.get("text") or "").strip(), author
+    fallback = pool[0] if pool else {"text": "A recorded quote.", "author": "Unknown"}
+    return fallback.get("text", ""), fallback.get("author", "")
+
+
+def _fabricate_quote(avoid_authors: set[str], rng: random.Random) -> tuple[str, str]:
+    names = [
+        "Clara Mendes", "Julian Hart", "Priya Raman", "Seth Alvarez", "Mara Quinn",
+        "Devon Carlisle", "Noor Hassan", "Inez Porter", "Caleb Brooks", "Lena Duarte",
+        "Riley Cobb", "Anika Shah", "Mason Pike", "Talia Rhodes", "Jonah Reeves",
+        "Kai Morgan", "Vivian Cross", "Leo Navarro", "Isla Becker", "Tomas Reed",
+        "Felix Rowe", "Daria Voss", "Kendall Price", "Mateo Serrano",
+    ]
+    openers = [
+        "I carry the lesson that",
+        "What stays with me is that",
+        "I learned long ago that",
+        "We move forward when",
+        "It is never wasted when",
+        "Progress starts the moment",
+        "I hold to the idea that",
+        "We earn our momentum when",
+    ]
+    middles = [
+        "steady effort meets honest intent",
+        "quiet practice builds real strength",
+        "curiosity outruns the fear of failing",
+        "discipline and hope travel together",
+        "we choose to keep showing up",
+        "careful work honors the craft",
+        "we listen before we leap",
+        "we take the next small step",
+    ]
+    endings = [
+        "and that is enough to change a day.",
+        "and that turns work into craft.",
+        "and that is the root of good work.",
+        "and that keeps the door open.",
+        "and that is where courage lives.",
+        "and that is how a team begins.",
+        "and that is how we earn trust.",
+        "and that is how progress holds.",
+    ]
+    rng.shuffle(names)
+    author = next((n for n in names if n not in avoid_authors), names[0])
+    text = f"{rng.choice(openers)} {rng.choice(middles)} {rng.choice(endings)}"
+    return text.strip(), author
+
 def _build_quote_round(today_round: TimelineRound) -> dict:
-    real_quote, real_attr = _fetch_today_quote()
-    real_quote = _clean_quote_text(real_quote)
-    if not real_quote and OPENAI_API_KEY:
-        try:
-            prompt = (
-                "Provide one verifiable historical quote that occurred on today's date. "
-                "Return one sentence containing the quote and the speaker/attribution. No sources or commentary. Do not include the date."
-            )
-            r = requests.post(
-                OAI_URL,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": OAI_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.6,
-                },
-                timeout=12,
-            )
-            r.raise_for_status()
-            real_quote = _clean_quote_text(r.json()["choices"][0]["message"]["content"] or "")
-            real_attr = ""
-        except Exception:
-            real_quote = ""
-            real_attr = ""
-
-    def _ai_quote(existing: list[str]) -> str:
-        if OPENAI_API_KEY:
-            for _ in range(5):
-                try:
-                    r = requests.post(
-                        OAI_URL,
-                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                        json={
-                            "model": OAI_MODEL,
-                            "messages": [
-                                {"role": "system", "content": "Invent a concise, believable quote with attribution, 12-18 words, one sentence, neutral tone, no cliches."},
-                                {"role": "user", "content": f"Do NOT mention the real event. Use a different speaker each time. Avoid sounding like other quotes: {existing}. Real event: {today_round.real_title}."},
-                            ],
-                            "temperature": 0.85,
-                        },
-                        timeout=12,
-                    )
-                    r.raise_for_status()
-                    q = (r.json()["choices"][0]["message"]["content"] or "").strip()
-                    if len(q.split()) < 9:
-                        continue
-                    if any(_quote_too_similar(q, ex) for ex in existing if ex):
-                        continue
-                    return q
-                except Exception:
-                    continue
-        return ""
-
-    fakes: list[str] = []
-    fake1 = _clean_quote_text(_ai_quote([real_quote])) or "A noted figure reflects on change in a short remark."
-    fakes.append(fake1)
-    fake2 = _clean_quote_text(_ai_quote([real_quote, fake1])) or "An artist speaks on creativity in a brief line."
+    seed = int(datetime.now(_TZ).strftime("%Y%m%d"))
+    real_quote, real_author = _pick_real_quote(seed, set())
+    avoid = {real_author}
+    fake1, fake1_author = _fabricate_quote(avoid, random.Random(seed + 11))
+    avoid.add(fake1_author)
+    fake2, fake2_author = _fabricate_quote(avoid, random.Random(seed + 19))
 
     images = _quote_images()
     cards, correct_idx = _shuffle_cards([
         {
             "orig_idx": 0,
-            "title": _headline_from_text(real_quote or "A historical quote recorded for this date.", 6, 18),
-            "blurb": real_attr or "",
+            "title": real_quote or "A historical quote recorded for this date.",
+            "quote": real_quote or "A historical quote recorded for this date.",
+            "author": real_author,
+            "blurb": real_author,
             "image_url": images[0],
             "raw_text": real_quote or "",
         },
         {
             "orig_idx": 1,
-            "title": _headline_from_text(fake1, 6, 18),
-            "blurb": "",
+            "title": fake1,
+            "quote": fake1,
+            "author": fake1_author,
+            "blurb": fake1_author,
             "image_url": images[1],
             "raw_text": fake1,
         },
         {
             "orig_idx": 2,
-            "title": _headline_from_text(fake2, 6, 18),
-            "blurb": "",
+            "title": fake2,
+            "quote": fake2,
+            "author": fake2_author,
+            "blurb": fake2_author,
             "image_url": images[2],
             "raw_text": fake2,
         },
     ])
     return {
         "type": "quote",
-        "prompt": "One quote is real. Two are decoys. Pick the real line.",
+        "prompt": "One quote is real. Pick it.",
         "date_label": today_round.round_date.strftime("%B %d"),
         "cards": cards,
         "correct_index": correct_idx,
