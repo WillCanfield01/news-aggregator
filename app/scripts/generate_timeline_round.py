@@ -808,6 +808,12 @@ FALLBACK_IMAGE_MAP: Dict[str, list[str]] = {
     "general": ["general-01.svg", "general-02.svg"],
 }
 
+PHOTO_FALLBACKS = [
+    "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
+    "https://images.unsplash.com/photo-1489515217757-5fd1be406fef?auto=format&fit=crop&w=1200&q=80",
+]
+
 LOCATION_KEYWORDS = {
     "new york": "New York",
     "los angeles": "Los Angeles",
@@ -1011,7 +1017,7 @@ def _recent_image_urls(limit: int = 15) -> set[str]:
         return set()
 
 
-def _fallback_image_for_category(category: str, used: set[str], rng: random.Random) -> str:
+def _abstract_fallback_image_for_category(category: str, used: set[str], rng: random.Random) -> str:
     names = FALLBACK_IMAGE_MAP.get(category) or FALLBACK_IMAGE_MAP["general"]
     pool = list(names)
     rng.shuffle(pool)
@@ -1023,6 +1029,17 @@ def _fallback_image_for_category(category: str, used: set[str], rng: random.Rand
         return url
     used.add(FALLBACK_ICON_URL)
     return FALLBACK_ICON_URL
+
+
+def _photo_fallback_image(used: set[str], rng: random.Random) -> str:
+    pool = list(PHOTO_FALLBACKS)
+    rng.shuffle(pool)
+    for url in pool:
+        if url in used:
+            continue
+        used.add(url)
+        return url
+    return pool[0]
 
 
 def _search_unsplash(query: str, rng: random.Random, used: set[str]) -> Tuple[Optional[str], Optional[str]]:
@@ -1077,7 +1094,15 @@ def _generate_decoy_image(choice: dict, rng: random.Random, used: set[str], seed
     return None, None
 
 
-def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], existing_url: str | None = None, mode: str = "real", seed: int | None = None) -> Tuple[str, str, Optional[str]]:
+def pick_image_for_choice(
+    choice: dict,
+    rng: random.Random,
+    used: set[str],
+    existing_url: str | None = None,
+    mode: str = "real",
+    seed: int | None = None,
+    allow_abstract: bool = False,
+) -> Tuple[str, str, Optional[str]]:
     """
     Pick an image for a choice, honoring existing URLs when valid.
     mode: "real" uses Unsplash-first; "decoy" prefers generated decoys.
@@ -1098,7 +1123,7 @@ def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], exis
         found, attr = _search_unsplash(choice.get("text", ""), rng, used)
         if found:
             return found, "search", attr
-        fallback = _fallback_image_for_category(choice.get("category") or "general", used, rng)
+        fallback = _photo_fallback_image(used, rng)
         return fallback, "fallback", None
 
     # decoys: try generated, then unsplash, then fallback
@@ -1108,7 +1133,7 @@ def pick_image_for_choice(choice: dict, rng: random.Random, used: set[str], exis
     found, attr = _search_unsplash(choice.get("text", ""), rng, used)
     if found:
         return found, "search", attr
-    fallback = _fallback_image_for_category(choice.get("category") or "general", used, rng)
+    fallback = _photo_fallback_image(used, rng) if not allow_abstract else _abstract_fallback_image_for_category(choice.get("category") or "general", used, rng)
     return fallback, "fallback", None
 
 def ensure_today_round(force: int = 0) -> bool:

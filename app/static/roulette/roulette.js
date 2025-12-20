@@ -11,6 +11,20 @@
   const recapEl = document.getElementById("recap");
 
   let state = { step: 1, score: 0, payload: null, locked: false };
+  const PHOTO_FALLBACK_URL = "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80";
+
+  function sanitizeImages(payload) {
+    const puzzleType = payload.puzzle_type || payload.type || "";
+    if (puzzleType === "QUOTE") return payload;
+    payload.cards = (payload.cards || []).map((c) => {
+      if ((c.image_url || "").includes("/static/roulette/fallbacks/")) {
+        console.warn("Replacing abstract image in non-quote round");
+        return { ...c, image_url: PHOTO_FALLBACK_URL };
+      }
+      return c;
+    });
+    return payload;
+  }
 
   const escapeHtml = (s = "") =>
     s
@@ -27,6 +41,7 @@
   }
 
   function renderCards(payload) {
+    payload = sanitizeImages(payload);
     cardsEl.innerHTML = "";
     sourceLink.style.display = "none";
     resultEl.classList.remove("is-visible");

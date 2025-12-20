@@ -54,6 +54,8 @@ from app.scripts.generate_timeline_round import (
     _category_for_text,
     _guess_location,
     _guess_entity,
+    _infer_domain,
+    _extract_year_hint,
     ensure_today_round,
 )
 
@@ -258,6 +260,7 @@ def _build_text_round(today_round: TimelineRound) -> dict:
     date_label = today_round.round_date.strftime("%B %d")
     return {
         "type": "text",
+        "puzzle_type": "HEADLINE",
         "prompt": "Three headlines. One is real.",
         "subhead": f"Pick the real headline. Based on an event from {date_label}.",
         "date_label": date_label,
@@ -306,6 +309,7 @@ def _build_image_round(today_round: TimelineRound) -> dict:
     ])
     return {
         "type": "image",
+        "puzzle_type": "PHOTO",
         "prompt": "Three photos. One is real.",
         "subhead": f"Pick the photo that matches a real event. Based on {date_label}.",
         "date_label": date_label,
@@ -471,6 +475,7 @@ def _build_quote_round(today_round: TimelineRound) -> dict:
     ])
     return {
         "type": "quote",
+        "puzzle_type": "QUOTE",
         "prompt": "One quote is real.",
         "subhead": "Two are decoys. Pick the real line.",
         "date_label": today_round.round_date.strftime("%B %d"),
