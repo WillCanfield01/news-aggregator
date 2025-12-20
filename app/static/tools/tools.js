@@ -240,6 +240,16 @@
         return n;
     }
 
+    function toAbsoluteUrl(pathOrUrl) {
+        const raw = (pathOrUrl || "").trim();
+        if (!raw) return "";
+        try {
+            return new URL(raw, window.location.origin).toString();
+        } catch (e) {
+            return raw;
+        }
+    }
+
     function initWorkoutLog(form, outputEl, statusEl) {
         const slug = form?.dataset?.toolSlug;
         if (slug !== "workout-log") return;
@@ -603,15 +613,6 @@
             return from ? from.trim() : "";
         };
 
-        const normalizeShareUrl = (url) => {
-            const raw = (url || "").trim();
-            if (!raw) return "";
-            if (/^https?:\/\//i.test(raw)) return raw;
-            if (raw.startsWith("//")) return `${window.location.protocol}${raw}`;
-            if (raw.startsWith("/")) return `${window.location.origin}${raw}`;
-            return raw;
-        };
-
         const state = {
             token: parseTokenFromUrl(),
             shareUrl: "",
@@ -717,7 +718,7 @@
         listWrap.className = "gl-list";
 
         function setShare(url) {
-            const normalized = normalizeShareUrl(url);
+            const normalized = toAbsoluteUrl(url);
             state.shareUrl = normalized;
             shareInput.value = normalized;
             shareInput.title = normalized || "Share link";
@@ -1152,9 +1153,11 @@
         listWrap.append(listTitle, list);
 
         function setShare(url) {
-            state.shareUrl = url || "";
-            shareInput.value = url || "";
-            shareBox.style.display = url ? "block" : "none";
+            const abs = toAbsoluteUrl(url);
+            state.shareUrl = abs;
+            shareInput.value = abs;
+            shareBox.style.display = abs ? "block" : "none";
+            shareCopy.disabled = !abs;
         }
 
         function getActiveCountdown() {
