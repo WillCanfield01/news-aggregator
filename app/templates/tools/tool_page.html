@@ -5,6 +5,9 @@
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='tools/tools.css') }}">
 <script src="{{ url_for('static', filename='tools/tools.js') }}" defer></script>
+{% if tool.slug == "grocery-list" and share_url %}
+<link rel="canonical" href="{{ share_url }}">
+{% endif %}
 {% endblock %}
 
 {% block content %}

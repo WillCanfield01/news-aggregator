@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
 
-from flask import Blueprint, abort, jsonify, render_template, request, url_for
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
 
 from app.extensions import db
 from app.tools.handlers import (
@@ -43,6 +44,23 @@ api_tools_bp = Blueprint(
 
 # Safety guard for request payload size
 MAX_INPUT_CHARS = 10_000
+
+
+def _base_url() -> str:
+    """Return the canonical base URL from env or the current request root."""
+    env_base = (os.environ.get("BASE_URL") or "").strip()
+    if env_base:
+        return env_base.rstrip("/")
+    root = (request.url_root or "").strip()
+    return root.rstrip("/") if root else ""
+
+
+def _grocery_share_url(token: str) -> str:
+    """Build an absolute grocery share URL."""
+    base = _base_url()
+    if not base:
+        return url_for("tools.grocery_share_view", token=token, _external=True)
+    return f"{base}/tools/grocery/{token}"
 
 
 def _aggregate_string_length(payload: Any) -> int:
@@ -209,9 +227,14 @@ def grocery_share_view(token: str):
         "tools/tool_page.html",
         tool=tool,
         view_mode=False,
-        share_url=url_for("tools.grocery_share_view", token=token),
+        share_url=_grocery_share_url(token),
         callout_message="This list is shared. Changes auto-save for anyone with the link.",
     )
+
+
+@tools_bp.route("/grocery/share/<token>", methods=["GET"])
+def grocery_share_redirect(token: str):
+    return redirect(_grocery_share_url(token))
 
 
 @tools_bp.route("/countdown/<token>", methods=["GET"])
@@ -392,7 +415,7 @@ def run_tool():
                 )
                 db.session.add(event)
                 db.session.commit()
-                share_url = url_for("tools.grocery_share_view", token=token)
+                share_url = _grocery_share_url(token)
                 data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
                 return _build_response(True, data=data, error=None, request_id=request_id), 200
 
@@ -412,7 +435,7 @@ def run_tool():
 
             if action == "get":
                 run_grocery_list_get(merged_input)
-                share_url = url_for("tools.grocery_share_view", token=token)
+                share_url = _grocery_share_url(token)
                 data = {"output": {"token": token, "share_url": share_url, "payload": current_payload}}
                 return _build_response(True, data=data, error=None, request_id=request_id), 200
 
@@ -421,7 +444,7 @@ def run_tool():
             next_payload = updated.get("payload") or {}
             event.payload_json = json.dumps(next_payload)
             db.session.commit()
-            share_url = url_for("tools.grocery_share_view", token=token)
+            share_url = _grocery_share_url(token)
             data = {"output": {"token": token, "share_url": share_url, "payload": next_payload}}
             return _build_response(True, data=data, error=None, request_id=request_id), 200
         except ValueError as exc:

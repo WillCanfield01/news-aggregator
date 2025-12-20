@@ -95,10 +95,12 @@ def create_app():
 
     # ---- Blueprints ----
     from app.aggregator import aggregator_bp, start_background_tasks
+    from app.admin_routes import admin_bp
     from app.reddit_articles import bp as reddit_bp
     from app.roulette import roulette_bp
     from app.roulette.routes import start_regen_worker
     app.register_blueprint(aggregator_bp)
+    app.register_blueprint(admin_bp)
     app.register_blueprint(reddit_bp)
     app.register_blueprint(create_escape_bp(), url_prefix="/escape")
     app.register_blueprint(roulette_bp)    

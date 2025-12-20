@@ -603,6 +603,15 @@
             return from ? from.trim() : "";
         };
 
+        const normalizeShareUrl = (url) => {
+            const raw = (url || "").trim();
+            if (!raw) return "";
+            if (/^https?:\/\//i.test(raw)) return raw;
+            if (raw.startsWith("//")) return `${window.location.protocol}${raw}`;
+            if (raw.startsWith("/")) return `${window.location.origin}${raw}`;
+            return raw;
+        };
+
         const state = {
             token: parseTokenFromUrl(),
             shareUrl: "",
@@ -627,23 +636,49 @@
         shareInput.readOnly = true;
         shareInput.className = "gl-share-input";
         shareInput.value = "";
+        const shareOpen = document.createElement("button");
+        shareOpen.type = "button";
+        shareOpen.className = "tool-copy-btn gl-open";
+        shareOpen.textContent = "Open";
         const shareCopy = document.createElement("button");
         shareCopy.type = "button";
         shareCopy.className = "tool-run-btn gl-copy";
         shareCopy.textContent = "Copy";
+        shareOpen.disabled = true;
+        shareCopy.disabled = true;
+        const shareFeedback = document.createElement("div");
+        shareFeedback.className = "gl-share-feedback";
+        shareFeedback.setAttribute("aria-live", "polite");
+        let shareCopyTimer = null;
+        shareOpen.onclick = () => {
+            if (!state.shareUrl) return;
+            window.open(state.shareUrl, "_blank", "noopener,noreferrer");
+        };
         shareCopy.onclick = async () => {
             if (!shareInput.value) return;
+            if (shareCopyTimer) clearTimeout(shareCopyTimer);
             try {
                 await navigator.clipboard.writeText(shareInput.value);
                 shareCopy.textContent = "Copied";
-                setTimeout(() => (shareCopy.textContent = "Copy"), 1200);
+                shareFeedback.textContent = "Copied";
+                shareCopyTimer = setTimeout(() => {
+                    shareCopy.textContent = "Copy";
+                    shareFeedback.textContent = "";
+                }, 1500);
             } catch (e) {
                 shareCopy.textContent = "Copy failed";
-                setTimeout(() => (shareCopy.textContent = "Copy"), 1200);
+                shareFeedback.textContent = "Copy failed";
+                shareCopyTimer = setTimeout(() => {
+                    shareCopy.textContent = "Copy";
+                    shareFeedback.textContent = "";
+                }, 1500);
             }
         };
-        shareRow.append(shareInput, shareCopy);
-        shareBox.append(shareLabel, shareRow);
+        shareRow.append(shareInput, shareOpen, shareCopy);
+        const shareHelp = document.createElement("div");
+        shareHelp.className = "gl-share-help";
+        shareHelp.textContent = "Anyone with this link can add and check items.";
+        shareBox.append(shareLabel, shareRow, shareHelp, shareFeedback);
 
         const controls = document.createElement("div");
         controls.className = "gl-controls";
@@ -682,9 +717,19 @@
         listWrap.className = "gl-list";
 
         function setShare(url) {
-            state.shareUrl = url || "";
-            shareInput.value = url || "";
-            shareBox.style.display = url ? "block" : "none";
+            const normalized = normalizeShareUrl(url);
+            state.shareUrl = normalized;
+            shareInput.value = normalized;
+            shareInput.title = normalized || "Share link";
+            shareBox.style.display = normalized ? "block" : "none";
+            shareOpen.disabled = !normalized;
+            shareCopy.disabled = !normalized;
+            shareFeedback.textContent = "";
+            if (shareCopyTimer) {
+                clearTimeout(shareCopyTimer);
+                shareCopyTimer = null;
+            }
+            shareCopy.textContent = "Copy";
         }
 
         function setToken(token) {
@@ -904,7 +949,6 @@
         if (state.token) {
             createBtn.style.display = "none";
             createNote.style.display = "none";
-            shareBox.style.display = "block";
         }
 
         load();
