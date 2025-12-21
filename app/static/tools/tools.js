@@ -1340,15 +1340,25 @@
             }
             setStatus("Creating share link…");
             shareBtn.disabled = true;
-            const res = await runToolRequest("countdown", {
-                action: "create_share",
-                event_name: active.name,
-                event_date: active.date,
-                timezone: active.timezone || "Local",
-            });
+            let res;
+            try {
+                res = await runToolRequest("countdown", {
+                    action: "create_share",
+                    event_name: active.name,
+                    event_date: active.date,
+                    timezone: active.timezone || "Local",
+                });
+            } catch (e) {
+                setStatus("Couldn't reach the server. Check your connection and try again.", "error");
+                shareBtn.disabled = false;
+                return;
+            }
             shareBtn.disabled = false;
             if (!res.ok) {
-                setStatus(res?.error?.message || "Unable to create share link.", "error");
+                const ref = res?.ref || res?.error?.ref;
+                const message = res?.message || res?.error?.message || "Unable to create share link.";
+                const refText = ref ? ` Reference: ${ref}` : "";
+                setStatus(`${message}${refText}`, "error");
                 return;
             }
             const out = res.data?.output || {};

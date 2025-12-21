@@ -9,6 +9,7 @@ from app.roulette import models as _roulette_models
 from app.extensions import db, login_manager
 from app.security import generate_csrf_token
 from app.subscriptions import current_user_has_plus
+from sqlalchemy import text
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -32,6 +33,46 @@ def _compute_asset_version() -> str:
     except Exception:
         pass
     return datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
+
+def _ensure_user_schema():
+    """
+    Backfill new user columns on existing databases without manual migrations.
+    Postgres-only; safe no-ops if columns already exist.
+    """
+    engine = db.engine
+    if not engine:
+        return
+    backend = engine.url.get_backend_name()
+    if not str(backend).startswith("postgres"):
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;'
+                )
+            )
+            conn.execute(
+                text(
+                    'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;'
+                )
+            )
+            conn.execute(
+                text(
+                    'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;'
+                )
+            )
+            conn.execute(
+                text(
+                    'UPDATE "user" SET created_at = COALESCE(created_at, NOW()), is_active = COALESCE(is_active, TRUE);'
+                )
+            )
+    except Exception as exc:
+        try:
+            current_app.logger.warning("user schema backfill skipped: %s", exc)
+        except Exception:
+            print("user schema backfill skipped:", exc)
 
 def schedule_daily_reddit_article(app):
     def scheduled_job():
@@ -73,6 +114,15 @@ def create_app():
     app.config["PATCHPAL_LEGAL_URL"] = os.getenv("PATCHPAL_LEGAL_URL", "https://your-patchpal-host/legal")
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-dev-key")
     app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+    app.config["SHOW_PLUS_UPSELL"] = (
+        os.getenv(
+            "SHOW_PLUS_UPSELL",
+            "true" if os.getenv("FLASK_ENV") in {"production", "prod"} else "false",
+        )
+        .strip()
+        .lower()
+        in {"1", "true", "yes"}
+    )
 
     # ---- Bind extensions FIRST ----
     db.init_app(app)
@@ -99,6 +149,7 @@ def create_app():
     from app.auth_routes import MagicLinkToken       # noqa: F401
     from app.subscriptions import StripeCustomer, SubscriptionEntitlement  # noqa: F401
     with app.app_context():
+        _ensure_user_schema()
         db.create_all()
 
     # ---- Blueprints ----

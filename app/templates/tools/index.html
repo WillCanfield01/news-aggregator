@@ -14,19 +14,39 @@
         <p class="eyebrow">Tools Hub</p>
         <h1>Workflow helpers to speed up your day</h1>
         <p class="lead">Pick a tool to improve your writing and research. New utilities will appear here as they launch.</p>
-        <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+    </div>
+
+    {% set is_plus = has_plus() %}
+    {% if show_plus_upsell %}
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
+        <div class="space-y-2">
+            <div class="text-lg font-bold text-slate-900">Roundup Plus</div>
+            <p class="text-sm text-slate-600">Save your work, replay puzzles, and export results. No ads.</p>
+            <ul class="text-sm text-slate-700 grid gap-1">
+                <li class="flex items-center gap-2"><span class="text-blue-600">•</span> Easy mode and replays</li>
+                <li class="flex items-center gap-2"><span class="text-blue-600">•</span> Unlimited Roulette and archives</li>
+                <li class="flex items-center gap-2"><span class="text-blue-600">•</span> Exports and share links</li>
+            </ul>
+        </div>
+        <div class="flex flex-col items-start md:items-end gap-2">
+            <div class="text-base font-semibold text-slate-900">$2.99 per month</div>
+            <div class="text-xs text-slate-500">Cancel anytime</div>
             {% if not current_user.is_authenticated %}
-            <a class="tool-card" style="padding:10px 14px;border-radius:12px;background:#1f57ff;color:#fff;font-weight:800;text-decoration:none;" href="{{ url_for('auth.auth_page', next='/plus') }}">Log in to upgrade</a>
-            {% elif not has_plus() %}
-            <form action="{{ url_for('billing.create_checkout') }}" method="post" style="margin:0;">
+            <a href="{{ url_for('auth.auth_page', next='/plus') }}" class="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 text-sm font-semibold">Log in to unlock</a>
+            {% elif not is_plus %}
+            <form action="{{ url_for('billing.create_checkout') }}" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="tool-card" style="padding:10px 14px;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;border:none;cursor:pointer;">Upgrade to Plus $2.99/mo</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 text-sm font-semibold">Unlock Plus</button>
             </form>
             {% else %}
-            <a class="tool-card" style="padding:10px 14px;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;text-decoration:none;" href="{{ url_for('billing.customer_portal') }}">Manage billing</a>
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-md">Plus is active</span>
+                <a href="{{ url_for('billing.customer_portal') }}" class="border border-slate-300 text-slate-800 rounded-xl px-4 py-2 text-sm font-semibold hover:bg-slate-50">Manage billing</a>
+            </div>
             {% endif %}
         </div>
     </div>
+    {% endif %}
 
     {% if tools %}
     <div class="tools-grid" role="list" aria-label="Available tools">

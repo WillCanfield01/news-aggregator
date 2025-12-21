@@ -34,6 +34,9 @@ from app.tools.handlers import (
 from app.tools.models import SharedExpenseEvent, default_expiry
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 from app.subscriptions import current_user_has_plus
+import logging
+import string
+import random
 
 # UI blueprint
 tools_bp = Blueprint(
@@ -88,6 +91,11 @@ def _build_response(ok: bool, *, data: Any, error: dict[str, Any] | None, reques
 
 def _error_response(code: str, message: str, request_id: str, status: int = 400):
     return _build_response(False, data=None, error={"code": code, "message": message}, request_id=request_id), status
+
+
+def _ref_code(length: int = 8) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(random.choice(alphabet) for _ in range(length))
 
 
 def _current_user_id() -> int | None:
@@ -186,7 +194,14 @@ def _validate_input_against_schema(tool: Dict[str, Any], payload: Dict[str, Any]
 @tools_bp.route("", methods=["GET"])
 def tools_home():
     enabled_tools = get_enabled_tools()
-    return render_template("tools/index.html", tools=enabled_tools)
+    show_plus_upsell = bool(
+        (tools_bp.app and getattr(tools_bp.app, "config", {})) and tools_bp.app.config.get("SHOW_PLUS_UPSELL")
+    )
+    return render_template(
+        "tools/index.html",
+        tools=enabled_tools,
+        show_plus_upsell=show_plus_upsell,
+    )
 
 
 @tools_bp.route("/expense-splitter/<token>", methods=["GET"])
@@ -529,21 +544,34 @@ def run_tool():
                 if not _free_share_allowed():
                     return _share_limit_response(request_id)
                 token = secrets.token_urlsafe(24)[:32]
-                created = run_countdown_create_share(merged_input, token=token)
-                payload = created.get("payload") or {}
-                # Keep countdowns around longer than trip shares
-                event = SharedExpenseEvent(
-                    token=token,
-                    expires_at=default_expiry(days=365),
-                    payload_json=json.dumps(payload),
-                    user_id=_current_user_id(),
-                )
-                db.session.add(event)
-                db.session.commit()
-                _record_free_share(token)
-                share_url = url_for("tools.countdown_share_view", token=token)
-                data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
-                return _build_response(True, data=data, error=None, request_id=request_id), 200
+                try:
+                    created = run_countdown_create_share(merged_input, token=token)
+                    payload = created.get("payload") or {}
+                    # Keep countdowns around longer than trip shares
+                    event = SharedExpenseEvent(
+                        token=token,
+                        expires_at=default_expiry(days=365),
+                        payload_json=json.dumps(payload),
+                        user_id=_current_user_id(),
+                    )
+                    db.session.add(event)
+                    db.session.commit()
+                    _record_free_share(token)
+                    share_url = url_for("tools.countdown_share_view", token=token)
+                    data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
+                    return _build_response(True, data=data, error=None, request_id=request_id), 200
+                except ValueError:
+                    db.session.rollback()
+                    return _error_response("invalid_input", "Check the date and try again.", request_id, status=400)
+                except Exception as exc:
+                    db.session.rollback()
+                    ref = _ref_code()
+                    logging.exception("countdown share_link_failed ref=%s", ref)
+                    friendly = "Something on our side failed while saving your share link. Please refresh and try again."
+                    return (
+                        jsonify({"ok": False, "error": "share_link_failed", "message": friendly, "ref": ref}),
+                        500,
+                    )
 
             token = (merged_input.get("token") or "").strip()
             if not token:
