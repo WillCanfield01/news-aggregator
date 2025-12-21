@@ -115,7 +115,49 @@
                 line-height: 1.5;
             }
         }
+
+        .plus-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(6px);
+            z-index: 9999;
+            padding: 16px;
+        }
+
+        .plus-modal.open {
+            display: flex;
+        }
+
+        .plus-modal-card {
+            background: #0f172a;
+            color: #f8fafc;
+            border-radius: 16px;
+            padding: 18px;
+            width: min(480px, 95vw);
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .plus-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #0ef0c5;
+            color: #0b1d33;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-weight: 800;
+            font-size: 0.9rem;
+        }
     </style>
+
+    <script>
+        window.rrHasPlus = {{ 'true' if has_plus() else 'false' }};
+    </script>
 
     {% block head %}{% endblock %}
 </head>
@@ -134,6 +176,55 @@
             <div class="footer-build" aria-hidden="true">Build {{ asset_version }}</div>
         </footer>
     </div>
+
+    {% if not has_plus() %}
+    <div id="plusModal" class="plus-modal" aria-hidden="true">
+        <div class="plus-modal-card">
+            <div class="plus-pill">Roundup Plus</div>
+            <h3 style="margin:10px 0 6px;font-size:1.4rem;">This is included in Roundup Plus</h3>
+            <p style="margin:0 0 12px;color:#cbd5e1;">Upgrade for $2.99/month to unlock archives, exports, and easy mode.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+                <button id="plusModalUpgrade" style="padding:10px 14px;border:none;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;cursor:pointer;">Upgrade $2.99/mo</button>
+                <button type="button" data-plus-close style="padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#e2e8f0;font-weight:700;cursor:pointer;">Not now</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const modal = document.getElementById("plusModal");
+            if (!modal) return;
+            const upgradeUrl = "{{ url_for('billing.plus_page') }}";
+            const upgradeBtn = document.getElementById("plusModalUpgrade");
+            const closeBtns = modal.querySelectorAll("[data-plus-close]");
+
+            function openModal(ev) {
+                if (ev) ev.preventDefault();
+                modal.classList.add("open");
+                modal.setAttribute("aria-hidden", "false");
+            }
+            function closeModal() {
+                modal.classList.remove("open");
+                modal.setAttribute("aria-hidden", "true");
+            }
+            window.showPlusModal = openModal;
+            closeBtns.forEach((btn) => btn.addEventListener("click", closeModal));
+            if (upgradeBtn) {
+                upgradeBtn.addEventListener("click", () => {
+                    window.location.href = upgradeUrl;
+                });
+            }
+            document.querySelectorAll("[data-plus-required]").forEach((el) => {
+                el.addEventListener("click", openModal);
+            });
+            document.addEventListener("click", (ev) => {
+                const trigger = ev.target.closest("[data-plus-required]");
+                if (trigger) {
+                    openModal(ev);
+                }
+            });
+        })();
+    </script>
+    {% endif %}
 </body>
 
 </html>

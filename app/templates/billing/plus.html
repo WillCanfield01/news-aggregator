@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Roundup Plus · $2.99/mo{% endblock %}
+
+{% block content %}
+{% set is_plus = plus_active if plus_active is defined else has_plus() %}
+<section style="max-width:960px;margin:32px auto;padding:0 20px 36px;">
+  <div style="background:linear-gradient(135deg,#0f1b2d,#1f57ff);border-radius:24px;padding:26px;box-shadow:0 16px 44px rgba(15,27,45,0.25);color:#eaf1ff;">
+    <p style="margin:0 0 8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:0.9rem;color:#9bd0ff;">Roundup Plus</p>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;">
+      <div>
+        <h1 style="margin:0 0 6px;font-size:2.1rem;">Unlock the full toolkit</h1>
+        <p style="margin:0;color:#d7e4ff;">Easy mode in Daily Escape, unlimited replays, archives, exports, and ad-free play for $2.99/month.</p>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-weight:800;font-size:1.6rem;color:#fff;">$2.99<span style="font-size:0.9rem;font-weight:600;color:#c9d8ff;">/month</span></div>
+      </div>
+    </div>
+    {% if error %}
+    <div style="margin-top:12px;background:#fff4f4;border:1px solid #fca5a5;color:#991b1b;padding:10px 12px;border-radius:12px;">{{ error }}</div>
+    {% endif %}
+    <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
+      {% if not current_user.is_authenticated %}
+      <a href="{{ url_for('auth.auth_page', next='/plus') }}" class="btn-upgrade" style="background:#fff;color:#0f1b2d;font-weight:800;padding:12px 16px;border-radius:12px;text-decoration:none;">Log in to upgrade</a>
+      {% elif not is_plus %}
+      <form action="{{ url_for('billing.create_checkout') }}" method="post" style="margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" style="border:none;background:#0ef0c5;color:#0b1d33;font-weight:800;padding:12px 16px;border-radius:12px;cursor:pointer;">Upgrade to Plus — $2.99/mo</button>
+      </form>
+      <a href="{{ url_for('billing.plus_page', next=next_url) }}" data-plus-required class="btn-secondary" style="padding:12px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.3);color:#eaf1ff;text-decoration:none;">View features</a>
+      {% else %}
+      <span style="background:#0ef0c5;color:#0b1d33;padding:10px 14px;border-radius:999px;font-weight:800;">Plus active</span>
+      <a href="{{ url_for('billing.customer_portal') }}" class="btn-secondary" style="padding:12px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.3);color:#eaf1ff;text-decoration:none;">Manage billing</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="margin-top:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;">
+    {% for feature in [
+      "Daily Escape easy mode and unlimited replays",
+      "Escape archive + Timeline Roulette archive",
+      "Unlimited Timeline Roulette plays",
+      "Briefings deep dive + exports (CSV/PDF)",
+      "Tools history and multiple share links",
+      "Timeline Roulette exports + ad-free everywhere",
+      "Puzzle + roulette archives to replay anytime",
+      "Multiple share links; one is always free"
+    ] %}
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:14px 12px;display:flex;gap:10px;align-items:flex-start;box-shadow:0 10px 26px rgba(12,22,44,0.05);">
+      <div style="width:34px;height:34px;border-radius:10px;background:#e6f0ff;display:flex;align-items:center;justify-content:center;font-weight:800;color:#1f57ff;">✓</div>
+      <div style="font-weight:700;color:#0f172a;">{{ feature }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

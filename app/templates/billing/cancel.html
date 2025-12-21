@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Checkout canceled{% endblock %}
+
+{% block content %}
+<section style="max-width:720px;margin:36px auto;padding:0 20px 32px;">
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px 18px;box-shadow:0 10px 26px rgba(12,22,44,0.05);">
+    <h1 style="margin:0 0 6px;font-size:1.8rem;color:#0f172a;">Checkout canceled</h1>
+    <p style="margin:0 0 12px;color:#475569;">No changes were made. You can restart checkout anytime.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+      <a href="{{ url_for('billing.plus_page') }}" style="padding:10px 14px;border-radius:12px;background:#1f57ff;color:#fff;text-decoration:none;font-weight:800;">Return to Plus</a>
+      <a href="{{ url_for('auth.auth_page', next='/plus') }}" style="padding:10px 14px;border-radius:12px;border:1px solid #e5e7eb;color:#0f172a;text-decoration:none;font-weight:700;">Log in</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

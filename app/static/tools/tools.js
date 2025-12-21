@@ -1,5 +1,6 @@
 (function () {
     const endpoint = "/api/tools/run";
+    const HAS_PLUS = window.rrHasPlus === true || window.rrHasPlus === "true";
     window.__rrToolState = window.__rrToolState || {};
 
     async function runToolRequest(tool, input = {}) {
@@ -365,6 +366,7 @@
         exportBtn.className = "tool-copy-btn wl-export";
         exportBtn.style.display = "inline-block";
         exportBtn.textContent = "Export CSV";
+        exportBtn.dataset.plusRequired = "true";
 
         actions.append(saveBtn, clearBtn, exportBtn);
 
@@ -537,6 +539,10 @@
         };
 
         exportBtn.onclick = () => {
+            if (!HAS_PLUS && typeof window.showPlusModal === "function") {
+                window.showPlusModal();
+                return;
+            }
             const store = loadWorkoutStore();
             const workouts = Array.isArray(store.workouts) ? store.workouts : [];
             if (!workouts.length) {

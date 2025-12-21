@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Plus checkout complete{% endblock %}
+
+{% block content %}
+{% set is_plus = plus_active if plus_active is defined else has_plus() %}
+<section style="max-width:720px;margin:36px auto;padding:0 20px 32px;">
+  <div style="background:#ecfdf3;border:1px solid #4ade80;border-radius:16px;padding:20px 18px;box-shadow:0 10px 26px rgba(12,22,44,0.05);">
+    <h1 style="margin:0 0 6px;font-size:1.8rem;color:#0f172a;">Checkout complete</h1>
+    <p style="margin:0 0 12px;color:#14532d;">Thanks for upgrading. Your Roundup Plus status will activate as soon as Stripe confirms payment (via webhook).</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+      <a href="{{ url_for('billing.plus_page') }}" style="padding:10px 14px;border-radius:12px;background:#0f172a;color:#fff;text-decoration:none;font-weight:800;">Back to Plus</a>
+      {% if is_plus %}
+      <a href="{{ url_for('billing.customer_portal') }}" style="padding:10px 14px;border-radius:12px;border:1px solid #0f172a;color:#0f172a;text-decoration:none;font-weight:700;">Manage billing</a>
+      {% else %}
+      <a href="{{ url_for('billing.plus_page') }}" data-plus-required style="padding:10px 14px;border-radius:12px;border:1px solid #0f172a;color:#0f172a;text-decoration:none;font-weight:700;">Refresh status</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

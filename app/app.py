@@ -7,6 +7,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 from app.roulette import models as _roulette_models 
 from app.extensions import db, login_manager
+from app.security import generate_csrf_token
+from app.subscriptions import current_user_has_plus
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -75,7 +77,7 @@ def create_app():
     # ---- Bind extensions FIRST ----
     db.init_app(app)
     login_manager.init_app(app)
-    login_manager.login_view = "aggregator.login"
+    login_manager.login_view = "auth.auth_page"
 
     @app.url_defaults
     def add_asset_version(endpoint, values):
@@ -84,22 +86,32 @@ def create_app():
 
     @app.context_processor
     def inject_asset_version():
-        return {"asset_version": app.config.get("ASSET_VERSION", asset_version)}
+        return {
+            "asset_version": app.config.get("ASSET_VERSION", asset_version),
+            "csrf_token": generate_csrf_token,
+            "has_plus": current_user_has_plus,
+        }
 
     # ---- Import models so SQLAlchemy knows them, then (optionally) create tables ----
     from app.escape import models as _escape_models  # noqa: F401
     from app.models import CommunityArticle          # site models
     from app.tools import models as _tools_models    # tools models
+    from app.auth_routes import MagicLinkToken       # noqa: F401
+    from app.subscriptions import StripeCustomer, SubscriptionEntitlement  # noqa: F401
     with app.app_context():
         db.create_all()
 
     # ---- Blueprints ----
     from app.aggregator import aggregator_bp, start_background_tasks
+    from app.auth_routes import auth_bp
+    from app.billing import billing_bp
     from app.admin_routes import admin_bp
     from app.reddit_articles import bp as reddit_bp
     from app.roulette import roulette_bp
     from app.roulette.routes import start_regen_worker
     app.register_blueprint(aggregator_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(billing_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(reddit_bp)
     app.register_blueprint(create_escape_bp(), url_prefix="/escape")

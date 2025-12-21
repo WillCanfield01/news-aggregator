@@ -16,6 +16,7 @@ from random import Random
 from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
 
 from app.extensions import db
+from app.subscriptions import current_user_has_plus
 from .models import EscapeAttempt, EscapeRoom, DailyLeaderboardView
 from .core import (
     ensure_daily_room,
@@ -254,7 +255,12 @@ def init_routes(bp: Blueprint):
     @bp.route("/today", methods=["GET"])
     def play_today():
         room = ensure_daily_room()
-        return render_template("escape/play.html", date_key=room.date_key, difficulty=room.difficulty)
+        return render_template(
+            "escape/play.html",
+            date_key=room.date_key,
+            difficulty=room.difficulty,
+            has_plus=current_user_has_plus(),
+        )
 
     @bp.route("/play", methods=["GET"])
     def play_alias():

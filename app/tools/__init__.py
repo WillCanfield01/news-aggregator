@@ -7,7 +7,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
 
-from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for, session
+try:
+    from flask_login import current_user  # type: ignore
+except Exception:  # pragma: no cover
+    class _Anon:
+        is_authenticated = False
+        id = None
+    current_user = _Anon()  # type: ignore
 
 from app.extensions import db
 from app.tools.handlers import (
@@ -26,6 +33,7 @@ from app.tools.handlers import (
 )
 from app.tools.models import SharedExpenseEvent, default_expiry
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
+from app.subscriptions import current_user_has_plus
 
 # UI blueprint
 tools_bp = Blueprint(
@@ -80,6 +88,47 @@ def _build_response(ok: bool, *, data: Any, error: dict[str, Any] | None, reques
 
 def _error_response(code: str, message: str, request_id: str, status: int = 400):
     return _build_response(False, data=None, error={"code": code, "message": message}, request_id=request_id), status
+
+
+def _current_user_id() -> int | None:
+    if getattr(current_user, "is_authenticated", False):
+        try:
+            return int(current_user.id)
+        except Exception:
+            return None
+    return None
+
+
+def _free_share_allowed() -> bool:
+    if current_user_has_plus():
+        return True
+    user_id = _current_user_id()
+    if user_id:
+        owned = SharedExpenseEvent.query.filter_by(user_id=user_id).count()
+        if owned >= 1:
+            return False
+    free_tokens = session.get("free_share_tokens") or []
+    return len(free_tokens) < 1
+
+
+def _record_free_share(token: str):
+    if current_user_has_plus():
+        return
+    user_id = _current_user_id()
+    if user_id:
+        return
+    free_tokens = session.get("free_share_tokens") or []
+    free_tokens.append(token)
+    session["free_share_tokens"] = free_tokens[-3:]
+
+
+def _share_limit_response(request_id: str):
+    return _error_response(
+        "PLUS_REQUIRED",
+        "Upgrade to Roundup Plus to create more share links.",
+        request_id,
+        status=402,
+    )
 
 
 def _build_response(ok: bool, *, data: Any, error: dict[str, Any] | None, request_id: str):
@@ -305,6 +354,8 @@ def run_tool():
             for k, v in (tool_input or {}).items():
                 if k not in merged_input:
                     merged_input[k] = v
+            if not _free_share_allowed():
+                return _share_limit_response(request_id)
             result = run_trip_planner(merged_input)
             expires_at = datetime.fromisoformat(result["expires_at"])
             share_url = url_for("tools.trip_share_view", token=result["token"])
@@ -312,9 +363,11 @@ def run_tool():
                 token=result["token"],
                 expires_at=expires_at,
                 payload_json=result["payload_json"],
+                user_id=_current_user_id(),
             )
             db.session.add(event)
             db.session.commit()
+            _record_free_share(result["token"])
             data = {
                 "output": result["output"],
                 "token": result["token"],
@@ -406,15 +459,19 @@ def run_tool():
 
             if action == "create":
                 # Create a new shared token record
+                if not _free_share_allowed():
+                    return _share_limit_response(request_id)
                 token = secrets.token_urlsafe(24)[:32]
                 created = run_grocery_list_create(merged_input, token=token)
                 payload = created.get("payload") or {}
                 event = SharedExpenseEvent(
                     token=token,
                     payload_json=json.dumps(payload),
+                    user_id=_current_user_id(),
                 )
                 db.session.add(event)
                 db.session.commit()
+                _record_free_share(token)
                 share_url = _grocery_share_url(token)
                 data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
                 return _build_response(True, data=data, error=None, request_id=request_id), 200
@@ -469,6 +526,8 @@ def run_tool():
                 return _error_response("TOOL_INPUT_INVALID", "Payload too large.", request_id, status=400)
 
             if action == "create_share":
+                if not _free_share_allowed():
+                    return _share_limit_response(request_id)
                 token = secrets.token_urlsafe(24)[:32]
                 created = run_countdown_create_share(merged_input, token=token)
                 payload = created.get("payload") or {}
@@ -477,9 +536,11 @@ def run_tool():
                     token=token,
                     expires_at=default_expiry(days=365),
                     payload_json=json.dumps(payload),
+                    user_id=_current_user_id(),
                 )
                 db.session.add(event)
                 db.session.commit()
+                _record_free_share(token)
                 share_url = url_for("tools.countdown_share_view", token=token)
                 data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
                 return _build_response(True, data=data, error=None, request_id=request_id), 200
@@ -511,13 +572,17 @@ def run_tool():
             result = run_expense_splitter(validated_input)
             expires_at = datetime.fromisoformat(result["expires_at"])
             share_url = url_for("tools.expense_splitter_view", token=result["token"])
+            if not _free_share_allowed():
+                return _share_limit_response(request_id)
             event = SharedExpenseEvent(
                 token=result["token"],
                 expires_at=expires_at,
                 payload_json=result["payload_json"],
+                user_id=_current_user_id(),
             )
             db.session.add(event)
             db.session.commit()
+            _record_free_share(result["token"])
             data = {"output": result["output"], "token": result["token"], "share_url": share_url}
             return _build_response(True, data=data, error=None, request_id=request_id), 200
         except ValueError as exc:

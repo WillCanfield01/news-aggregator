@@ -88,6 +88,9 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True)
     password_hash = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
     saved_articles = db.relationship("SavedArticle", backref="user", lazy=True)
     zipcode = db.Column(db.String(10))
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -358,50 +361,11 @@ def start_background_tasks():
 # ----- USER AUTH AND ACCOUNT ROUTES -----
 @aggregator_bp.route("/signup", methods=["POST"])
 def signup():
-    data = request.get_json() or {}
-    username = data.get("username", "").strip().lower()
-    password = data.get("password", "").strip()
-    email = data.get("email", "").strip().lower()
-    if not username or not password or not email:
-        return jsonify({"error": "All fields are required"}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({"error": "Username already exists"}), 400
-    if User.query.filter_by(email=email).first():
-        return jsonify({"error": "Email already registered"}), 400
-    try:
-        zipcode_input = data.get("zipcode", "").strip()
-        user = User(username=username, email=email, zipcode=zipcode_input)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
-        # Email confirmation
-        token = generate_confirmation_token(user.email)
-        send_confirmation_email(user.email, username, token)
-        return jsonify({"success": True, "message": "Signup complete! Check your email to confirm."})
-    except Exception as e:
-        print("Signup error:", e)
-        db.session.rollback()
-        return jsonify({"error": "Signup failed. Please try again."}), 500
+    return jsonify({"error": "Password signup is disabled. Use the magic link at /auth."}), 410
 
 @aggregator_bp.route("/login", methods=["POST"])
 def login():
-    data = request.get_json() or {}
-    username = data.get("username", "").strip().lower()
-    password = data.get("password", "").strip()
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
-    try:
-        user = User.query.filter_by(username=username).first()
-    except Exception as db_error:
-        print("Database error during login:", db_error)
-        return jsonify({"error": "Database error. Please try again shortly."}), 503
-    if user and user.check_password(password):
-        if not user.is_confirmed:
-            return jsonify({"error": "Please confirm your email first."}), 403
-        login_user(user)
-        return jsonify(success=True, username=user.username)
-    else:
-        return jsonify(success=False, message="Invalid credentials"), 401
+    return jsonify({"error": "Password login is disabled. Request a magic link at /auth."}), 410
 
 @aggregator_bp.route("/logout", methods=["POST"])
 @login_required
@@ -412,27 +376,19 @@ def logout():
 @aggregator_bp.route("/me")
 @login_required
 def me():
-    return jsonify({"username": current_user.username})
+    return jsonify({"username": current_user.username or current_user.email})
 
 @aggregator_bp.route("/account")
 @login_required
 def account_page():
     saved = SavedArticle.query.filter_by(user_id=current_user.id).all()
-    return render_template("account.html", username=current_user.username, saved_articles=saved)
+    display_name = current_user.username or current_user.email
+    return render_template("account.html", username=display_name, saved_articles=saved)
 
 @aggregator_bp.route("/reset-password", methods=["POST"])
 @login_required
 def reset_password():
-    data = request.get_json() or {}
-    current = data.get("current_password", "").strip()
-    new = data.get("new_password", "").strip()
-    if not current_user.check_password(current):
-        return jsonify({"error": "Current password is incorrect"}), 400
-    if len(new) < 6:
-        return jsonify({"error": "New password must be at least 6 characters"}), 400
-    current_user.set_password(new)
-    db.session.commit()
-    return jsonify({"success": True, "message": "Password updated successfully"})
+    return jsonify({"error": "Password resets are disabled. Use a new magic link to sign in."}), 410
 
 @aggregator_bp.route("/confirm/<token>")
 def confirm_email(token):
@@ -609,7 +565,8 @@ def get_local_news():
         articles = asyncio.run(fetch_google_local_feed(zip_code, limit=50))
         with local_cache_lock:
             local_articles_cache[zip_code] = articles
-    print(f"✅ Returning {len(articles)} local articles to user {current_user.username}")
+    name = current_user.username or current_user.email
+    print(f"✅ Returning {len(articles)} local articles to user {name}")
     return jsonify(articles)
 
 @aggregator_bp.route("/update-zipcode", methods=["POST"])
@@ -630,7 +587,7 @@ def resend_confirmation():
     if current_user.is_confirmed:
         return jsonify({"message": "Account already confirmed."}), 200
     token = generate_confirmation_token(current_user.email)
-    send_confirmation_email(current_user.email, current_user.username, token)
+    send_confirmation_email(current_user.email, current_user.username or current_user.email, token)
     return jsonify({"message": "Confirmation email resent."}), 200
 
 # --- BACKGROUND THREADS ---

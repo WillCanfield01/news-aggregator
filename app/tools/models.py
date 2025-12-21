@@ -19,6 +19,7 @@ class SharedExpenseEvent(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     token = db.Column(db.String(64), unique=True, index=True, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, index=True, nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), default=default_expiry, index=True, nullable=False)
     payload_json = db.Column(db.Text, nullable=False)

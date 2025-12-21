@@ -14,6 +14,18 @@
         <p class="eyebrow">Tools Hub</p>
         <h1>Workflow helpers to speed up your day</h1>
         <p class="lead">Pick a tool to improve your writing and research. New utilities will appear here as they launch.</p>
+        <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+            {% if not current_user.is_authenticated %}
+            <a class="tool-card" style="padding:10px 14px;border-radius:12px;background:#1f57ff;color:#fff;font-weight:800;text-decoration:none;" href="{{ url_for('auth.auth_page', next='/plus') }}">Log in to upgrade</a>
+            {% elif not has_plus() %}
+            <form action="{{ url_for('billing.create_checkout') }}" method="post" style="margin:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="tool-card" style="padding:10px 14px;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;border:none;cursor:pointer;">Upgrade to Plus $2.99/mo</button>
+            </form>
+            {% else %}
+            <a class="tool-card" style="padding:10px 14px;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;text-decoration:none;" href="{{ url_for('billing.customer_portal') }}">Manage billing</a>
+            {% endif %}
+        </div>
     </div>
 
     {% if tools %}

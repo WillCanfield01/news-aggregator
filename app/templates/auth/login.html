@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in · The Roundup{% endblock %}
+
+{% block content %}
+<section style="max-width:620px;margin:32px auto;padding:24px 20px;">
+  <div style="background:#fff;border:1px solid #e4e7ec;border-radius:18px;padding:24px 22px;box-shadow:0 10px 30px rgba(12,22,44,0.05);">
+    <p style="text-transform:uppercase;letter-spacing:0.1em;font-weight:700;font-size:0.8rem;margin:0 0 6px;color:#6b7280;">Magic link</p>
+    <h1 style="margin:0 0 10px;font-size:1.8rem;">Sign in with your email</h1>
+    <p style="margin:0 0 18px;color:#4b5563;">No passwords. We’ll email you a secure link that expires in 15 minutes.</p>
+
+    {% if error %}
+    <div style="background:#fff4f4;border:1px solid #fca5a5;color:#991b1b;padding:10px 12px;border-radius:12px;margin-bottom:12px;">{{ error }}</div>
+    {% endif %}
+    {% if sent %}
+    <div style="background:#ecfdf3;border:1px solid #4ade80;color:#14532d;padding:10px 12px;border-radius:12px;margin-bottom:12px;">Check your inbox for the magic link.</div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('auth.request_magic_link') }}" style="display:grid;gap:12px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next_url or '/' }}">
+      <label style="display:grid;gap:6px;font-weight:700;color:#111827;">
+        Email
+        <input type="email" name="email" required placeholder="you@example.com" style="padding:12px 14px;border-radius:12px;border:1px solid #d1d5db;font-size:1rem;">
+      </label>
+      <button type="submit" style="padding:12px 14px;border:none;border-radius:12px;background:#1f57ff;color:#fff;font-weight:800;font-size:1rem;cursor:pointer;">Send magic link</button>
+    </form>
+
+    <p style="margin:14px 0 0;color:#6b7280;font-size:0.95rem;">We’ll never share your email. Already have a link? Use it to finish signing in.</p>
+  </div>
+</section>
+{% endblock %}
