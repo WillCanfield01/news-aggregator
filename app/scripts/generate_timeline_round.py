@@ -528,38 +528,46 @@ def _extract_year_hint(text: str) -> Optional[int]:
             continue
     return None
 
-def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_len: int, max_len: int, year_hint: Optional[int] = None, salt: int = 0) -> Tuple[str, str]:
+def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_len: int, max_len: int, year_hint: Optional[int] = None, salt: int = 0) -> Tuple[dict, dict]:
     """
-    Produce two plausible-but-false events similar in tone/length to the real item, with a single coherent action.
+    Produce two plausible-but-false decoy headlines with validation, retries, and safe fallback.
+    Returns structured decoys with metadata.
     """
-    era_note = ""
-    if year_hint:
-        decade = (year_hint // 10) * 10
-        era_note = f"Keep the era around the {decade}s."
+    target_chars = max(40, len(real_text))
+    target_min = int(target_chars * 0.9)
+    target_max = int(target_chars * 1.1)
 
-    def _ask_openai() -> Optional[str]:
-        sys_prompt = (
-            "Write one believable 'On this day' news-style sentence (no bullet). "
-            f"Length {min_len}-{max_len} words. One sentence only. No trailing fragments. "
-            "No tragedies/violence. Avoid jargon. Use concrete nouns and a single clear action. "
-            "Do not copy the real event. Do not prepend a year dash."
+    safe_actors = ["transport authority", "city council", "national museum", "health agency", "education ministry", "election commission", "port authority", "arts council"]
+    safe_domains = ["transport", "civic", "culture", "science", "business", "environment", "sports"]
+    safe_places = ["Lisbon", "Oslo", "Dublin", "Montreal", "Helsinki", "Valencia", "Perth", "Kyoto", "Auckland", "Vancouver", "Cork", "Glasgow", "Warsaw", "Reykjavik", "Quebec City"]
+    safe_actions = ["approves new service plan", "opens restored venue", "launches river ferry route", "suspends late-night schedule", "announces coastal upgrade", "restores historic terminal", "expands visitor hours", "sets new safety rules", "launches local grant program", "unveils park redesign"]
+    banned_topics = re.compile(r"\b(bomb|explosive|terror|massacre|shooting|assassination|suicide attack|car bomb|gunman|detonate|knife attack|hostage|kidnap|murder|mass casualty)\b", re.I)
+    banned_phrases = ["covered by", "went viral", "major blogs", "reported across outlets", "remembered that", "viral sensation"]
+    banned_endings = {"and", "or", "but", "for", "nor", "so", "yet", "with", "during", "that", "of"}
+    banned_units = re.compile(r"\b\d{3,}\b|\b\d+\s?(kg|kilograms|tons|tonnes|casualties|dead)\b", re.I)
+
+    real_loc = _guess_location(real_text) or ""
+
+    def _prompt(real_headline: str, real_loc: str, real_cat: str, desired_len: int, temperature: float) -> Optional[str]:
+        sys_msg = (
+            "You write fictional, newsroom-style decoy headlines for a trivia game. "
+            "Your output must be plausible and grammatically complete. Do not describe real historical events. "
+            "Avoid violence, terrorism, atrocities, or accusations. Avoid exact large quantities, exact dates, and exact victim counts. "
+            "Use neutral, newswire tone. Match the length and specificity of the provided real headline without copying its unique keywords."
         )
-        if era_note:
-            sys_prompt += f" {era_note}"
+        user_msg = (
+            f"real_headline: {real_headline}\n"
+            f"real_location: {real_loc or 'unknown'}\n"
+            f"real_category: {real_cat or 'general'}\n"
+            f"desired_length_chars: {desired_len}"
+        )
         payload = {
             "model": OAI_MODEL,
             "messages": [
-                {"role": "system", "content": sys_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Real event for context (do not copy): {real_text}\\n"
-                        f"Month: {month_name}\\n"
-                        f"Era: {year_hint or 'any'}"
-                    ),
-                },
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
             ],
-            "temperature": 0.8,
+            "temperature": temperature,
         }
         try:
             r = requests.post(
@@ -573,15 +581,111 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
         except Exception:
             return None
 
+    def _has_min_structure(text: str) -> bool:
+        if not text or len(text.split()) < 6:
+            return False
+        has_place = any(p.lower() in text.lower() for p in safe_places)
+        has_actor = any(a in text.lower() for a in safe_actors) or re.search(r"\b(council|agency|authority|ministry|commission|board|department|office|museum|university)\b", text, re.I)
+        has_action = any(a.split()[0] in text.lower() for a in safe_actions) or re.search(r"\b(approves|opens|launches|suspends|announces|restores|expands|fin(?:es|ing)|extends|reviews)\b", text, re.I)
+        return has_place and has_actor and has_action
+
+    def _too_close_keywords(real_headline: str, decoy: str) -> bool:
+        words = [w.lower() for w in re.findall(r"[A-Za-z]{6,}", real_headline)]
+        uniq = set(words)
+        overlap = sum(1 for w in uniq if w in decoy.lower())
+        return overlap > 1
+
+    def _ends_badly(text: str) -> bool:
+        tokens = re.findall(r"\b\w+\b", text)
+        if not tokens:
+            return True
+        last = tokens[-1].lower()
+        return last in banned_endings
+
+    def _contains_banned(text: str) -> bool:
+        if banned_topics.search(text):
+            return True
+        if banned_units.search(text):
+            return True
+        lower = text.lower()
+        if "..." in text or lower.endswith("..."):
+            return True
+        if any(p in lower for p in banned_phrases):
+            return True
+        if _ends_badly(text):
+            return True
+        return False
+
+    def _validate_decoy(real_headline: str, candidate: str, target_len: int) -> bool:
+        if not candidate:
+            return False
+        cand = candidate.strip()
+        if cand.endswith((";", ",")):
+            return False
+        if _contains_banned(cand):
+            return False
+        if _is_tragedy(cand):
+            return False
+        clen = len(cand)
+        if clen < max(38, int(target_len * 0.9)) or clen > int(target_len * 1.1):
+            return False
+        if _too_similar(cand, real_headline):
+            return False
+        if _too_close_keywords(real_headline, cand):
+            return False
+        if not _has_min_structure(cand):
+            return False
+        return True
+
+    def _fallback_decoy() -> str:
+        rng_local = random.Random(
+            int(datetime.now(TZ).strftime("%Y%m%d")) ^
+            (hash(real_text) & 0xFFFFFFFF) ^
+            (salt & 0xFFFF) ^ 1337
+        )
+        place = rng_local.choice(safe_places)
+        actor = rng_local.choice(safe_actors)
+        action = rng_local.choice(safe_actions)
+        domain_tag = rng_local.choice(safe_domains)
+        sentence = f"{place} {actor} {action} after review by {domain_tag} leaders."
+        if len(sentence) < target_min:
+            sentence = f"{place} {actor} {action} as {domain_tag} officials outline next steps for commuters."
+        return _normalize_choice(sentence, min_len, max_len)
+
+    def _build_structured(decoy_text: str) -> dict:
+        tags = [domain] if domain else []
+        summary = ""
+        return {
+            "decoy_headline": decoy_text,
+            "decoy_summary": summary,
+            "decoy_tags": tags or ["general"],
+            "fictional": True,
+        }
+
+    decoys: list[dict] = []
+
     if OPENAI_API_KEY:
-        fakes: list[str] = []
-        for _ in range(4):
-            out = _ask_openai()
-            if out and min_len <= _wlen(out) <= max_len and not _is_tragedy(out):
-                if all(not _too_similar(out, f) for f in fakes) and not _too_similar(out, real_text):
-                    fakes.append(out)
-            if len(fakes) >= 2:
-                return fakes[0], fakes[1]
+        temps = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
+        for t in temps:
+            out = _prompt(real_text, real_loc, domain or "general", target_chars, t)
+            if not out:
+                continue
+            out = out.replace("\n", " ").strip()
+            if _validate_decoy(real_text, out, target_chars):
+                if all(d["decoy_headline"].lower() != out.lower() for d in decoys):
+                    decoys.append(_build_structured(out))
+            if len(decoys) >= 2:
+                break
+
+    while len(decoys) < 2:
+        fallback_text = _fallback_decoy()
+        if _validate_decoy(real_text, fallback_text, target_chars):
+            decoys.append(_build_structured(fallback_text))
+        else:
+            fallback_text = _normalize_choice(fallback_text, min_len, max_len)
+            decoys.append(_build_structured(fallback_text))
+
+    return decoys[0], decoys[1]
 
     rng = random.Random(
         int(datetime.now(TZ).strftime("%Y%m%d")) ^
@@ -1165,7 +1269,9 @@ def ensure_today_round(force: int = 0) -> bool:
     fake_max = min(22, real_len + 3)
 
     year_hint = real_year or _extract_year_hint(real_raw) or _extract_year_hint(real_soft)
-    fake1, fake2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max, year_hint=year_hint)
+    decoy1, decoy2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max, year_hint=year_hint)
+    fake1 = decoy1["decoy_headline"]
+    fake2 = decoy2["decoy_headline"]
 
     def _normalize_target(text: str) -> str:
         normalized = _normalize_choice(text, fake_min, fake_max)
@@ -1232,7 +1338,7 @@ def ensure_today_round(force: int = 0) -> bool:
     f1_icon   = pick_icon_for_text(fake1)
     f2_icon   = pick_icon_for_text(fake2)
 
-    def _choice_meta(text: str) -> dict:
+    def _choice_meta(text: str, fictional: bool = False) -> dict:
         ev_type, ev_cat = _guess_event_type(text)
         domain_guess = _infer_domain(text)
         category = ev_cat or _category_for_text(text, domain_guess)
@@ -1244,11 +1350,12 @@ def ensure_today_round(force: int = 0) -> bool:
             "location": _guess_location(text),
             "entity": _guess_entity(text),
             "year": year_hint,
+            "fictional": fictional,
         }
 
-    real_meta = _choice_meta(real_soft)
-    fake1_meta = _choice_meta(fake1)
-    fake2_meta = _choice_meta(fake2)
+    real_meta = _choice_meta(real_soft, fictional=False)
+    fake1_meta = _choice_meta(fake1, fictional=True)
+    fake2_meta = _choice_meta(fake2, fictional=True)
 
     # seed with recent picks to avoid showing yesterday's photos again
     used_urls: set[str] = _recent_image_urls(limit=8)

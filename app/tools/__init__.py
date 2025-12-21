@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
 
-from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for, session
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for, session, current_app
 try:
     from flask_login import current_user  # type: ignore
 except Exception:  # pragma: no cover
@@ -194,9 +194,8 @@ def _validate_input_against_schema(tool: Dict[str, Any], payload: Dict[str, Any]
 @tools_bp.route("", methods=["GET"])
 def tools_home():
     enabled_tools = get_enabled_tools()
-    show_plus_upsell = bool(
-        (tools_bp.app and getattr(tools_bp.app, "config", {})) and tools_bp.app.config.get("SHOW_PLUS_UPSELL")
-    )
+    cfg = getattr(current_app, "config", {}) or {}
+    show_plus_upsell = bool(cfg.get("SHOW_PLUS_UPSELL"))
     return render_template(
         "tools/index.html",
         tools=enabled_tools,
