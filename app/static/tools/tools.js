@@ -539,9 +539,11 @@
         };
 
         exportBtn.onclick = () => {
-            if (!HAS_PLUS && typeof window.showPlusModal === "function") {
-                window.showPlusModal();
-                return;
+            if (!HAS_PLUS) {
+                if (typeof window.openPlusPrompt === "function") {
+                    window.openPlusPrompt("Export is a Plus feature", "Unlock CSV and PDF exports, plus saved history.");
+                    return;
+                }
             }
             const store = loadWorkoutStore();
             const workouts = Array.isArray(store.workouts) ? store.workouts : [];
@@ -1356,9 +1358,16 @@
             shareBtn.disabled = false;
             if (!res.ok) {
                 const ref = res?.ref || res?.error?.ref;
-                const message = res?.message || res?.error?.message || "Unable to create share link.";
+                const message = res?.message || res?.error?.message || "Please refresh and try again. If it keeps happening, contact support.";
                 const refText = ref ? ` Reference: ${ref}` : "";
-                setStatus(`${message}${refText}`, "error");
+                if (res?.error === "PLUS_REQUIRED" || res?.error?.code === "PLUS_REQUIRED") {
+                    if (typeof window.openPlusPrompt === "function") {
+                        window.openPlusPrompt("Want multiple share links?", "Plus lets you create more than one share link and keep history.");
+                    }
+                    setStatus("Multiple share links are a Plus feature.", "error");
+                    return;
+                }
+                setStatus(`Could not create share link. ${message}${refText}`, "error");
                 return;
             }
             const out = res.data?.output || {};

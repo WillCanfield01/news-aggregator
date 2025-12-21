@@ -722,6 +722,16 @@
         </div>
         <div style="height:10px;"></div>
         <a href="/escape/leaderboard" class="btn">See Leaderboard</a>
+        {% if not has_plus() %}
+        <div id="escapePlusPanel" style="margin-top:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;color:#e2e8f0;">
+          <div style="font-weight:800;margin-bottom:4px;">Nice escape 👏</div>
+          <p style="margin:0 0 8px;color:#cbd5e1;">Want to try Easy mode, replay today’s puzzle, or explore past escapes?</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <a href="/plus" class="btn btn-primary">Unlock Plus · $2.99/mo</a>
+            <a href="/" class="btn btn-secondary">Back tomorrow</a>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -1147,6 +1157,10 @@
         const cleared = Object.keys(state.answers || {}).length;
         const share = document.getElementById("shareBlock");
         if (share) share.textContent = `Daily Escape ${state.dateKey}\n${cleared}/3 cleared`;
+        if (!HAS_PLUS) {
+          const panel = document.getElementById("escapePlusPanel");
+          if (panel) panel.style.display = "block";
+        }
       }
 
       function hostOf(mini) {

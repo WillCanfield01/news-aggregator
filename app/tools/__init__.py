@@ -31,7 +31,7 @@ from app.tools.handlers import (
     run_countdown_create_share,
     run_countdown_get,
 )
-from app.tools.models import SharedExpenseEvent, default_expiry
+from app.tools.models import SharedExpenseEvent, SharedToolLink, default_expiry
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 from app.subscriptions import current_user_has_plus
 import logging
@@ -74,6 +74,13 @@ def _grocery_share_url(token: str) -> str:
     return f"{base}/tools/grocery/{token}"
 
 
+def _countdown_share_url(token: str) -> str:
+    base = _base_url()
+    if not base:
+        return url_for("tools.countdown_share_view", token=token, _external=True)
+    return f"{base}/tools/countdown/{token}"
+
+
 def _aggregate_string_length(payload: Any) -> int:
     """Recursively count characters across all string fields in payload."""
     if isinstance(payload, str):
@@ -112,7 +119,7 @@ def _free_share_allowed() -> bool:
         return True
     user_id = _current_user_id()
     if user_id:
-        owned = SharedExpenseEvent.query.filter_by(user_id=user_id).count()
+        owned = SharedToolLink.query.filter_by(user_id=user_id, tool="countdown").count()
         if owned >= 1:
             return False
     free_tokens = session.get("free_share_tokens") or []
@@ -133,7 +140,7 @@ def _record_free_share(token: str):
 def _share_limit_response(request_id: str):
     return _error_response(
         "PLUS_REQUIRED",
-        "Upgrade to Roundup Plus to create more share links.",
+        "Multiple share links are a Plus feature.",
         request_id,
         status=402,
     )
@@ -305,12 +312,24 @@ def countdown_share_view(token: str):
     tool = get_tool_by_slug("countdown")
     if not tool:
         abort(404)
+    link = SharedToolLink.query.filter_by(token=token, tool="countdown").first()
+    now = datetime.now(timezone.utc)
+    if not link or (link.expires_at and link.expires_at < now):
+        return render_template(
+            "tools/tool_page.html",
+            tool=tool,
+            view_mode=True,
+            error_message="This countdown link is unavailable or expired.",
+        ), 404
+    payload = link.to_payload()
+    share_url = _countdown_share_url(token)
     return render_template(
         "tools/tool_page.html",
         tool=tool,
         view_mode=False,
-        share_url=url_for("tools.countdown_share_view", token=token),
+        share_url=share_url,
         callout_message="Shared countdown. Save it locally if you want to track it on this device.",
+        shared_payload=payload,
     )
 
 
@@ -547,16 +566,17 @@ def run_tool():
                     created = run_countdown_create_share(merged_input, token=token)
                     payload = created.get("payload") or {}
                     # Keep countdowns around longer than trip shares
-                    event = SharedExpenseEvent(
+                    link = SharedToolLink(
                         token=token,
+                        tool="countdown",
                         expires_at=default_expiry(days=365),
                         payload_json=json.dumps(payload),
                         user_id=_current_user_id(),
                     )
-                    db.session.add(event)
+                    db.session.add(link)
                     db.session.commit()
                     _record_free_share(token)
-                    share_url = url_for("tools.countdown_share_view", token=token)
+                    share_url = _countdown_share_url(token)
                     data = {"output": {"token": token, "share_url": share_url, "payload": payload}}
                     return _build_response(True, data=data, error=None, request_id=request_id), 200
                 except ValueError:
@@ -566,7 +586,7 @@ def run_tool():
                     db.session.rollback()
                     ref = _ref_code()
                     logging.exception("countdown share_link_failed ref=%s", ref)
-                    friendly = "Something on our side failed while saving your share link. Please refresh and try again."
+                    friendly = "Could not create share link. Please refresh and try again. If it keeps happening, contact support."
                     return (
                         jsonify({"ok": False, "error": "share_link_failed", "message": friendly, "ref": ref}),
                         500,
@@ -577,15 +597,12 @@ def run_tool():
                 return _error_response("TOOL_INPUT_INVALID", "Token is required.", request_id, status=400)
             run_countdown_get(merged_input)
 
-            event = SharedExpenseEvent.query.filter_by(token=token).first()
+            event = SharedToolLink.query.filter_by(token=token, tool="countdown").first()
             now = datetime.now(timezone.utc)
             if not event or not event.expires_at or event.expires_at < now:
                 return _error_response("NOT_FOUND", "This countdown link is unavailable or expired.", request_id, status=404)
             current_payload = event.to_payload()
-            if current_payload.get("type") != "countdown":
-                return _error_response("INVALID_REQUEST", "This token does not belong to a countdown.", request_id, status=400)
-
-            share_url = url_for("tools.countdown_share_view", token=token)
+            share_url = _countdown_share_url(token)
             data = {"output": {"token": token, "share_url": share_url, "payload": current_payload}}
             return _build_response(True, data=data, error=None, request_id=request_id), 200
         except ValueError as exc:

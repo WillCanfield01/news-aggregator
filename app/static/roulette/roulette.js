@@ -9,6 +9,8 @@
   const restartBtn = document.getElementById("restartBtn");
   const sessionScore = document.getElementById("sessionScore");
   const recapEl = document.getElementById("recap");
+  const plusCard = document.getElementById("roulettePlusCard");
+  const HAS_PLUS = window.rrHasPlus === true || window.rrHasPlus === "true";
 
   let state = { step: 1, score: 0, payload: null, locked: false };
   const PHOTO_FALLBACK_URL = "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80";
@@ -217,6 +219,15 @@
   }
 
   restartBtn.addEventListener("click", async () => {
+    if (!HAS_PLUS) {
+        if (plusCard) {
+            plusCard.style.display = "block";
+            plusCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else if (typeof window.openPlusPrompt === "function") {
+            window.openPlusPrompt("🔒 Want to keep playing?", "Plus unlocks unlimited plays, streak protection, and past days.");
+        }
+        return;
+    }
     try {
       await fetch("/roulette/session/reset", { method: "POST" });
     } catch (e) {

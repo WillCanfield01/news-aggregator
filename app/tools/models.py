@@ -29,3 +29,21 @@ class SharedExpenseEvent(db.Model):
             return json.loads(self.payload_json or "{}")
         except Exception:
             return {}
+
+
+class SharedToolLink(db.Model):
+    __tablename__ = "shared_tool_links"
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, index=True, nullable=False)
+    tool = db.Column(db.String(50), index=True, nullable=False)
+    payload_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+    def to_payload(self):
+        try:
+            return json.loads(self.payload_json or "{}")
+        except Exception:
+            return {}

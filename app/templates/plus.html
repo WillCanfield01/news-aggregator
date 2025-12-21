@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Plus · The Real Roundup{% endblock %}
+
+{% block content %}
+<section style="max-width:960px;margin:32px auto;padding:0 20px 36px;">
+  <div style="background:#0f172a;border-radius:24px;padding:24px;color:#e2e8f0;border:1px solid rgba(255,255,255,0.08);box-shadow:0 18px 40px rgba(0,0,0,0.35);">
+    <p style="margin:0 0 8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;font-size:0.85rem;color:#a5b4fc;">Plus</p>
+    <h1 style="margin:0 0 8px;font-size:2rem;color:#f8fafc;">Plus makes The Real Roundup smoother and distraction free.</h1>
+    <p style="margin:0 0 16px;color:#cbd5e1;">$2.99 per month. Cancel anytime.</p>
+    {% if is_plus_user() %}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+      <span style="background:#0ef0c5;color:#052018;padding:10px 14px;border-radius:12px;font-weight:800;">Plus active</span>
+      <a href="{{ url_for('billing.customer_portal') }}" style="padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.3);color:#e2e8f0;text-decoration:none;font-weight:700;">Manage billing</a>
+    </div>
+    {% else %}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+      <a href="{{ plus_checkout_url() }}" style="padding:12px 16px;border-radius:12px;background:#1f57ff;color:#fff;text-decoration:none;font-weight:800;">Unlock Plus · $2.99/mo</a>
+      <a href="{{ url_for('landing') }}" style="padding:12px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);color:#e2e8f0;text-decoration:none;font-weight:700;">Continue free</a>
+    </div>
+    {% endif %}
+    <p style="margin:0;color:#cbd5e1;">Ad free. Unlimited plays. Save and export.</p>
+  </div>
+
+  <div style="margin-top:18px;display:grid;gap:12px;">
+    <div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px;">
+      <h3 style="margin:0 0 8px;color:#0f172a;">Timeline Roulette</h3>
+      <ul style="margin:0;padding-left:18px;color:#475569;line-height:1.6;">
+        <li>Unlimited plays</li>
+        <li>Streak protection</li>
+        <li>Past days</li>
+      </ul>
+    </div>
+    <div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px;">
+      <h3 style="margin:0 0 8px;color:#0f172a;">Daily Escape</h3>
+      <ul style="margin:0;padding-left:18px;color:#475569;line-height:1.6;">
+        <li>Replays</li>
+        <li>Easy mode</li>
+        <li>Archive</li>
+      </ul>
+    </div>
+    <div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px;">
+      <h3 style="margin:0 0 8px;color:#0f172a;">Tools</h3>
+      <ul style="margin:0;padding-left:18px;color:#475569;line-height:1.6;">
+        <li>Save history</li>
+        <li>Exports (CSV/PDF)</li>
+        <li>Multiple share links</li>
+      </ul>
+    </div>
+    <div style="background:#fff;border-radius:14px;border:1px solid #e2e8f0;padding:16px;">
+      <h3 style="margin:0 0 8px;color:#0f172a;">Site wide</h3>
+      <ul style="margin:0;padding-left:18px;color:#475569;line-height:1.6;">
+        <li>Ad free experience</li>
+      </ul>
+    </div>
+  </div>
+</section>
+{% endblock %}

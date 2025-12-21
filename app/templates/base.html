@@ -132,15 +132,15 @@
             display: flex;
         }
 
-        .plus-modal-card {
-            background: #0f172a;
-            color: #f8fafc;
-            border-radius: 16px;
-            padding: 18px;
-            width: min(480px, 95vw);
-            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+    .plus-modal-card {
+      background: #0f172a;
+      color: #f8fafc;
+      border-radius: 16px;
+      padding: 18px;
+      width: min(480px, 95vw);
+      box-shadow: 0 18px 44px rgba(15, 23, 42, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
 
         .plus-pill {
             display: inline-flex;
@@ -163,6 +163,16 @@
 </head>
 
 <body>
+    <header style="display:flex;justify-content:flex-end;align-items:center;padding:12px 16px;gap:10px;">
+            <div class="plus-pill-trigger" style="position:relative;">
+                <a href="/plus" id="plusHeaderPill" style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.7);color:#e2e8f0;font-weight:700;font-size:0.95rem;text-decoration:none;border:1px solid rgba(148,163,184,0.35);">
+                    <span id="plusPillText">{{ 'Plus active' if has_plus() else 'Plus · $2.99/mo' }}</span>
+                </a>
+                <div id="plusPillTip" style="display:none;position:absolute;right:0;top:110%;background:#0f172a;color:#e2e8f0;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);box-shadow:0 12px 28px rgba(0,0,0,0.35);font-size:0.9rem;white-space:nowrap;z-index:50;">
+                    {{ 'Thanks for supporting The Real Roundup.' if has_plus() else 'Ad free. Unlimited plays. Save and export.' }}
+                </div>
+            </div>
+    </header>
     <div class="site">
         <main class="site-main">
             <div class="page-wrapper">
@@ -178,53 +188,111 @@
     </div>
 
     {% if not has_plus() %}
-    <div id="plusModal" class="plus-modal" aria-hidden="true">
-        <div class="plus-modal-card">
-            <div class="plus-pill">Roundup Plus</div>
-            <h3 style="margin:10px 0 6px;font-size:1.4rem;">This is included in Roundup Plus</h3>
-            <p style="margin:0 0 12px;color:#cbd5e1;">Upgrade for $2.99/month to unlock archives, exports, and easy mode.</p>
+    <div id="plusIntroModal" class="plus-modal" aria-hidden="true" aria-labelledby="plusIntroTitle" role="dialog">
+        <div class="plus-modal-card" tabindex="-1">
+            <div class="plus-pill">Plus</div>
+            <h3 id="plusIntroTitle" style="margin:10px 0 6px;font-size:1.4rem;">Get more out of The Real Roundup</h3>
+            <ul style="margin:0 0 12px 16px;color:#cbd5e1;line-height:1.5;">
+                <li>Unlimited Timeline Roulette plays</li>
+                <li>Past Daily Escapes plus replays</li>
+                <li>Ad free tools and briefings</li>
+            </ul>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
-                <button id="plusModalUpgrade" style="padding:10px 14px;border:none;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;cursor:pointer;">Upgrade $2.99/mo</button>
-                <button type="button" data-plus-close style="padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#e2e8f0;font-weight:700;cursor:pointer;">Not now</button>
+                <button id="plusIntroUnlock" style="padding:10px 14px;border:none;border-radius:12px;background:#0ef0c5;color:#0b1d33;font-weight:800;cursor:pointer;">Unlock Plus · $2.99/mo</button>
+                <button type="button" id="plusIntroContinue" style="padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#e2e8f0;font-weight:700;cursor:pointer;">Continue free</button>
             </div>
         </div>
     </div>
     <script>
         (function () {
-            const modal = document.getElementById("plusModal");
+            const modal = document.getElementById("plusIntroModal");
             if (!modal) return;
-            const upgradeUrl = "{{ url_for('billing.plus_page') }}";
-            const upgradeBtn = document.getElementById("plusModalUpgrade");
-            const closeBtns = modal.querySelectorAll("[data-plus-close]");
+            const unlock = document.getElementById("plusIntroUnlock");
+            const cont = document.getElementById("plusIntroContinue");
+            const tip = document.getElementById("plusPillTip");
+            const pill = document.getElementById("plusHeaderPill");
+            const DISMISS_KEY = "rr_plus_intro_dismissed";
+            const checkoutUrl = "/plus";
 
-            function openModal(ev) {
-                if (ev) ev.preventDefault();
+            function closeModal() {
+                modal.classList.remove("open");
+                modal.setAttribute("aria-hidden", "true");
+                localStorage.setItem(DISMISS_KEY, "1");
+            }
+            function openModal() {
                 modal.classList.add("open");
                 modal.setAttribute("aria-hidden", "false");
+                const card = modal.querySelector(".plus-modal-card");
+                if (card) card.focus();
             }
+            if (!localStorage.getItem(DISMISS_KEY)) {
+                window.addEventListener("load", () => {
+                    openModal();
+                });
+            }
+            if (unlock) {
+                unlock.addEventListener("click", () => {
+                    closeModal();
+                    window.location.href = checkoutUrl;
+                });
+            }
+            if (cont) cont.addEventListener("click", () => {
+                closeModal();
+            });
+            document.addEventListener("keydown", (ev) => {
+                if (ev.key === "Escape" && modal.classList.contains("open")) {
+                    closeModal();
+                }
+            });
+            if (pill && tip) {
+                pill.addEventListener("mouseenter", () => (tip.style.display = "block"));
+                pill.addEventListener("mouseleave", () => (tip.style.display = "none"));
+            }
+        })();
+    </script>
+    {% endif %}
+
+    <div id="plusPromptModal" class="plus-modal" aria-hidden="true" aria-labelledby="plusPromptTitle" role="dialog">
+        <div class="plus-modal-card" tabindex="-1">
+            <h3 id="plusPromptTitle" style="margin:0 0 6px;font-size:1.25rem;">Plus</h3>
+            <p id="plusPromptBody" style="margin:0 0 12px;color:#cbd5e1;">Ad free. Unlimited plays. Save and export.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+                <button id="plusPromptUnlock" style="padding:10px 14px;border:none;border-radius:12px;background:#1f57ff;color:#fff;font-weight:800;cursor:pointer;">Unlock Plus · $2.99/mo</button>
+                <button type="button" id="plusPromptClose" style="padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#e2e8f0;font-weight:700;cursor:pointer;">Not now</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const modal = document.getElementById("plusPromptModal");
+            if (!modal) return;
+            const unlock = document.getElementById("plusPromptUnlock");
+            const closeBtn = document.getElementById("plusPromptClose");
+            const titleEl = document.getElementById("plusPromptTitle");
+            const bodyEl = document.getElementById("plusPromptBody");
+            const checkoutUrl = "/plus";
+
             function closeModal() {
                 modal.classList.remove("open");
                 modal.setAttribute("aria-hidden", "true");
             }
-            window.showPlusModal = openModal;
-            closeBtns.forEach((btn) => btn.addEventListener("click", closeModal));
-            if (upgradeBtn) {
-                upgradeBtn.addEventListener("click", () => {
-                    window.location.href = upgradeUrl;
-                });
+            function openModal(title, body) {
+                if (titleEl) titleEl.textContent = title || "Plus";
+                if (bodyEl) bodyEl.textContent = body || "Ad free. Unlimited plays. Save and export.";
+                modal.classList.add("open");
+                modal.setAttribute("aria-hidden", "false");
+                const card = modal.querySelector(".plus-modal-card");
+                if (card) card.focus();
             }
-            document.querySelectorAll("[data-plus-required]").forEach((el) => {
-                el.addEventListener("click", openModal);
-            });
-            document.addEventListener("click", (ev) => {
-                const trigger = ev.target.closest("[data-plus-required]");
-                if (trigger) {
-                    openModal(ev);
-                }
-            });
+            if (unlock) unlock.addEventListener("click", () => { closeModal(); window.location.href = checkoutUrl; });
+            if (closeBtn) closeBtn.addEventListener("click", closeModal);
+            document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && modal.classList.contains("open")) closeModal(); });
+            window.openPlusPrompt = function (title, body) {
+                if (window.rrHasPlus === true || window.rrHasPlus === "true") return;
+                openModal(title, body);
+            };
         })();
     </script>
-    {% endif %}
 </body>
 
 </html>

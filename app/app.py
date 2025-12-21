@@ -10,6 +10,7 @@ from app.extensions import db, login_manager
 from app.security import generate_csrf_token
 from app.subscriptions import current_user_has_plus
 from sqlalchemy import text
+from app.plus import get_plus_checkout_url, is_plus_user
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -113,6 +114,7 @@ def create_app():
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
     app.config["PATCHPAL_LEGAL_URL"] = os.getenv("PATCHPAL_LEGAL_URL", "https://your-patchpal-host/legal")
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-dev-key")
+    app.config["PLUS_CHECKOUT_URL"] = os.getenv("STRIPE_PLUS_CHECKOUT_URL") or os.getenv("PLUS_CHECKOUT_URL") or "/billing/checkout"
     app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
     app.config["SHOW_PLUS_UPSELL"] = (
         os.getenv(
@@ -140,6 +142,8 @@ def create_app():
             "asset_version": app.config.get("ASSET_VERSION", asset_version),
             "csrf_token": generate_csrf_token,
             "has_plus": current_user_has_plus,
+            "is_plus_user": is_plus_user,
+            "plus_checkout_url": get_plus_checkout_url,
         }
 
     # ---- Import models so SQLAlchemy knows them, then (optionally) create tables ----
@@ -184,6 +188,10 @@ def create_app():
     def landing():
         latest = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
         return render_template("index.html", year=datetime.now().year, latest=latest)
+
+    @app.route("/plus")
+    def plus_landing():
+        return render_template("plus.html")
 
     @app.route("/sitemap.xml")
     def sitemap():
