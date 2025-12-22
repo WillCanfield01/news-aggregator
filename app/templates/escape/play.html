@@ -6,6 +6,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Daily Escape — Play</title>
+  {% set _has_plus = (has_plus() if (has_plus is defined and has_plus is callable) else (has_plus if has_plus is defined else false)) %}
   <style>
     :root {
       --bg: #0e1222;
@@ -646,7 +647,7 @@
       background-color: #555;
       transform: scale(0.95);
     }
-    {% if has_plus %}
+    {% if _has_plus %}
     .ads {
       display: none !important;
     }
@@ -665,7 +666,7 @@
       </div>
     </div>
   </div>
-  {% if not has_plus %}
+  {% if not _has_plus %}
   <div id="plusPrompt" class="mode-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="plusTitle">
     <div class="mode-card">
       <p class="muted" style="margin:0 0 6px 0;">Roundup Plus</p>
@@ -722,7 +723,7 @@
         </div>
         <div style="height:10px;"></div>
         <a href="/escape/leaderboard" class="btn">See Leaderboard</a>
-        {% if not has_plus() %}
+        {% if not _has_plus %}
         <div id="escapePlusPanel" style="margin-top:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;color:#e2e8f0;">
           <div style="font-weight:800;margin-bottom:4px;">Nice escape 👏</div>
           <p style="margin:0 0 8px;color:#cbd5e1;">Want to try Easy mode, replay today’s puzzle, or explore past escapes?</p>
@@ -745,7 +746,7 @@
       const MODE_KEY = "rr_escape_mode_v1";
       const EASY_MULT = 1.3;
       const VALID_MODES = new Set(["easy", "normal"]);
-      const HAS_PLUS = {{ 'true' if has_plus else 'false' }};
+      const HAS_PLUS = {{ 'true' if _has_plus else 'false' }};
       const UPGRADE_URL = "{{ url_for('billing.plus_page') }}";
 
       const parseMode = (raw) => {

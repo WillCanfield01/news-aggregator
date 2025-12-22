@@ -45,6 +45,7 @@
                 data-output-label="{{ tool.output_label }}" aria-label="{{ tool.title }} input form"
                 data-view-mode="{{ 'true' if view_mode else 'false' }}"
                 {% if saved_input %}data-saved-input='{{ saved_input|safe }}'{% endif %}
+                {% if shared_payload %}data-shared-payload='{{ shared_payload|tojson }}'{% endif %}
                 {% if share_url %}data-share-initial="{{ share_url }}"{% endif %}>
                 {% for field in tool.inputs %}
                 <div class="tool-field" {% if field.depends_on %}data-depends-field="{{ field.depends_on.field }}" data-depends-value="{{ field.depends_on.value }}"{% endif %}>
@@ -91,4 +92,15 @@
         </div>
     </div>
 </section>
+
+{% if shared_payload %}
+<script>
+  window.SHARED_PAYLOAD = {{ shared_payload|tojson }};
+</script>
+{% endif %}
+{% if share_url %}
+<script>
+  window.SHARE_URL_INITIAL = "{{ share_url }}";
+</script>
+{% endif %}
 {% endblock %}

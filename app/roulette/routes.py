@@ -21,10 +21,12 @@ from flask import (
     render_template,
     request,
     url_for,
+    session,
 )
 from sqlalchemy import and_, func
 
 from app.extensions import db
+from app.plus import is_plus_user, get_plus_checkout_url
 
 # Optional: support without flask-login present
 try:
@@ -157,6 +159,7 @@ _ADMIN_TOKEN = os.getenv("ADMIN_REGEN_TOKEN", "")
 _runner_started = False
 _runner_lock = threading.Lock()
 _process_lock = threading.Lock()
+_ROULETTE_PLAY_KEY = "rr_roulette_played"
 
 def _set_session_cookie(resp, sid: str):
     resp.set_cookie(
@@ -650,6 +653,10 @@ def leaderboard():
 # -----------------------------------------------------------------------------
 def _get_or_create_session():
     today = _local_today()
+    if not is_plus_user():
+        played = session.get(_ROULETTE_PLAY_KEY)
+        if played and played == today.isoformat():
+            return None
     sid = _get_session_id()
     sess = None
     if sid:
@@ -684,6 +691,13 @@ def _payload_for_step(sess: RouletteSession, today_round: TimelineRound) -> dict
 def get_session():
     today_round = _today_round_or_404()
     sess = _get_or_create_session()
+    if sess is None:
+        return jsonify({
+            "ok": False,
+            "error": "plus_required",
+            "message": "Unlimited plays are included with Plus.",
+            "checkout_url": get_plus_checkout_url(),
+        }), 402
     payload = _payload_for_step(sess, today_round)
     resp = make_response(jsonify({
         "ok": True,
@@ -704,6 +718,8 @@ def get_session():
 def session_guess():
     today_round = _today_round_or_404()
     sess = _get_or_create_session()
+    if sess is None:
+        return jsonify({"ok": False, "error": "plus_required", "checkout_url": get_plus_checkout_url()}), 402
     if sess.current_step > 3:
         return jsonify({"ok": False, "error": "session_finished"}), 400
     payload = request.get_json(force=True) or {}
@@ -733,6 +749,8 @@ def session_guess():
 def session_next():
     today_round = _today_round_or_404()
     sess = _get_or_create_session()
+    if sess is None:
+        return jsonify({"ok": False, "error": "plus_required", "checkout_url": get_plus_checkout_url()}), 402
     if sess.current_step < 3:
         sess.current_step += 1
         db.session.commit()
@@ -751,6 +769,10 @@ def session_next():
     # mark finished to prevent further guessing on this session
     sess.current_step = 4
     db.session.commit()
+    try:
+        session[_ROULETTE_PLAY_KEY] = _local_today().isoformat()
+    except Exception:
+        pass
     return jsonify(recap)
 
 

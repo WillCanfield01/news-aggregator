@@ -320,6 +320,10 @@ def countdown_share_view(token: str):
             tool=tool,
             view_mode=True,
             error_message="This countdown link is unavailable or expired.",
+            saved_input=None,
+            share_url=None,
+            shared_payload=None,
+            callout_message=None,
         ), 404
     payload = link.to_payload()
     share_url = _countdown_share_url(token)
@@ -330,6 +334,7 @@ def countdown_share_view(token: str):
         share_url=share_url,
         callout_message="Shared countdown. Save it locally if you want to track it on this device.",
         shared_payload=payload,
+        saved_input=json.dumps(payload),
     )
 
 

@@ -23,6 +23,23 @@
             min-height: 100%;
         }
 
+        .global-plus-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 12px 16px;
+            pointer-events: none;
+        }
+
+        .plus-pill-trigger a,
+        .plus-pill-trigger {
+            pointer-events: auto;
+        }
+
         body {
             margin: 0;
             overflow-x: hidden;
@@ -163,7 +180,8 @@
 </head>
 
 <body>
-    <header style="display:flex;justify-content:flex-end;align-items:center;padding:12px 16px;gap:10px;">
+    <div class="site" style="position:relative;">
+        <div class="global-plus-header">
             <div class="plus-pill-trigger" style="position:relative;">
                 <a href="/plus" id="plusHeaderPill" style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.7);color:#e2e8f0;font-weight:700;font-size:0.95rem;text-decoration:none;border:1px solid rgba(148,163,184,0.35);">
                     <span id="plusPillText">{{ 'Plus active' if has_plus() else 'Plus · $2.99/mo' }}</span>
@@ -172,8 +190,7 @@
                     {{ 'Thanks for supporting The Real Roundup.' if has_plus() else 'Ad free. Unlimited plays. Save and export.' }}
                 </div>
             </div>
-    </header>
-    <div class="site">
+        </div>
         <main class="site-main">
             <div class="page-wrapper">
                 {% block content %}{% endblock %}

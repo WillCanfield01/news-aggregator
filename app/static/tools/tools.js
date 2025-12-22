@@ -1093,6 +1093,24 @@
             sharedPayload: null,
             tickTimer: null,
         };
+        const initialShareUrl = (form?.dataset?.shareInitial || (typeof window !== "undefined" ? window.SHARE_URL_INITIAL : "") || "").trim();
+        if (form && form.dataset.sharedPayload) {
+            try {
+                state.sharedPayload = JSON.parse(form.dataset.sharedPayload);
+            } catch (_) {
+                state.sharedPayload = null;
+            }
+        }
+        if (!state.sharedPayload && form && form.dataset.savedInput) {
+            try {
+                state.sharedPayload = JSON.parse(form.dataset.savedInput);
+            } catch (_) {
+                // ignore
+            }
+        }
+        if (!state.sharedPayload && typeof window !== "undefined" && window.SHARED_PAYLOAD) {
+            state.sharedPayload = window.SHARED_PAYLOAD;
+        }
 
         const shareBox = document.createElement("div");
         shareBox.className = "cd-share";
@@ -1166,6 +1184,23 @@
             shareInput.value = abs;
             shareBox.style.display = abs ? "block" : "none";
             shareCopy.disabled = !abs;
+        }
+
+        if (initialShareUrl) {
+            setShare(initialShareUrl);
+        } else if (state.shareToken) {
+            setShare(toAbsoluteUrl(window.location.pathname));
+        }
+
+        function applySharedPayload() {
+            if (!state.sharedPayload) return;
+            if (nameEl) nameEl.value = state.sharedPayload.name || "";
+            if (dateEl) {
+                const raw = state.sharedPayload.date || "";
+                const cleaned = raw.includes("/") ? raw.replace(/\//g, "-") : raw;
+                dateEl.value = cleaned;
+            }
+            if (tzEl) tzEl.value = state.sharedPayload.timezone || "Local";
         }
 
         function getActiveCountdown() {
@@ -1377,26 +1412,32 @@
 
         async function loadShared() {
             if (!state.shareToken) return;
-            setStatus("Loading shared countdown…");
-            const res = await runToolRequest("countdown", { action: "get", token: state.shareToken });
-            if (!res.ok) {
-                setStatus(res?.error?.message || "Unable to load countdown.", "error");
-                return;
+            if (!state.sharedPayload) {
+                setStatus("Loading shared countdown…");
+                const res = await runToolRequest("countdown", { action: "get", token: state.shareToken });
+                if (!res.ok) {
+                    setStatus(res?.error?.message || "Unable to load countdown.", "error");
+                    return;
+                }
+                const out = res.data?.output || {};
+                const payload = out.payload || null;
+                if (!payload) {
+                    setStatus("Countdown not found.", "error");
+                    return;
+                }
+                state.sharedPayload = {
+                    name: payload.name,
+                    date: payload.date,
+                    timezone: payload.timezone || "Local",
+                };
+                setShare(out.share_url || "");
+                setStatus("Loaded.", "success");
             }
-            const out = res.data?.output || {};
-            const payload = out.payload || null;
-            if (!payload) {
-                setStatus("Countdown not found.", "error");
-                return;
-            }
-            state.sharedPayload = {
-                name: payload.name,
-                date: payload.date,
-                timezone: payload.timezone || "Local",
-            };
             state.activeId = null;
-            setShare(out.share_url || "");
-            setStatus("Loaded.", "success");
+            applySharedPayload();
+            if (!state.shareUrl) {
+                setShare(initialShareUrl || toAbsoluteUrl(window.location.pathname));
+            }
             renderList();
             renderCard();
         }
@@ -1423,6 +1464,7 @@
 
         custom.append(shareBox, card, actions, listWrap);
         renderList();
+        applySharedPayload();
         renderCard();
         scheduleTick();
         loadShared();
