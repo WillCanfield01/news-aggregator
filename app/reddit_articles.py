@@ -16,6 +16,7 @@ import feedparser
 from urllib.parse import urlparse
 import hashlib
 from app.subscriptions import current_user_is_plus
+import json
 
 # ------------------------------
 # Config & constants
@@ -61,6 +62,98 @@ def _item_key(it: dict) -> str:
     # stable key per article item; prefer link, fall back to title
     raw = (_normalize(it.get("link") or "") + "|" + _normalize(it.get("title") or "")).encode("utf-8")
     return hashlib.md5(raw).hexdigest()
+
+
+# ------------------------------
+# Preview helpers
+# ------------------------------
+def _strip_markdown(md_text: str) -> str:
+    """Very small markdown-to-plain helper for preview generation."""
+    t = md_text or ""
+    # strip images
+    t = re.sub(r"!\[[^\]]*\]\([^\)]*\)", "", t)
+    # strip links but keep text
+    t = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", t)
+    # strip headings markers
+    t = re.sub(r"^\s*#{1,6}\s*", "", t, flags=re.MULTILINE)
+    # strip emphasis markers
+    t = re.sub(r"[*_`]", "", t)
+    return t.strip()
+
+
+def _first_sentences(text: str, max_sentences: int = 2) -> str:
+    """Return the first N sentences from text."""
+    if not text:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    return " ".join(sentences[:max_sentences]).strip()
+
+
+def _extract_bullets_from_md(md_text: str, max_items: int = 4) -> list[str]:
+    bullets: list[str] = []
+    for line in (md_text or "").splitlines():
+        m = re.match(r"^\s*[-*+]\s+(.*)", line)
+        if m:
+            val = m.group(1).strip()
+            if val:
+                bullets.append(val)
+        if len(bullets) >= max_items:
+            break
+    return bullets[:max_items]
+
+
+def _fallback_bullets_from_text(text: str, max_items: int = 4) -> list[str]:
+    sentences = re.split(r"(?<=[.!?])\s+", text or "")
+    out = []
+    for s in sentences[1:]:
+        s = s.strip()
+        if len(s) < 8:
+            continue
+        out.append(s)
+        if len(out) >= max_items:
+            break
+    return out or sentences[:max_items]
+
+
+def _coerce_preview_bullets(raw) -> list[str]:
+    if isinstance(raw, list):
+        return [str(b).strip() for b in raw if str(b).strip()]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return _coerce_preview_bullets(parsed)
+        except Exception:
+            pass
+        parts = [p.strip() for p in raw.split("\n") if p.strip()]
+        return parts
+    return []
+
+
+def _extract_hero_url(md_text: str) -> str | None:
+    m = re.search(r"!\[[^\]]*\]\((https?://[^\s\)]+)\)", md_text or "")
+    if m:
+        return m.group(1)
+    return None
+
+
+def _build_preview(article, md_text: str) -> tuple[str, list[str]]:
+    summary = getattr(article, "preview_summary", None) or ""
+    bullets_raw = getattr(article, "preview_bullets", None)
+    bullets = _coerce_preview_bullets(bullets_raw)
+
+    if not summary:
+        summary = article.meta_description or ""
+    plain = _strip_markdown(md_text)
+    if not summary:
+        summary = _first_sentences(plain, 2)
+
+    if not bullets:
+        bullets = _extract_bullets_from_md(md_text)
+    if not bullets:
+        bullets = _fallback_bullets_from_text(plain)
+
+    return summary.strip(), bullets[:5]
 
 # Topic/vendor helpers
 VENDOR_HINTS = [
@@ -943,24 +1036,16 @@ def read_article(filename):
             output.append(line)
         return "\n".join(output)
 
-    def _trim_words(text: str, limit: int = 350) -> str:
-        words = re.findall(r"\S+", text or "")
-        if len(words) <= limit:
-            return (text or "").strip()
-        return " ".join(words[:limit]).strip() + " ..."
-
     cleaned_md = remove_first_heading(article.content or "")
-    html_content = markdown(cleaned_md, extras=["tables"])
-    preview_md = cleaned_md if is_plus else _trim_words(cleaned_md, 350)
-    preview_html = markdown(preview_md, extras=["tables"])
+    hero_url = _extract_hero_url(article.content or "")
+    preview_summary, preview_bullets = _build_preview(article, cleaned_md)
+    html_content = markdown(cleaned_md, extras=["tables"]) if is_plus else None
 
     meta_title = article.meta_title or article.title
     if article.meta_description:
         meta_description = article.meta_description
     else:
-        plain_source = html_content if is_plus else preview_html
-        plain = re.sub(r"<.*?>", "", plain_source)
-        meta_description = plain[:160]
+        meta_description = preview_summary[:160]
 
     # NEW: fetch newest article to power the CTA
     latest_article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
@@ -970,7 +1055,9 @@ def read_article(filename):
         title=article.title,
         date=article.date,
         content_full=html_content if is_plus else None,
-        preview_content=preview_html if not is_plus else html_content,
+        preview_summary=preview_summary,
+        preview_bullets=preview_bullets,
+        hero_url=hero_url,
         meta_title=meta_title,
         meta_description=meta_description,
         latest_article=latest_article,          # <-- pass it
@@ -980,7 +1067,7 @@ def read_article(filename):
 
 # Manual verification checklist:
 # - Visit /all-articles/articles while logged out: list renders excerpts with “Preview briefing” buttons and Plus badge.
-# - Open any article while logged out: preview renders (title/date/hero + truncated body) and locked card shows Plus CTA/back link; full text not present in page source.
+# - Open any article while logged out: preview renders (title/date/hero + overview summary/bullets) and locked card shows Plus CTA/back link; full text not present in page source.
 # - Open an article while Plus (or after toggling is_plus flag): full content renders with no lock card.
 # - Ensure latest briefing CTA at page bottom still works and list remains accessible to all users.
 

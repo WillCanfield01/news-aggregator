@@ -47,3 +47,17 @@ class SharedToolLink(db.Model):
             return json.loads(self.payload_json or "{}")
         except Exception:
             return {}
+
+
+class DailyLanguagePhrase(db.Model):
+    __tablename__ = "daily_language_phrases"
+    __table_args__ = (db.UniqueConstraint("date", "language", "level", name="uq_daily_phrase_date_lang_level"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    language = db.Column(db.String(50), nullable=False, index=True)
+    level = db.Column(db.String(50), nullable=False, index=True)
+    phrase = db.Column(db.Text, nullable=False)
+    translation = db.Column(db.Text, nullable=False)
+    example = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False, index=True)

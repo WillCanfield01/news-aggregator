@@ -147,6 +147,39 @@
         padding: 0;
     }
 
+    .briefing-preview {
+        padding: 18px 16px;
+        background: linear-gradient(180deg, #f8faff 0%, #f1f3f9 100%);
+        border: 1px solid #e5eaf5;
+        border-radius: 14px;
+        box-shadow: 0 4px 20px rgba(16, 42, 86, .06);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .briefing-preview h2 {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 1.3rem;
+        margin: 0 0 8px;
+        color: #102a56;
+    }
+
+    .preview-bullets {
+        margin: 10px 0 0 18px;
+        color: #1a2331;
+        line-height: 1.55;
+    }
+
+    .preview-fade {
+        position: absolute;
+        inset: auto 0 0 0;
+        height: 80px;
+        background: linear-gradient(0deg, rgba(245, 247, 255, 1) 0%, rgba(245, 247, 255, 0) 100%);
+        pointer-events: none;
+    }
+
     .lock-card {
         margin-top: 24px;
         padding: 20px 18px;
@@ -210,27 +243,31 @@
     <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Briefings</a>
     <h1 class="article-title">{{ title }}</h1>
     <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
-    {% set show_full = is_plus %}
-    <div class="article-content">
-        {% if show_full and content_full %}
-        {{ content_full | safe }}
-        {% else %}
-        {{ preview_content | safe }}
-        <div class="lock-card">
-            <h3>Continue reading with Plus</h3>
-            <p>Unlock the full Daily Cybersecurity Briefing.</p>
-            <ul class="lock-points">
-                <li>Deep dive briefings</li>
-                <li>Exports (CSV/PDF)</li>
-                <li>Ad free experience</li>
-            </ul>
-            <div class="lock-actions">
-                <a class="lock-cta" href="{{ plus_checkout_url() }}">Unlock Plus · $2.99/mo</a>
-                <a class="lock-secondary" href="{{ url_for('all_articles.published_articles') }}">Back to all briefings</a>
-            </div>
-        </div>
-        {% endif %}
+    {% if hero_url %}
+    <div style="margin: 10px 0 18px;">
+        <img src="{{ hero_url }}" alt="" style="width:100%;height:auto;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,0.08);">
     </div>
+    {% endif %}
+
+    {% if is_plus and content_full %}
+    <div class="article-content">
+        {{ content_full | safe }}
+    </div>
+    {% else %}
+    <div class="briefing-preview">
+        <h2>Overview 🔒</h2>
+        <p>{{ preview_summary }}</p>
+        {% if preview_bullets %}
+        <ul class="preview-bullets">
+            {% for bullet in preview_bullets %}
+            <li>{{ bullet }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="preview-fade"></div>
+    </div>
+    {% include "partials/plus_lock_card.html" %}
+    {% endif %}
 </div>
 
 <script type="application/ld+json">

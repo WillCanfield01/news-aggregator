@@ -5,15 +5,21 @@ import math
 import os
 import re
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Any, Dict, List, Tuple
 
 import openai
+import pytz
+from sqlalchemy.exc import IntegrityError
+
+from app.extensions import db
+from app.tools.models import DailyLanguagePhrase
 
 # Reuse existing OpenAI integration style
 _client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _DEFAULT_MODEL = "gpt-4.1-mini"
-_DAILY_PHRASE_CACHE: Dict[str, Dict[str, str]] = {}
+_TZ_NAME = os.getenv("TIME_ZONE", "America/Denver")
+_TZ = pytz.timezone(_TZ_NAME)
 
 def _parse_decision_options(raw: str) -> List[Dict[str, str]]:
     lines = [line.strip() for line in (raw or "").splitlines() if line.strip()]
@@ -91,6 +97,47 @@ def _parse_daily_phrase_content(content: str) -> Dict[str, str]:
         "phrase": _clean_daily_phrase_value(phrase),
         "translation": _clean_daily_phrase_value(translation),
         "example": _clean_daily_phrase_value(example),
+    }
+
+
+def _local_today() -> date:
+    return datetime.now(_TZ).date()
+
+
+def _yesterday(d: date) -> date:
+    return d - timedelta(days=1)
+
+
+def _generate_daily_phrase(language: str, level: str, seed: str, yesterday_phrase: str | None = None) -> Dict[str, str]:
+    yesterday_phrase = (yesterday_phrase or "").strip()
+    system_prompt = "You generate one short useful daily phrase. Output JSON only using keys phrase, translation, example."
+    user_prompt = (
+        "Language: {language}\n"
+        "Level: {level}\n"
+        "DateSeed: {seed}\n"
+        "Constraints:\n"
+        f'Phrase must be different from yesterday: "{yesterday_phrase}"\n'
+        "Use everyday casual speech\n"
+        "Keep phrase under 40 characters if possible\n"
+        "Return JSON only."
+    ).format(language=language, level=level, seed=seed)
+
+    result = _client.chat.completions.create(
+        model=_DEFAULT_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_tokens=200,
+        temperature=0.5,
+        timeout=15,
+    )
+    content = (result.choices[0].message.content or "").strip()
+    parsed = _parse_daily_phrase_content(content)
+    return {
+        "phrase": _clean_daily_phrase_value(parsed.get("phrase", "")),
+        "translation": _clean_daily_phrase_value(parsed.get("translation", "")),
+        "example": _clean_daily_phrase_value(parsed.get("example", "")),
     }
 
 
@@ -505,51 +552,55 @@ def run_trip_planner(payload: Dict[str, Any]) -> Dict[str, Any]:
 def run_daily_phrase(payload: Dict[str, Any]) -> Dict[str, Any]:
     language = (payload.get("language") or "Spanish").strip()
     level = (payload.get("level") or "Beginner").strip()
-    today = datetime.now().strftime("%Y-%m-%d")
-    cache_key = f"daily_phrase::{language}::{level}::{today}"
+    today = _local_today()
+    today_str = today.isoformat()
+    seed = f"{today_str}|{language}|{level}"
 
-    if cache_key in _DAILY_PHRASE_CACHE:
-        cached = _DAILY_PHRASE_CACHE[cache_key]
+    existing = DailyLanguagePhrase.query.filter_by(date=today, language=language, level=level).first()
+    if existing:
         return {
-            "phrase": cached["phrase"],
-            "translation": cached["translation"],
-            "example": cached["example"],
-            "date": today,
+            "phrase": existing.phrase,
+            "translation": existing.translation,
+            "example": existing.example,
+            "date": today_str,
         }
 
-    prompt = (
-        "Provide one useful daily phrase.\n"
-        f"Language: {language}\n"
-        f"Level: {level}\n"
-        "Respond ONLY with strict JSON in this exact shape (no markdown, no labels, no extra text):\n"
-        '{"phrase":"<phrase in the target language>","translation":"<english translation>","example":"<natural sentence using the phrase>"}\n'
-        "Keep the phrase short for beginners, avoid slang unless Advanced, and keep the example concise."
-    )
+    yesterday_row = DailyLanguagePhrase.query.filter_by(date=_yesterday(today), language=language, level=level).first()
+    yesterday_phrase = yesterday_row.phrase if yesterday_row else ""
 
     try:
-        result = _client.chat.completions.create(
-            model=_DEFAULT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a concise language tutor. Reply with JSON only using keys phrase, translation, example.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=200,
-            temperature=0.4,
-            timeout=15,
+        generated = _generate_daily_phrase(language, level, seed, yesterday_phrase)
+        if yesterday_phrase and generated.get("phrase", "").strip().lower() == yesterday_phrase.strip().lower():
+            retry_seed = f"{seed}|retry1"
+            generated = _generate_daily_phrase(language, level, retry_seed, yesterday_phrase)
+
+        new_row = DailyLanguagePhrase(
+            date=today,
+            language=language,
+            level=level,
+            phrase=generated.get("phrase", ""),
+            translation=generated.get("translation", ""),
+            example=generated.get("example", ""),
         )
-        content = (result.choices[0].message.content or "").strip()
-        parsed = _parse_daily_phrase_content(content)
-        data = {
-            "phrase": parsed.get("phrase", ""),
-            "translation": parsed.get("translation", ""),
-            "example": parsed.get("example", ""),
-            "date": today,
+        db.session.add(new_row)
+        db.session.commit()
+        return {
+            "phrase": new_row.phrase,
+            "translation": new_row.translation,
+            "example": new_row.example,
+            "date": today_str,
         }
-        _DAILY_PHRASE_CACHE[cache_key] = data
-        return data
+    except IntegrityError:
+        db.session.rollback()
+        existing = DailyLanguagePhrase.query.filter_by(date=today, language=language, level=level).first()
+        if existing:
+            return {
+                "phrase": existing.phrase,
+                "translation": existing.translation,
+                "example": existing.example,
+                "date": today_str,
+            }
+        raise
     except Exception as exc:
         raise RuntimeError(f"OpenAI request failed: {exc}") from exc
 

@@ -2879,16 +2879,17 @@
             }
             if (slug === "daily-phrase") {
                 const phrase = normalizePhraseValue(response.data?.phrase);
+                const language = form.querySelector('[name="language"]')?.value || "Spanish";
+                const level = form.querySelector('[name="level"]')?.value || "Beginner";
                 window.__rrToolState["daily-phrase"] = {
                     phrase,
                     translation: normalizePhraseValue(response.data?.translation),
                     example: normalizePhraseValue(response.data?.example),
-                    language: form.querySelector('[name="language"]')?.value || "",
-                    level: form.querySelector('[name="level"]')?.value || "",
+                    language,
+                    level,
                 };
                 renderAudioControls(form);
-                setStatus("Come back tomorrow for a new phrase.", "success");
-                if (runBtn) runBtn.disabled = true;
+                setStatus(`Today's phrase for ${language}, ${level}.`, "success");
             } else {
                 setStatus("Done.", "success");
             }
