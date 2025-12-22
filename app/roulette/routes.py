@@ -161,6 +161,46 @@ _runner_lock = threading.Lock()
 _process_lock = threading.Lock()
 _ROULETTE_PLAY_KEY = "rr_roulette_played"
 
+
+def free_roulette_available(today: date | None = None) -> bool:
+    """
+    Return True if the user/session has not used today's free roulette play.
+    """
+    today_label = (today or _local_today()).isoformat()
+    try:
+        played = session.get(_ROULETTE_PLAY_KEY)
+    except Exception:
+        played = None
+    return played != today_label
+
+
+def mark_free_roulette_used(today: date | None = None):
+    """
+    Mark today's free roulette play as consumed for this session/user.
+    """
+    try:
+        session[_ROULETTE_PLAY_KEY] = (today or _local_today()).isoformat()
+    except Exception:
+        pass
+
+
+def _log_gate_decision(session_id: str | None, decision: str, plus_user: bool, free_available: bool, blocked_reason: str | None = None):
+    """
+    Minimal logging to understand roulette gating decisions.
+    """
+    try:
+        current_app.logger.info(
+            "roulette_session_gate user=%s session=%s plus=%s free_available=%s decision=%s blocked_reason=%s",
+            getattr(current_user, "id", None) or "anon",
+            session_id or _get_session_id() or "none",
+            plus_user,
+            free_available,
+            decision,
+            blocked_reason or "",
+        )
+    except Exception:
+        pass
+
 def _set_session_cookie(resp, sid: str):
     resp.set_cookie(
         _SESSION_COOKIE,
@@ -653,10 +693,6 @@ def leaderboard():
 # -----------------------------------------------------------------------------
 def _get_or_create_session():
     today = _local_today()
-    if not is_plus_user():
-        played = session.get(_ROULETTE_PLAY_KEY)
-        if played and played == today.isoformat():
-            return None
     sid = _get_session_id()
     sess = None
     if sid:
@@ -665,9 +701,34 @@ def _get_or_create_session():
             db.session.delete(sess)
             db.session.commit()
             sess = None
-    if not sess:
-        sess = _new_session(today, getattr(current_user, "id", None) if getattr(current_user, "is_authenticated", False) else None)
-    return sess
+    plus_user = is_plus_user()
+    free_available = free_roulette_available(today)
+    decision = "resume" if sess else None
+    if not sess and plus_user:
+        sess = _new_session(
+            today,
+            getattr(current_user, "id", None) if getattr(current_user, "is_authenticated", False) else None,
+        )
+        decision = "plus_new"
+    elif not sess and free_available:
+        sess = _new_session(
+            today,
+            getattr(current_user, "id", None) if getattr(current_user, "is_authenticated", False) else None,
+        )
+        decision = "free_new"
+        mark_free_roulette_used(today)
+    elif not sess:
+        decision = "blocked"
+
+    # Ensure we record the free play once a session exists for today
+    if sess and not plus_user and free_available:
+        mark_free_roulette_used(today)
+
+    return sess, {
+        "plus_user": plus_user,
+        "free_available": free_available,
+        "decision": decision or ("resume" if sess else "blocked"),
+    }
 
 def _payload_for_step(sess: RouletteSession, today_round: TimelineRound) -> dict:
     if sess.current_step == 1:
@@ -687,18 +748,31 @@ def _payload_for_step(sess: RouletteSession, today_round: TimelineRound) -> dict
         return sess.quote_payload
     return {}
 
+
+def _plus_required_response(status_code: int = 200):
+    payload = {
+        "ok": False,
+        "reason": "plus_required",
+        "error": "plus_required",
+        "title": "Want to keep playing?",
+        "message": "You've used today's free play. Plus unlocks unlimited plays, streak protection, and past days.",
+        "checkout_url": get_plus_checkout_url(),
+    }
+    return jsonify(payload), status_code
+
+
 @roulette_bp.get("/roulette/session")
 def get_session():
     today_round = _today_round_or_404()
-    sess = _get_or_create_session()
+    sess, gate = _get_or_create_session()
+    plus_user = gate.get("plus_user", False)
+    free_available = gate.get("free_available", False)
+    decision = gate.get("decision", "unknown")
     if sess is None:
-        return jsonify({
-            "ok": False,
-            "error": "plus_required",
-            "message": "Unlimited plays are included with Plus.",
-            "checkout_url": get_plus_checkout_url(),
-        }), 402
+        _log_gate_decision(None, decision, plus_user, free_available, "plus_required")
+        return _plus_required_response(200)
     payload = _payload_for_step(sess, today_round)
+    _log_gate_decision(sess.id, decision, plus_user, free_available, None)
     resp = make_response(jsonify({
         "ok": True,
         "session_id": sess.id,
@@ -717,9 +791,10 @@ def get_session():
 @roulette_bp.post("/roulette/session/guess")
 def session_guess():
     today_round = _today_round_or_404()
-    sess = _get_or_create_session()
+    sess, gate = _get_or_create_session()
     if sess is None:
-        return jsonify({"ok": False, "error": "plus_required", "checkout_url": get_plus_checkout_url()}), 402
+        _log_gate_decision(None, gate.get("decision", "blocked"), gate.get("plus_user", False), gate.get("free_available", False), "plus_required")
+        return _plus_required_response(403)
     if sess.current_step > 3:
         return jsonify({"ok": False, "error": "session_finished"}), 400
     payload = request.get_json(force=True) or {}
@@ -748,9 +823,10 @@ def session_guess():
 @roulette_bp.post("/roulette/session/next")
 def session_next():
     today_round = _today_round_or_404()
-    sess = _get_or_create_session()
+    sess, gate = _get_or_create_session()
     if sess is None:
-        return jsonify({"ok": False, "error": "plus_required", "checkout_url": get_plus_checkout_url()}), 402
+        _log_gate_decision(None, gate.get("decision", "blocked"), gate.get("plus_user", False), gate.get("free_available", False), "plus_required")
+        return _plus_required_response(403)
     if sess.current_step < 3:
         sess.current_step += 1
         db.session.commit()
@@ -770,7 +846,7 @@ def session_next():
     sess.current_step = 4
     db.session.commit()
     try:
-        session[_ROULETTE_PLAY_KEY] = _local_today().isoformat()
+        mark_free_roulette_used(_local_today())
     except Exception:
         pass
     return jsonify(recap)

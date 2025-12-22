@@ -10,10 +10,19 @@
   const sessionScore = document.getElementById("sessionScore");
   const recapEl = document.getElementById("recap");
   const plusCard = document.getElementById("roulettePlusCard");
+  const plusTitleEl = document.getElementById("roulettePlusTitle");
+  const plusCopyEl = document.getElementById("roulettePlusCopy");
+  const plusCtaEl = document.getElementById("roulettePlusCta");
+  const plusSecondaryEl = document.getElementById("roulettePlusSecondary");
   const HAS_PLUS = window.rrHasPlus === true || window.rrHasPlus === "true";
 
   let state = { step: 1, score: 0, payload: null, locked: false };
   const PHOTO_FALLBACK_URL = "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80";
+  const DEFAULT_CHECKOUT_URL = (plusCard && plusCard.dataset.checkoutUrl) || "/plus";
+  const DEFAULT_PLUS_PROMPT = {
+    title: "Want to keep playing?",
+    message: "Plus unlocks unlimited plays, streak protection, and past days.",
+  };
 
   function sanitizeImages(payload) {
     const puzzleType = payload.puzzle_type || payload.type || "";
@@ -26,6 +35,51 @@
       return c;
     });
     return payload;
+  }
+
+  const isPlusRequired = (payload, res) => {
+    const reason = payload && (payload.reason || payload.error);
+    if (reason === "plus_required") return true;
+    if (!res) return false;
+    return res.status === 402 || res.status === 403;
+  };
+
+  function renderPlusPrompt(payload = {}) {
+    const title = payload.title || DEFAULT_PLUS_PROMPT.title;
+    const message = payload.message || DEFAULT_PLUS_PROMPT.message;
+    const checkout = payload.checkout_url || DEFAULT_CHECKOUT_URL;
+    state.payload = null;
+    state.step = 1;
+    state.score = 0;
+
+    promptEl.textContent = title;
+    subheadEl.textContent = message;
+    dateNoteEl.textContent = "";
+    resultEl.textContent = "";
+    resultEl.classList.remove("is-visible");
+    cardsEl.innerHTML = "";
+    recapEl.innerHTML = "";
+    recapEl.style.display = "none";
+    sourceLink.style.display = "none";
+    nextBtn.style.display = "none";
+    restartBtn.style.display = "none";
+    sessionScore.textContent = "Score: 0/0";
+    state.locked = true;
+
+    if (plusCard) {
+      plusCard.style.display = "block";
+      if (plusTitleEl) plusTitleEl.textContent = title;
+      if (plusCopyEl) plusCopyEl.textContent = message;
+      if (plusCtaEl) plusCtaEl.href = checkout;
+      if (plusSecondaryEl) {
+        plusSecondaryEl.onclick = () => {
+          window.location.href = "/";
+        };
+      }
+      plusCard.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (typeof window.openPlusPrompt === "function") {
+      window.openPlusPrompt(title, message);
+    }
   }
 
   const escapeHtml = (s = "") =>
@@ -124,9 +178,31 @@
   }
 
   async function fetchSession() {
-    const res = await fetch("/roulette/session");
-    if (!res.ok) throw new Error("session fetch failed");
-    const data = await res.json();
+    let res;
+    try {
+      res = await fetch("/roulette/session");
+    } catch (e) {
+      promptEl.textContent = "Unable to start game right now.";
+      return;
+    }
+    let data = {};
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = {};
+    }
+    if (!res.ok || data.ok === false) {
+      if (isPlusRequired(data, res)) {
+        renderPlusPrompt(data);
+        return;
+      }
+      promptEl.textContent = "Unable to start game right now.";
+      subheadEl.textContent = "Pick the real one.";
+      return;
+    }
+    if (plusCard) {
+      plusCard.style.display = "none";
+    }
     state.step = data.step;
     state.score = data.score;
     state.payload = data.payload;
@@ -151,6 +227,13 @@
         body: JSON.stringify({ choice: idx }),
       });
       const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        if (isPlusRequired(data, res)) {
+          renderPlusPrompt(data);
+          return;
+        }
+        throw new Error("guess failed");
+      }
       if (data.ok) {
         const msg = data.is_correct ? "You got it." : "Good try - the real pick is highlighted.";
         resultEl.textContent = msg;
@@ -170,9 +253,24 @@
   }
 
   async function nextStep() {
-    const res = await fetch("/roulette/session/next", { method: "POST" });
-    const data = await res.json();
-    if (!data.ok) return;
+    let res;
+    try {
+      res = await fetch("/roulette/session/next", { method: "POST" });
+    } catch (e) {
+      return;
+    }
+    let data = {};
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = {};
+    }
+    if (!res.ok || data.ok === false) {
+      if (isPlusRequired(data, res)) {
+        renderPlusPrompt(data);
+      }
+      return;
+    }
     if (data.rounds) {
       showRecap(data);
       return;
@@ -220,13 +318,8 @@
 
   restartBtn.addEventListener("click", async () => {
     if (!HAS_PLUS) {
-        if (plusCard) {
-            plusCard.style.display = "block";
-            plusCard.scrollIntoView({ behavior: "smooth", block: "center" });
-        } else if (typeof window.openPlusPrompt === "function") {
-            window.openPlusPrompt("🔒 Want to keep playing?", "Plus unlocks unlimited plays, streak protection, and past days.");
-        }
-        return;
+      renderPlusPrompt({});
+      return;
     }
     try {
       await fetch("/roulette/session/reset", { method: "POST" });
