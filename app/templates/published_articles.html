@@ -51,6 +51,13 @@
         box-shadow: 0 8px 18px rgba(0, 0, 0, .10);
     }
 
+    .card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
     .article-title,
     .article-title:visited {
         color: #14345b;
@@ -88,6 +95,25 @@
         overflow: hidden;
     }
 
+    .article-footer {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .plus-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 8px;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #24346a;
+        font-weight: 800;
+        font-size: 0.85rem;
+    }
+
     .article-btn,
     .article-btn:visited {
         display: inline-flex;
@@ -122,12 +148,16 @@
 <div class="container">
     <a href="/" class="back-link">← Back to Home</a>
     <h1>Daily Cybersecurity Briefings</h1>
+    {% set user_is_plus = is_plus or False %}
     <div class="articles-list">
         {% for article in articles %}
         <div class="article-card">
-            <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
-                {{ article.title }}
-            </a>
+            <div class="card-top">
+                <a class="article-title" href="{{ url_for('all_articles.read_article', filename=article.filename) }}">
+                    {{ article.title }}
+                </a>
+                <span class="plus-badge" aria-label="Plus feature">Plus</span>
+            </div>
 
             {% if article.date %}
             <div class="article-date">
@@ -139,10 +169,12 @@
                 {{ article.snippet or article.excerpt }}
             </div>
 
-            <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}"
-                aria-label="Read full briefing: {{ article.title }}">
-                Read Full Briefing
-            </a>
+            <div class="article-footer">
+                <a class="article-btn" href="{{ url_for('all_articles.read_article', filename=article.filename) }}"
+                    aria-label="{{ 'Read full briefing' if user_is_plus else 'Preview briefing' }}: {{ article.title }}">
+                    {{ "Read Full Briefing" if user_is_plus else "Preview briefing" }}
+                </a>
+            </div>
         </div>
 
         {% endfor %}

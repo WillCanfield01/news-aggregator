@@ -15,6 +15,7 @@ from rapidfuzz import fuzz
 import feedparser
 from urllib.parse import urlparse
 import hashlib
+from app.subscriptions import current_user_is_plus
 
 # ------------------------------
 # Config & constants
@@ -920,11 +921,16 @@ def published_articles():
         a.excerpt = excerpt   # template uses `article.excerpt`
         a.snippet = excerpt   # keep for backward-compat
 
-    return render_template("published_articles.html", articles=articles)
+    return render_template(
+        "published_articles.html",
+        articles=articles,
+        is_plus=current_user_is_plus(),
+    )
 
 @bp.route("/articles/<filename>")
 def read_article(filename):
     article = CommunityArticle.query.filter_by(filename=filename).first_or_404()
+    is_plus = current_user_is_plus()
 
     def remove_first_heading(md_text):
         lines = (md_text or "").splitlines()
@@ -937,14 +943,23 @@ def read_article(filename):
             output.append(line)
         return "\n".join(output)
 
+    def _trim_words(text: str, limit: int = 350) -> str:
+        words = re.findall(r"\S+", text or "")
+        if len(words) <= limit:
+            return (text or "").strip()
+        return " ".join(words[:limit]).strip() + " ..."
+
     cleaned_md = remove_first_heading(article.content or "")
     html_content = markdown(cleaned_md, extras=["tables"])
+    preview_md = cleaned_md if is_plus else _trim_words(cleaned_md, 350)
+    preview_html = markdown(preview_md, extras=["tables"])
 
     meta_title = article.meta_title or article.title
     if article.meta_description:
         meta_description = article.meta_description
     else:
-        plain = re.sub(r'<.*?>', '', html_content)
+        plain_source = html_content if is_plus else preview_html
+        plain = re.sub(r"<.*?>", "", plain_source)
         meta_description = plain[:160]
 
     # NEW: fetch newest article to power the CTA
@@ -954,12 +969,20 @@ def read_article(filename):
         "single_article.html",
         title=article.title,
         date=article.date,
-        content=html_content,
+        content_full=html_content if is_plus else None,
+        preview_content=preview_html if not is_plus else html_content,
         meta_title=meta_title,
         meta_description=meta_description,
         latest_article=latest_article,          # <-- pass it
-        current_filename=article.filename       # (optional) for self-check in template
+        current_filename=article.filename,      # (optional) for self-check in template
+        is_plus=is_plus,
     )
+
+# Manual verification checklist:
+# - Visit /all-articles/articles while logged out: list renders excerpts with “Preview briefing” buttons and Plus badge.
+# - Open any article while logged out: preview renders (title/date/hero + truncated body) and locked card shows Plus CTA/back link; full text not present in page source.
+# - Open an article while Plus (or after toggling is_plus flag): full content renders with no lock card.
+# - Ensure latest briefing CTA at page bottom still works and list remains accessible to all users.
 
 # CLI run
 if __name__ == "__main__":

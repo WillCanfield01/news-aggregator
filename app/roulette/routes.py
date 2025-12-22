@@ -26,7 +26,8 @@ from flask import (
 from sqlalchemy import and_, func
 
 from app.extensions import db
-from app.plus import is_plus_user, get_plus_checkout_url
+from app.plus import get_plus_checkout_url
+from app.subscriptions import current_user_is_plus, plus_required
 
 # Optional: support without flask-login present
 try:
@@ -258,6 +259,7 @@ def start_regen_worker(app):
 
 
 @roulette_bp.post("/roulette/session/reset")
+@plus_required
 def reset_session():
     sid = _get_session_id()
     if sid:
@@ -701,7 +703,7 @@ def _get_or_create_session():
             db.session.delete(sess)
             db.session.commit()
             sess = None
-    plus_user = is_plus_user()
+    plus_user = current_user_is_plus()
     free_available = free_roulette_available(today)
     decision = "resume" if sess else None
     if not sess and plus_user:
@@ -749,13 +751,14 @@ def _payload_for_step(sess: RouletteSession, today_round: TimelineRound) -> dict
     return {}
 
 
-def _plus_required_response(status_code: int = 200):
+def _plus_required_response(status_code: int = 402):
     payload = {
         "ok": False,
         "reason": "plus_required",
         "error": "plus_required",
         "title": "Want to keep playing?",
-        "message": "You've used today's free play. Plus unlocks unlimited plays, streak protection, and past days.",
+        "message": "Plus unlocks unlimited plays, streak protection, and past days.",
+        "next_action": "upgrade_plus",
         "checkout_url": get_plus_checkout_url(),
     }
     return jsonify(payload), status_code
@@ -794,7 +797,7 @@ def session_guess():
     sess, gate = _get_or_create_session()
     if sess is None:
         _log_gate_decision(None, gate.get("decision", "blocked"), gate.get("plus_user", False), gate.get("free_available", False), "plus_required")
-        return _plus_required_response(403)
+        return _plus_required_response(402)
     if sess.current_step > 3:
         return jsonify({"ok": False, "error": "session_finished"}), 400
     payload = request.get_json(force=True) or {}
@@ -826,7 +829,7 @@ def session_next():
     sess, gate = _get_or_create_session()
     if sess is None:
         _log_gate_decision(None, gate.get("decision", "blocked"), gate.get("plus_user", False), gate.get("free_available", False), "plus_required")
-        return _plus_required_response(403)
+        return _plus_required_response(402)
     if sess.current_step < 3:
         sess.current_step += 1
         db.session.commit()
@@ -898,3 +901,10 @@ def regen_status(job_id: int):
     _admin_auth_or_abort()
     job = RouletteRegenJob.query.filter_by(id=job_id).first_or_404()
     return jsonify(job_status_payload(job))
+
+
+# Manual verification checklist:
+# - Load /roulette as an anonymous user and confirm the daily session starts without a 402 or crash.
+# - Finish the round as a free user; attempting to restart should render the Plus card inline.
+# - Mark a user as Plus (active entitlement) and confirm restart creates a fresh session smoothly.
+# - Trigger a blocked replay (402 from /roulette/session/reset) and confirm the CTA points to the configured checkout URL.

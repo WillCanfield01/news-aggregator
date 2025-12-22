@@ -146,6 +146,62 @@
         background: transparent;
         padding: 0;
     }
+
+    .lock-card {
+        margin-top: 24px;
+        padding: 20px 18px;
+        border: 1px solid #e1e6f1;
+        border-radius: 14px;
+        background: #f7f9ff;
+        box-shadow: inset 0 0 0 1px #eef2fb;
+    }
+
+    .lock-card h3 {
+        margin: 0 0 8px;
+        color: #102a56;
+        font-weight: 800;
+    }
+
+    .lock-card p {
+        margin: 0 0 12px;
+        color: #4a5572;
+    }
+
+    .lock-points {
+        margin: 0 0 12px 0;
+        padding-left: 18px;
+        color: #1a2331;
+    }
+
+    .lock-points li {
+        margin-bottom: 6px;
+    }
+
+    .lock-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .lock-cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #1f57ff;
+        color: #fff !important;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-weight: 800;
+        text-decoration: none;
+    }
+
+    .lock-secondary,
+    .lock-secondary:visited {
+        color: #1d2e52;
+        font-weight: 700;
+        text-decoration: none;
+    }
 </style>
 {% endblock %}
 
@@ -154,8 +210,26 @@
     <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Briefings</a>
     <h1 class="article-title">{{ title }}</h1>
     <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
+    {% set show_full = is_plus %}
     <div class="article-content">
-        {{ content | safe }}
+        {% if show_full and content_full %}
+        {{ content_full | safe }}
+        {% else %}
+        {{ preview_content | safe }}
+        <div class="lock-card">
+            <h3>Continue reading with Plus</h3>
+            <p>Unlock the full Daily Cybersecurity Briefing.</p>
+            <ul class="lock-points">
+                <li>Deep dive briefings</li>
+                <li>Exports (CSV/PDF)</li>
+                <li>Ad free experience</li>
+            </ul>
+            <div class="lock-actions">
+                <a class="lock-cta" href="{{ plus_checkout_url() }}">Unlock Plus · $2.99/mo</a>
+                <a class="lock-secondary" href="{{ url_for('all_articles.published_articles') }}">Back to all briefings</a>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 

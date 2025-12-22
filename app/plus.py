@@ -17,9 +17,9 @@ def is_plus_user() -> bool:
     """
     try:
         if hasattr(current_user, "is_authenticated") and current_user.is_authenticated:
-            from app.subscriptions import current_user_has_plus
+            from app.subscriptions import current_user_is_plus
 
-            return current_user_has_plus()
+            return current_user_is_plus()
     except Exception:
         pass
-    return False  # TODO: wire to real entitlement if/when available
+    return False

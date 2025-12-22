@@ -70,10 +70,14 @@
       plusCard.style.display = "block";
       if (plusTitleEl) plusTitleEl.textContent = title;
       if (plusCopyEl) plusCopyEl.textContent = message;
-      if (plusCtaEl) plusCtaEl.href = checkout;
+      if (plusCtaEl) {
+        plusCtaEl.href = checkout;
+        plusCtaEl.textContent = "Unlock Plus · $2.99/mo";
+      }
       if (plusSecondaryEl) {
+        plusSecondaryEl.textContent = "Not now";
         plusSecondaryEl.onclick = () => {
-          window.location.href = "/";
+          plusCard.style.display = "none";
         };
       }
       plusCard.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -321,10 +325,24 @@
       renderPlusPrompt({});
       return;
     }
+    let res;
     try {
-      await fetch("/roulette/session/reset", { method: "POST" });
+      res = await fetch("/roulette/session/reset", { method: "POST" });
     } catch (e) {
-      // ignore
+      renderPlusPrompt({});
+      return;
+    }
+    let data = {};
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = {};
+    }
+    if (!res.ok || data.ok === false) {
+      if (isPlusRequired(data, res)) {
+        renderPlusPrompt(data);
+      }
+      return;
     }
     state.locked = false;
     await fetchSession();

@@ -8,9 +8,9 @@ import pytz
 from app.roulette import models as _roulette_models 
 from app.extensions import db, login_manager
 from app.security import generate_csrf_token
-from app.subscriptions import current_user_has_plus
+from app.subscriptions import current_user_is_plus
 from sqlalchemy import text
-from app.plus import get_plus_checkout_url, is_plus_user
+from app.plus import get_plus_checkout_url
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -141,8 +141,8 @@ def create_app():
         return {
             "asset_version": app.config.get("ASSET_VERSION", asset_version),
             "csrf_token": generate_csrf_token,
-            "has_plus": current_user_has_plus,
-            "is_plus_user": is_plus_user,
+            "has_plus": current_user_is_plus,
+            "is_plus_user": current_user_is_plus,
             "plus_checkout_url": get_plus_checkout_url,
         }
 
