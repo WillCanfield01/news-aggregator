@@ -166,20 +166,6 @@
         color: #102a56;
     }
 
-    .preview-bullets {
-        margin: 10px 0 0 18px;
-        color: #1a2331;
-        line-height: 1.55;
-    }
-
-    .preview-fade {
-        position: absolute;
-        inset: auto 0 0 0;
-        height: 80px;
-        background: linear-gradient(0deg, rgba(245, 247, 255, 1) 0%, rgba(245, 247, 255, 0) 100%);
-        pointer-events: none;
-    }
-
     .lock-card {
         margin-top: 24px;
         padding: 20px 18px;
@@ -235,6 +221,12 @@
         font-weight: 700;
         text-decoration: none;
     }
+
+    .hero-credit {
+        margin: 4px 0 16px;
+        font-size: 0.9rem;
+        color: #6b7488;
+    }
 </style>
 {% endblock %}
 
@@ -247,6 +239,9 @@
     <div style="margin: 10px 0 18px;">
         <img src="{{ hero_url }}" alt="" style="width:100%;height:auto;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,0.08);">
     </div>
+    {% if hero_credit %}
+    <div class="hero-credit">{{ hero_credit }}</div>
+    {% endif %}
     {% endif %}
 
     {% if is_plus and content_full %}
@@ -257,14 +252,6 @@
     <div class="briefing-preview">
         <h2>Overview 🔒</h2>
         <p>{{ preview_summary }}</p>
-        {% if preview_bullets %}
-        <ul class="preview-bullets">
-            {% for bullet in preview_bullets %}
-            <li>{{ bullet }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-        <div class="preview-fade"></div>
     </div>
     {% include "partials/plus_lock_card.html" %}
     {% endif %}

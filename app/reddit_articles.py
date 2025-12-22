@@ -68,15 +68,26 @@ def _item_key(it: dict) -> str:
 # Preview helpers
 # ------------------------------
 def _strip_markdown(md_text: str) -> str:
-    """Very small markdown-to-plain helper for preview generation."""
+    """
+    Minimal markdown-to-plain helper for preview generation.
+    Drops images, bullet lines, and photo credits so they don't leak into previews.
+    """
     t = md_text or ""
-    # strip images
-    t = re.sub(r"!\[[^\]]*\]\([^\)]*\)", "", t)
-    # strip links but keep text
+    lines = []
+    for ln in t.splitlines():
+        raw = ln.strip()
+        if not raw:
+            continue
+        if re.match(r"!\[[^\]]*\]\([^\)]+\)", raw):
+            continue
+        if re.match(r"[-*+]\s+", raw):
+            continue
+        if re.search(r"photo by", raw, re.I):
+            continue
+        lines.append(raw)
+    t = "\n".join(lines)
     t = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", t)
-    # strip headings markers
     t = re.sub(r"^\s*#{1,6}\s*", "", t, flags=re.MULTILINE)
-    # strip emphasis markers
     t = re.sub(r"[*_`]", "", t)
     return t.strip()
 
@@ -87,6 +98,31 @@ def _first_sentences(text: str, max_sentences: int = 2) -> str:
         return ""
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     return " ".join(sentences[:max_sentences]).strip()
+
+
+def _sentence_limited_summary(text: str, max_chars: int = 330) -> str:
+    """
+    Keep complete sentences up to max_chars; append ellipsis if truncated.
+    """
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
+    out: list[str] = []
+    total = 0
+    for s in sentences:
+        if not s:
+            continue
+        proposed = total + len(s) + (1 if out else 0)
+        if out and proposed > max_chars:
+            break
+        if not out and len(s) > max_chars:
+            out.append(s[: max_chars].rstrip(" .,!?:;") + "…")
+            return out[0]
+        out.append(s)
+        total += len(s) + (1 if out else 0)
+    joined = " ".join(out).strip()
+    truncated = len(joined) < len(text.strip())
+    if truncated and not joined.endswith("…"):
+        joined = joined.rstrip(".!? ") + "…"
+    return joined
 
 
 def _extract_bullets_from_md(md_text: str, max_items: int = 4) -> list[str]:
@@ -130,30 +166,28 @@ def _coerce_preview_bullets(raw) -> list[str]:
     return []
 
 
-def _extract_hero_url(md_text: str) -> str | None:
-    m = re.search(r"!\[[^\]]*\]\((https?://[^\s\)]+)\)", md_text or "")
-    if m:
-        return m.group(1)
-    return None
+def _extract_hero_info(md_text: str) -> tuple[str | None, str | None]:
+    url = None
+    credit = None
+    img = re.search(r"!\[[^\]]*\]\((https?://[^\s\)]+)\)", md_text or "")
+    if img:
+        url = img.group(1)
+    credit_match = re.search(r"photo by[^\\n]*", md_text or "", re.I)
+    if credit_match:
+        credit = credit_match.group(0)
+        credit = credit.strip("* ").strip()
+    return url, credit
 
 
 def _build_preview(article, md_text: str) -> tuple[str, list[str]]:
-    summary = getattr(article, "preview_summary", None) or ""
-    bullets_raw = getattr(article, "preview_bullets", None)
-    bullets = _coerce_preview_bullets(bullets_raw)
-
-    if not summary:
-        summary = article.meta_description or ""
+    summary = getattr(article, "preview_summary", None) or article.meta_description or ""
     plain = _strip_markdown(md_text)
     if not summary:
-        summary = _first_sentences(plain, 2)
-
-    if not bullets:
-        bullets = _extract_bullets_from_md(md_text)
-    if not bullets:
-        bullets = _fallback_bullets_from_text(plain)
-
-    return summary.strip(), bullets[:5]
+        summary = _first_sentences(plain, 3)
+    summary = re.sub(r"photo by[^\\n]*", "", summary, flags=re.I)
+    summary = re.sub(r"[-*•]\s+", "", summary)
+    clean_summary = _sentence_limited_summary(summary, max_chars=340)
+    return clean_summary.strip(), []
 
 # Topic/vendor helpers
 VENDOR_HINTS = [
@@ -1037,7 +1071,7 @@ def read_article(filename):
         return "\n".join(output)
 
     cleaned_md = remove_first_heading(article.content or "")
-    hero_url = _extract_hero_url(article.content or "")
+    hero_url, hero_credit = _extract_hero_info(article.content or "")
     preview_summary, preview_bullets = _build_preview(article, cleaned_md)
     html_content = markdown(cleaned_md, extras=["tables"]) if is_plus else None
 
@@ -1058,6 +1092,7 @@ def read_article(filename):
         preview_summary=preview_summary,
         preview_bullets=preview_bullets,
         hero_url=hero_url,
+        hero_credit=hero_credit,
         meta_title=meta_title,
         meta_description=meta_description,
         latest_article=latest_article,          # <-- pass it
