@@ -245,31 +245,31 @@
     {% endif %}
     {% endif %}
 
-{% if is_plus and content_full %}
+    {% if is_plus and content_full %}
     <div class="article-content">
         {{ content_full | safe }}
     </div>
-{% else %}
+    {% else %}
     <div class="briefing-preview">
         <h2>Overview 🔒</h2>
-        {% if hero_credit %}
-        <div class="hero-credit" style="margin-bottom:8px;">{{ hero_credit }}</div>
-        {% endif %}
-        <p>{{ overview_text or preview_summary }}</p>
+        {% set preview_paras = (overview_text or "").split('\n\n') %}
+        <p style="font-weight:700;margin:0 0 6px;">{{ title }}</p>
+        {% for para in preview_paras if para.strip() %}
+        <p>{{ para }}</p>
+        {% endfor %}
         <button type="button" id="briefShareBtn" class="lock-secondary" style="margin-top:10px;">Copy share text</button>
         <span id="briefShareStatus" class="article-date" style="margin-left:8px;"></span>
     </div>
     {% if not is_plus %}
-    {% set title = "Want the full breakdown?" %}
-    {% set body = "Plus includes deep dive briefings, remediation steps, and exports." %}
-    {% set primary_label = "Unlock Plus · $2.99/mo" %}
-    {% set primary_href = plus_checkout_url() %}
-    {% set secondary_label = "Back to briefs" %}
-    {% set secondary_href = url_for('all_articles.published_articles') %}
-    {% include "partials/_peak_plus_panel.html" %}
+    <div class="lock-card" style="margin-top:16px;">
+        <h3>Continue reading with Plus</h3>
+        <p>Get the full deep dive, remediation steps, and exports.</p>
+        <div class="lock-actions">
+            <a class="lock-cta" href="{{ plus_checkout_url() }}">Unlock Plus · $2.99/mo</a>
+            <a class="lock-secondary" href="{{ url_for('all_articles.published_articles') }}">Back to briefs</a>
+        </div>
+    </div>
     {% endif %}
-    {% include "partials/_free_vs_plus.html" %}
-    {% include "partials/plus_lock_card.html" %}
     {% endif %}
 </div>
 
@@ -290,7 +290,7 @@
     const btn = document.getElementById("briefShareBtn");
     const status = document.getElementById("briefShareStatus");
     if (!btn) return;
-    const shareText = `Today’s cyber brief: {{ (overview_text or title)|replace('"', '') }}. {{ request.url }}`;
+    const shareText = `Today’s cyber brief: {{ (share_preview or title)|replace('"', '') }}. Read the overview: {{ request.url }}`;
     async function copyShare() {
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {

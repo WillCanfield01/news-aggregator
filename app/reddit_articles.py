@@ -16,8 +16,8 @@ import feedparser
 from urllib.parse import urlparse
 import hashlib
 from app.subscriptions import current_user_is_plus
-import json
 from app.daily_status import BRIEF_SEEN_KEY
+from app.utils.preview import build_preview_from_text
 
 # ------------------------------
 # Config & constants
@@ -189,6 +189,53 @@ def _build_preview(article, md_text: str) -> tuple[str, list[str]]:
     summary = re.sub(r"[-*•]\s+", "", summary)
     clean_summary = _sentence_limited_summary(summary, max_chars=340)
     return clean_summary.strip(), []
+
+
+def build_free_overview(full_text: str, title: str = "") -> str:
+    """
+    Build a concise, clean overview for the free preview.
+    Rules:
+    - 2-3 sentences, max ~420 chars
+    - No bullets/headings/labels
+    - Remove photo credits and boilerplate like "What happened" / "What to do"
+    - End on a sentence boundary; otherwise trim to 240 chars + ellipsis.
+    """
+    text = full_text or ""
+    # Strip bad tokens and markdown cruft
+    text = re.sub(r"(?im)^#+\s*", "", text)
+    text = re.sub(r"(?im)^[-*+]\s+", "", text)
+    text = re.sub(r"(?i)photo by[^\\n]*", "", text)
+    text = re.sub(r"(?i)unsplash", "", text)
+    text = re.sub(r"(?i)what happened:?", "", text)
+    text = re.sub(r"(?i)what to do:?", "", text)
+    text = re.sub(r"\*", " ", text)
+    text = re.sub(r"\|", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    # Split into sentences
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    overview_sentences = sentences[:3]
+    overview = " ".join(overview_sentences)
+    if len(overview) > 420:
+        # Trim but keep full sentences up to boundary
+        trimmed = []
+        total = 0
+        for s in overview_sentences:
+            if total + len(s) > 420:
+                break
+            trimmed.append(s)
+            total += len(s) + 1
+        overview = " ".join(trimmed) or overview[:420]
+    # Ensure sentence boundary
+    if not overview.endswith((".", "!", "?")):
+        last = max(overview.rfind("."), overview.rfind("!"), overview.rfind("?"))
+        if last != -1:
+            overview = overview[: last + 1]
+        elif len(overview) > 240:
+            overview = overview[:240].rstrip(" .,!?:;") + "…"
+    # If it's too dense, keep first two sentences
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", overview) if s.strip()]
+    overview = " ".join(sentences[:3]).strip()
+    return overview
 
 
 def _clean_overview(md_text: str) -> str:
@@ -1114,8 +1161,8 @@ def read_article(filename):
 
     cleaned_md = remove_first_heading(article.content or "")
     hero_url, hero_credit = _extract_hero_info(article.content or "")
-    preview_summary, preview_bullets = _build_preview(article, cleaned_md)
-    overview_text = _clean_overview(cleaned_md)
+    preview_credit, preview_text = build_preview_from_text(cleaned_md)
+    overview_text = preview_text
     html_content = markdown(cleaned_md, extras=["tables"]) if is_plus else None
 
     meta_title = article.meta_title or article.title
@@ -1138,16 +1185,15 @@ def read_article(filename):
         title=article.title,
         date=article.date,
         content_full=html_content if is_plus else None,
-        preview_summary=overview_text,
-        preview_bullets=[],
         overview_text=overview_text,
         hero_url=hero_url,
-        hero_credit=hero_credit,
+        hero_credit=hero_credit or preview_credit,
         meta_title=meta_title,
         meta_description=meta_description,
         latest_article=latest_article,          # <-- pass it
         current_filename=article.filename,      # (optional) for self-check in template
         is_plus=is_plus,
+        share_preview=overview_text.split("\n\n")[0] if overview_text else "",
     )
 
 # Manual verification checklist:
