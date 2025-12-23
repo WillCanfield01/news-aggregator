@@ -49,6 +49,26 @@
         font-size: clamp(2.2rem, 2.5vw + 1.6rem, 3.25rem);
     }
 
+    .site-title-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .daily-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #eef3ff;
+        color: #1a46c7;
+        font-weight: 700;
+        font-size: 0.92rem;
+    }
+
     .subtext {
         color: var(--muted);
         font-size: clamp(1rem, .4vw + .9rem, 1.125rem);
@@ -233,6 +253,15 @@
         margin-top: 4px;
         color: #6b7280;
         font-size: 0.95rem;
+    }
+
+    .today-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        color: #6b7280;
+        font-size: 0.92rem;
     }
 
     .today-pill {
@@ -468,8 +497,10 @@
 <div class="home-shell">
     <div class="hero-wrap">
         <section class="hero container">
-            <h1 class="site-title">The Real Roundup</h1>
-            {% include "partials/_micro_tagline.html" %}
+            <div class="site-title-row">
+                <h1 class="site-title">The Real Roundup</h1>
+                {% include "partials/daily_badge.html" %}
+            </div>
             <div class="subtext">
                 Daily security briefings, interactive games, and practical tools to keep your skills sharp.
             </div>
@@ -506,7 +537,10 @@
                     <a class="today-row" href="/escape/today">
                         <div>
                             <div class="today-label">Daily Escape is live</div>
-                            <div class="today-sub">Three quick puzzles, fresh today.</div>
+                            <div class="today-meta">
+                                <span class="today-sub">Three quick puzzles, fresh today.</span>
+                                <span class="today-sub">Daily · Under 5 min</span>
+                            </div>
                         </div>
                         <span class="today-pill {{ 'is-done' if escape_done else 'is-pending' }}">
                             {% if escape_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
@@ -515,7 +549,10 @@
                     <a class="today-row" href="/roulette">
                         <div>
                             <div class="today-label">Timeline Roulette</div>
-                            <div class="today-sub">Pick the real event to keep your streak.</div>
+                            <div class="today-meta">
+                                <span class="today-sub">Pick the real event to keep your streak.</span>
+                                <span class="today-sub">Daily · Under 2 min</span>
+                            </div>
                         </div>
                         <span class="today-pill {{ 'is-done' if roulette_done else 'is-pending' }}">
                             {% if roulette_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
@@ -524,7 +561,10 @@
                     <a class="today-row" href="{{ brief_href }}">
                         <div>
                             <div class="today-label">Cyber Brief</div>
-                            <div class="today-sub">Open today’s briefing or latest edition.</div>
+                            <div class="today-meta">
+                                <span class="today-sub">Open today’s briefing or latest edition.</span>
+                                <span class="today-sub">Daily · Under 5 min</span>
+                            </div>
                         </div>
                         <span class="today-pill {{ 'is-done' if brief_done else 'is-pending' }}">
                             {% if brief_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}

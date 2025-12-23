@@ -148,9 +148,6 @@
 <div class="container">
     <a href="/" class="back-link">← Back to Home</a>
     <h1>Daily Cybersecurity Briefings</h1>
-    <div style="display:flex;justify-content:center;">
-        {% include "partials/_micro_tagline.html" %}
-    </div>
     {% set user_is_plus = is_plus or False %}
     <div class="articles-list">
         {% for article in articles %}

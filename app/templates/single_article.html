@@ -234,7 +234,6 @@
 <div class="container">
     <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Briefings</a>
     <h1 class="article-title">{{ title }}</h1>
-    {% include "partials/_micro_tagline.html" %}
     <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
     {% if hero_url %}
     <div style="margin: 10px 0 18px;">

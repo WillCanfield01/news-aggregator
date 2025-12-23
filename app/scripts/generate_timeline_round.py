@@ -33,6 +33,91 @@ OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
 WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+CONNECTOR_ENDINGS = {"for","to","and","of","as","with","in","on","by","at","from","into","over","after","before","amid","following","next","steps","plan"}
+
+def _normalize_headline(text: str) -> str:
+    t = text or ""
+    t = t.strip()
+    t = t.replace("“", '"').replace("”", '"').replace("’", "'").replace("–", "-").replace("—", "-")
+    t = re.sub(r"\s+", " ", t)
+    t = t.strip(" \"'")
+    return t
+
+def _is_truncated(text: str) -> bool:
+    if not text:
+        return True
+    t = text.strip()
+    lower = t.lower()
+    if lower.split() and lower.split()[-1] in CONNECTOR_ENDINGS:
+        return True
+    if re.search(r"[:\-]\s*$", t):
+        return True
+    if re.search(r"[\(\[\{]$|^[\)\]\}]", t):
+        return True
+    if t[-1] not in ".!?":
+        return not t[-1].isalnum()
+    return False
+
+def _finalize_headline(text: str) -> str:
+    t = _normalize_headline(text)
+    t = t.rstrip(",;:-")
+    t = t.strip()
+    t = re.sub(r"\s{2,}", " ", t)
+    if t.endswith((".", "!", "?")):
+        return t
+    return t
+
+def _has_triple_repeat(text: str) -> bool:
+    tokens = [w.lower() for w in _words(text)]
+    for i in range(len(tokens) - 2):
+        if tokens[i] == tokens[i+1] == tokens[i+2]:
+            return True
+    return False
+
+def _validate_headline(text: str) -> bool:
+    if not text:
+        return False
+    t = _finalize_headline(text)
+    if len(t) < 60 or len(t) > 120:
+        return False
+    if _is_truncated(t):
+        return False
+    if _has_triple_repeat(t):
+        return False
+    return True
+
+def _normalize_for_uniqueness(text: str) -> str:
+    t = re.sub(r"[^\w\s]", " ", text.lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+def _first_words(text: str, n: int = 10) -> str:
+    return " ".join(_words(text)[:n]).lower()
+
+def _jaccard(a: str, b: str) -> float:
+    sa = set(_normalize_for_uniqueness(a).split())
+    sb = set(_normalize_for_uniqueness(b).split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / max(1, len(sa | sb))
+
+def _unique_headlines(headlines: list[str]) -> bool:
+    seen = set()
+    firsts = set()
+    for h in headlines:
+        norm = _normalize_for_uniqueness(h)
+        if norm in seen:
+            return False
+        seen.add(norm)
+        fw = _first_words(h, 10)
+        if fw in firsts:
+            return False
+        firsts.add(fw)
+    for i in range(len(headlines)):
+        for j in range(i+1, len(headlines)):
+            if _jaccard(headlines[i], headlines[j]) > 0.85:
+                return False
+    return True
 
 def _words(s: str) -> list[str]:
     return [w for w in WORD_RE.findall(s or "")]
@@ -325,7 +410,7 @@ def _normalize_choice(text: str, min_words: int, max_words: int) -> str:
     cleaned = _sanitize_sentence(cleaned)
     cleaned = _fit_length(cleaned, min_words, max_words)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
-    return _sentence_case(cleaned)
+    return _sentence_case(_finalize_headline(cleaned))
 
 def _strip_years(text: str) -> str:
     return re.sub(r"\b(19|20)\d{2}\b", "", text or "")
@@ -533,9 +618,9 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     Produce two plausible-but-false decoy headlines with validation, retries, and safe fallback.
     Returns structured decoys with metadata.
     """
-    target_chars = max(40, len(real_text))
-    target_min = int(target_chars * 0.9)
-    target_max = int(target_chars * 1.1)
+    target_chars = max(70, min(110, len(real_text)))
+    target_min = 60
+    target_max = 120
 
     safe_actors = ["transport authority", "city council", "national museum", "health agency", "education ministry", "election commission", "port authority", "arts council"]
     safe_domains = ["transport", "civic", "culture", "science", "business", "environment", "sports"]
@@ -619,21 +704,23 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
     def _validate_decoy(real_headline: str, candidate: str, target_len: int) -> bool:
         if not candidate:
             return False
-        cand = candidate.strip()
+        cand = _finalize_headline(candidate)
         if cand.endswith((";", ",")):
             return False
         if _contains_banned(cand):
             return False
         if _is_tragedy(cand):
             return False
-        clen = len(cand)
-        if clen < max(38, int(target_len * 0.9)) or clen > int(target_len * 1.1):
+        if not _validate_headline(cand):
             return False
         if _too_similar(cand, real_headline):
             return False
         if _too_close_keywords(real_headline, cand):
             return False
         if not _has_min_structure(cand):
+            return False
+        clen = len(cand)
+        if clen < target_min or clen > target_max:
             return False
         return True
 
@@ -664,26 +751,47 @@ def _openai_fakes_from_real(real_text: str, month_name: str, domain: str, min_le
 
     decoys: list[dict] = []
 
-    if OPENAI_API_KEY:
-        temps = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
+    def _yield_candidates():
+        if not OPENAI_API_KEY:
+            return []
+        temps = [0.6, 0.75, 0.9, 1.0]
+        all_out = []
         for t in temps:
-            out = _prompt(real_text, real_loc, domain or "general", target_chars, t)
-            if not out:
+            raw = _prompt(real_text, real_loc, domain or "general", target_chars, t)
+            if not raw:
                 continue
-            out = out.replace("\n", " ").strip()
-            if _validate_decoy(real_text, out, target_chars):
-                if all(d["decoy_headline"].lower() != out.lower() for d in decoys):
-                    decoys.append(_build_structured(out))
-            if len(decoys) >= 2:
-                break
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    all_out.extend([str(x) for x in parsed if str(x).strip()])
+                elif isinstance(parsed, dict):
+                    all_out.extend([str(v) for v in parsed.values() if str(v).strip()])
+            except Exception:
+                lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+                all_out.extend(lines)
+        return all_out
+
+    for out in _yield_candidates():
+        cand = _finalize_headline(out)
+        if not _validate_decoy(real_text, cand, target_chars):
+            if current_app:
+                try:
+                    current_app.logger.info("[roulette] decoy rejected: %s", cand[:140])
+                except Exception:
+                    pass
+            continue
+        if any(_normalize_for_uniqueness(cand) == _normalize_for_uniqueness(d["decoy_headline"]) for d in decoys):
+            continue
+        decoys.append(_build_structured(cand))
+        if len(decoys) >= 2:
+            break
 
     while len(decoys) < 2:
         fallback_text = _fallback_decoy()
-        if _validate_decoy(real_text, fallback_text, target_chars):
-            decoys.append(_build_structured(fallback_text))
-        else:
+        fallback_text = _finalize_headline(fallback_text)
+        if not _validate_decoy(real_text, fallback_text, target_chars):
             fallback_text = _normalize_choice(fallback_text, min_len, max_len)
-            decoys.append(_build_structured(fallback_text))
+        decoys.append(_build_structured(fallback_text))
 
     return decoys[0], decoys[1]
 
@@ -1264,6 +1372,12 @@ def ensure_today_round(force: int = 0) -> bool:
     domain = _infer_domain(real_soft)
 
     real_soft = _normalize_choice(real_soft, 14, 22)
+    real_soft = _finalize_headline(real_soft)
+    if not _validate_headline(real_soft):
+        real_soft = _normalize_choice(real_raw, 14, 22)
+        real_soft = _finalize_headline(real_soft)
+        if not _validate_headline(real_soft):
+            real_soft = _normalize_choice("Historic event covered by major outlets draws attention.", 14, 22)
     real_len = _wlen(real_soft)
     fake_min = max(14, real_len - 3)
     fake_max = min(22, real_len + 3)
@@ -1321,6 +1435,22 @@ def ensure_today_round(force: int = 0) -> bool:
 
     fake1 = _normalize_target(fake1)
     fake2 = _normalize_target(fake2)
+
+    headlines = [real_soft, fake1, fake2]
+    regen_attempts = 0
+    while (not _unique_headlines(headlines) or any(not _validate_headline(h) for h in headlines)) and regen_attempts < 3:
+        # regenerate decoys via fallback templates
+        fallback_a = _normalize_choice(f"A city agency unveils updated plan after review of {domain or 'public'} services.", fake_min, fake_max)
+        fallback_b = _normalize_choice(f"Regional board announces phased changes to {domain or 'community'} programs following hearings.", fake_min, fake_max)
+        fake1 = _finalize_headline(fallback_a)
+        fake2 = _finalize_headline(fallback_b)
+        headlines = [real_soft, fake1, fake2]
+        regen_attempts += 1
+    if current_app:
+        try:
+            current_app.logger.info("[roulette] headlines: real=%s | fake1=%s | fake2=%s", real_soft, fake1, fake2)
+        except Exception:
+            pass
 
     # enforce unique openings and avoid simple year swaps
     rng_norm = random.Random(int(time.time()) ^ (hash(real_soft) & 0xFFFFFFFF))
