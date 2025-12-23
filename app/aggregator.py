@@ -91,6 +91,7 @@ class User(db.Model, UserMixin):
     created_at = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    email_opt_in = db.Column(db.Boolean, default=True, nullable=False)
     saved_articles = db.relationship("SavedArticle", backref="user", lazy=True)
     zipcode = db.Column(db.String(10))
     email = db.Column(db.String(120), unique=True, nullable=False)

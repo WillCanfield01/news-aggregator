@@ -104,6 +104,159 @@
             border: 1px solid #ddd;
         }
 
+        .micro-tagline {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            font-size: 0.95rem;
+            line-height: 1.45;
+            color: var(--micro-tagline-color, rgba(15, 23, 42, 0.7));
+            letter-spacing: 0.01em;
+            margin: 4px 0 2px;
+        }
+
+        .micro-tagline span {
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .free-plus-compare {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+            background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+            box-shadow: 0 8px 26px rgba(15, 23, 42, 0.08);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+
+        .free-plus-col {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .free-plus-label {
+            font-weight: 800;
+            color: #111827;
+            letter-spacing: 0.02em;
+        }
+
+        .free-plus-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: grid;
+            gap: 8px;
+        }
+
+        .free-plus-item {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 8px;
+            align-items: flex-start;
+            color: #475569;
+            font-size: 0.97rem;
+        }
+
+        .free-plus-bullet {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #cbd5e1;
+            margin-top: 6px;
+        }
+
+        .free-plus-col.is-plus .free-plus-label {
+            color: #0f172a;
+        }
+
+        .free-plus-col.is-plus .free-plus-bullet {
+            background: #0ea5e9;
+        }
+
+        .free-plus-link,
+        .free-plus-link:visited {
+            font-size: 0.92rem;
+            color: #0f172a;
+            text-decoration: underline;
+            text-decoration-thickness: 1px;
+            text-underline-offset: 3px;
+        }
+
+        .free-plus-link:hover {
+            color: #0b65c2;
+        }
+
+        .peak-plus-panel {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+            background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+            display: grid;
+            gap: 10px;
+        }
+
+        .peak-plus-title {
+            font-weight: 800;
+            font-size: 1.05rem;
+            color: #0f172a;
+            margin-bottom: 2px;
+        }
+
+        .peak-plus-text {
+            color: #475569;
+            font-size: 0.97rem;
+            line-height: 1.5;
+        }
+
+        .peak-plus-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .peak-plus-primary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #1f57ff;
+            color: #fff;
+            font-weight: 800;
+            text-decoration: none;
+            box-shadow: 0 10px 22px rgba(31, 87, 255, 0.18);
+        }
+
+        .peak-plus-primary:hover {
+            background: #1c4ed8;
+        }
+
+        .peak-plus-secondary,
+        .peak-plus-secondary:visited {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            color: #0f172a;
+            font-weight: 700;
+            text-decoration: none;
+            background: #fff;
+        }
+
+        .peak-plus-secondary:hover {
+            background: #f8fafc;
+        }
+
         /* Debug helper (opt-in by adding class="debug-outline" to body) */
         body.debug-outline * {
             outline: 1px solid rgba(0, 0, 0, 0.05);

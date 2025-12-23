@@ -1,0 +1,34 @@
+{# Reusable inline Plus panel for peak moments #}
+{%- set _is_plus = false -%}
+{%- if is_plus_user is defined -%}
+  {%- if is_plus_user is callable -%}
+    {%- set _is_plus = is_plus_user() -%}
+  {%- else -%}
+    {%- set _is_plus = is_plus_user -%}
+  {%- endif -%}
+{%- elif has_plus is defined -%}
+  {%- if has_plus is callable -%}
+    {%- set _is_plus = has_plus() -%}
+  {%- else -%}
+    {%- set _is_plus = has_plus -%}
+  {%- endif -%}
+{%- endif -%}
+
+{%- if not _is_plus -%}
+  {%- set primary_href = primary_href or (plus_checkout_url() if plus_checkout_url is defined else "/plus") -%}
+  {%- set secondary_href = secondary_href or "#" -%}
+  {%- set _class = "peak-plus-panel" -%}
+  {%- if class_name is defined and class_name -%}
+    {%- set _class = _class ~ " " ~ class_name -%}
+  {%- endif -%}
+<div class="{{ _class }}">
+  <div class="peak-plus-body">
+    <div class="peak-plus-title">{{ title or "Plus" }}</div>
+    <div class="peak-plus-text">{{ body or "" }}</div>
+  </div>
+  <div class="peak-plus-actions">
+    <a class="peak-plus-primary" href="{{ primary_href }}">{{ primary_label or "Unlock Plus" }}</a>
+    <a class="peak-plus-secondary" href="{{ secondary_href }}">{{ secondary_label or "Not now" }}</a>
+  </div>
+</div>
+{%- endif -%}

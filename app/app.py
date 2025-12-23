@@ -9,13 +9,14 @@ from app.roulette import models as _roulette_models
 from app.extensions import db, login_manager
 from app.security import generate_csrf_token
 from app.subscriptions import current_user_is_plus
-from sqlalchemy import text
+from sqlalchemy import text, func
 from app.plus import get_plus_checkout_url
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
 from app.tools import tools_bp, api_tools_bp
 from app.scripts.generate_timeline_round import ensure_today_round
+from app.daily_status import get_today_status
 
 
 def _compute_asset_version() -> str:
@@ -66,7 +67,12 @@ def _ensure_user_schema():
             )
             conn.execute(
                 text(
-                    'UPDATE "user" SET created_at = COALESCE(created_at, NOW()), is_active = COALESCE(is_active, TRUE);'
+                    'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS email_opt_in BOOLEAN DEFAULT TRUE;'
+                )
+            )
+            conn.execute(
+                text(
+                    'UPDATE "user" SET created_at = COALESCE(created_at, NOW()), is_active = COALESCE(is_active, TRUE), email_opt_in = COALESCE(email_opt_in, TRUE);'
                 )
             )
     except Exception as exc:
@@ -93,6 +99,69 @@ def schedule_daily_timeline(app):
             print("✅ Timeline Roulette generated")
     scheduler = BackgroundScheduler(timezone=pytz.timezone("America/Denver"))
     scheduler.add_job(job, "cron", hour=0, minute=5)  # adjust to your TZ
+    scheduler.start()
+
+def schedule_weekly_digest(app):
+    def job():
+        from datetime import timedelta
+        with app.app_context():
+            from app.email_utils import send_email
+            from app.escape.models import EscapeAttempt
+            from app.roulette.models import TimelineGuess
+            from app.models import CommunityArticle
+            try:
+                from app.aggregator import User
+            except Exception:
+                User = None
+
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            escape_done = (
+                db.session.query(func.count(EscapeAttempt.id))
+                .filter(EscapeAttempt.success.is_(True), EscapeAttempt.created_at >= week_ago)
+                .scalar()
+                or 0
+            )
+            roulette_total = (
+                db.session.query(func.count(TimelineGuess.id))
+                .filter(TimelineGuess.created_at >= week_ago)
+                .scalar()
+                or 0
+            )
+            roulette_correct = (
+                db.session.query(func.count(TimelineGuess.id))
+                .filter(TimelineGuess.created_at >= week_ago, TimelineGuess.is_correct.is_(True))
+                .scalar()
+                or 0
+            )
+            latest_article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+            brief_topic = latest_article.title if latest_article else "New cyber briefings"
+
+            escape_line = f"{escape_done} Daily Escape wins logged this week."
+            roulette_line = f"Timeline Roulette: {roulette_correct}/{roulette_total} correct picks."
+            brief_line = f"Top brief: {brief_topic}."
+            home_link = "https://therealroundup.com/"
+            prefs_link = home_link.rstrip("/") + "/email-preferences"
+
+            html_body = (
+                f"<p>{escape_line}</p>"
+                f"<p>{roulette_line}</p>"
+                f"<p>{brief_line}</p>"
+                f"<p><a href=\"{home_link}\">Open The Real Roundup</a></p>"
+                f"<p><a href=\"{prefs_link}\">Email preferences</a></p>"
+            )
+            text_body = "\n".join([escape_line, roulette_line, brief_line, home_link, prefs_link])
+
+            if User:
+                recipients = (
+                    User.query.filter(User.email_opt_in.is_(True), User.email.isnot(None))
+                    .with_entities(User.email)
+                    .all()
+                )
+                emails = [r[0] for r in recipients if r and r[0]]
+                for email in emails:
+                    send_email(email, "This week on The Real Roundup", html_body, text_body)
+    scheduler = BackgroundScheduler(timezone=pytz.timezone("America/Denver"))
+    scheduler.add_job(job, "cron", day_of_week="sun", hour=17, minute=0)
     scheduler.start()
 
 def create_app():
@@ -187,7 +256,12 @@ def create_app():
     @app.route("/")
     def landing():
         latest = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
-        return render_template("index.html", year=datetime.now().year, latest=latest)
+        return render_template(
+            "index.html",
+            year=datetime.now().year,
+            latest=latest,
+            today_status=get_today_status(),
+        )
 
     @app.route("/plus")
     def plus_landing():
@@ -267,6 +341,14 @@ def create_app():
             {"Content-Type": "text/plain"},
         )
 
+    @app.route("/email-preferences")
+    def email_prefs():
+        return (
+            "<h2>Email preferences</h2><p>Weekly digest is on by default. Reply to any email or contact support to opt out.</p>",
+            200,
+            {"Content-Type": "text/html"},
+        )
+
     # ---- Start background work AFTER app is created ----
     with app.app_context():
         start_background_tasks()
@@ -274,6 +356,7 @@ def create_app():
         schedule_daily_reddit_article(app)
         schedule_daily_generation(app)
         schedule_daily_timeline(app)
+        schedule_weekly_digest(app)
 
     return app
 

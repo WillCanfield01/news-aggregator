@@ -1,0 +1,40 @@
+{%- set _is_plus = false -%}
+{%- if is_plus_user is defined -%}
+  {%- if is_plus_user is callable -%}
+    {%- set _is_plus = is_plus_user() -%}
+  {%- else -%}
+    {%- set _is_plus = is_plus_user -%}
+  {%- endif -%}
+{%- elif has_plus is defined -%}
+  {%- if has_plus is callable -%}
+    {%- set _is_plus = has_plus() -%}
+  {%- else -%}
+    {%- set _is_plus = has_plus -%}
+  {%- endif -%}
+{%- endif -%}
+
+{%- if not _is_plus -%}
+  {%- set _class = "free-plus-compare" -%}
+  {%- if class_name is defined and class_name -%}
+    {%- set _class = _class ~ " " ~ class_name -%}
+  {%- endif -%}
+<div class="{{ _class }}" data-free-plus-compare>
+  <div class="free-plus-col">
+    <div class="free-plus-label">Free</div>
+    <ul class="free-plus-list">
+      <li class="free-plus-item"><span class="free-plus-bullet" aria-hidden="true"></span><span>Today only</span></li>
+      <li class="free-plus-item"><span class="free-plus-bullet" aria-hidden="true"></span><span>No exports</span></li>
+      <li class="free-plus-item"><span class="free-plus-bullet" aria-hidden="true"></span><span>Ads</span></li>
+    </ul>
+  </div>
+  <div class="free-plus-col is-plus">
+    <div class="free-plus-label">Plus</div>
+    <ul class="free-plus-list">
+      <li class="free-plus-item"><span class="free-plus-bullet is-plus" aria-hidden="true"></span><span>Unlimited plays</span></li>
+      <li class="free-plus-item"><span class="free-plus-bullet is-plus" aria-hidden="true"></span><span>Save and export</span></li>
+      <li class="free-plus-item"><span class="free-plus-bullet is-plus" aria-hidden="true"></span><span>Ad free everywhere</span></li>
+    </ul>
+    <a class="free-plus-link" href="{{ url_for('plus_landing') if url_for is defined else '/plus' }}" onclick="if (window.openPlusPrompt) { window.openPlusPrompt(); return false; } return true;">See Plus features</a>
+  </div>
+</div>
+{%- endif -%}

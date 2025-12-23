@@ -1557,6 +1557,9 @@
         });
 
         if (outputPre) outputPre.textContent = lines.join("\n");
+        if (typeof window.__showToolsPeakPlus === "function" && outputPre && outputPre.textContent.trim().length > 0) {
+            window.__showToolsPeakPlus();
+        }
         if (statusEl) {
             statusEl.textContent = "Saved locally.";
             statusEl.className = "tool-status success";
@@ -2187,6 +2190,8 @@
         const shareUrlEl = outputEl ? outputEl.querySelector("[data-share-url]") : null;
         const copyShareBtn = outputEl ? outputEl.querySelector("[data-copy-share]") : null;
         const copyBtn = form.querySelector("[data-copy-button]");
+        const freePlusBlock = document.querySelector("[data-free-plus-tools]");
+        const peakPanel = document.querySelector("[data-peak-plus-panel]");
         const viewMode = form.dataset.viewMode === "true";
         const savedInput = (() => {
             const raw = form.dataset.savedInput;
@@ -2198,6 +2203,27 @@
             }
         })();
         let lockedView = viewMode;
+
+        const showFreePlus = () => {
+            if (!freePlusBlock) return;
+            if (!freePlusBlock.children || freePlusBlock.children.length === 0) return;
+            freePlusBlock.style.display = "block";
+        };
+
+        const showPeakPlus = () => {
+            if (HAS_PLUS) return;
+            if (viewMode || lockedView) return;
+            if (!peakPanel) return;
+            peakPanel.style.display = "block";
+        };
+
+        if (freePlusBlock && outputPre && outputPre.textContent && outputPre.textContent.trim().length > 0) {
+            showFreePlus();
+        }
+        window.__showToolsPeakPlus = () => {
+            showFreePlus();
+            showPeakPlus();
+        };
 
         const setStatus = (text, type = "") => {
             if (!statusEl) return;
@@ -2525,6 +2551,8 @@
 
         const renderOutput = (data, slug) => {
             if (!outputEl) return;
+            showFreePlus();
+            showPeakPlus();
             clearOutputCards();
             if (outputPre) outputPre.textContent = "";
 

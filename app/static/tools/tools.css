@@ -348,6 +348,10 @@
     color: #1f2937;
 }
 
+.tool-free-plus {
+    margin-top: 14px;
+}
+
 .tool-copy-share,
 .tool-copy-btn {
     background: #eef3ff;

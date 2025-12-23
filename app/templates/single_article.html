@@ -234,25 +234,35 @@
 <div class="container">
     <a class="back-link" href="{{ url_for('all_articles.published_articles') }}">← Back to All Briefings</a>
     <h1 class="article-title">{{ title }}</h1>
+    {% include "partials/_micro_tagline.html" %}
     <p class="article-meta">{{ date.strftime('%B %d, %Y') }}</p>
     {% if hero_url %}
     <div style="margin: 10px 0 18px;">
         <img src="{{ hero_url }}" alt="" style="width:100%;height:auto;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,0.08);">
     </div>
-    {% if hero_credit %}
+    {% if hero_credit and is_plus %}
     <div class="hero-credit">{{ hero_credit }}</div>
     {% endif %}
     {% endif %}
 
-    {% if is_plus and content_full %}
+{% if is_plus and content_full %}
     <div class="article-content">
         {{ content_full | safe }}
     </div>
-    {% else %}
+{% else %}
     <div class="briefing-preview">
         <h2>Overview 🔒</h2>
-        <p>{{ preview_summary }}</p>
+        {% if hero_credit %}
+        <div class="hero-credit" style="margin-bottom:8px;">{{ hero_credit }}</div>
+        {% endif %}
+        <p>{{ overview_text or preview_summary }}</p>
+        <button type="button" id="briefShareBtn" class="lock-secondary" style="margin-top:10px;">Copy share text</button>
+        <span id="briefShareStatus" class="article-date" style="margin-left:8px;"></span>
     </div>
+    {% if not is_plus %}
+    {% include "partials/_peak_plus_panel.html" with title="Want the full breakdown?" body="Plus includes deep dive briefings, remediation steps, and exports." primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="Back to briefs" secondary_href=url_for('all_articles.published_articles') %}
+    {% endif %}
+    {% include "partials/_free_vs_plus.html" %}
     {% include "partials/plus_lock_card.html" %}
     {% endif %}
 </div>
@@ -267,6 +277,35 @@
   "author":{"@type":"Person","name":"The Roundup"},
   "mainEntityOfPage":{"@type":"WebPage","@id":"https://therealroundup.com/all-articles/articles/{{ request.view_args['filename'] }}"}
 }
+</script>
+
+<script>
+  (() => {
+    const btn = document.getElementById("briefShareBtn");
+    const status = document.getElementById("briefShareStatus");
+    if (!btn) return;
+    const shareText = `Today’s cyber brief: {{ (overview_text or title)|replace('"', '') }}. {{ request.url }}`;
+    async function copyShare() {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(shareText);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = shareText;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        status.textContent = "Copied";
+        setTimeout(() => status.textContent = "", 2000);
+      } catch (e) {
+        status.textContent = "Copy failed";
+        setTimeout(() => status.textContent = "", 2000);
+      }
+    }
+    btn.addEventListener("click", copyShare);
+  })();
 </script>
 
 <section class="cta">

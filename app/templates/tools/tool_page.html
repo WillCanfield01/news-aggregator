@@ -34,6 +34,7 @@
         <header class="tool-header">
             <p class="eyebrow">{{ tool.category }}</p>
             <h1>{{ tool.title }}</h1>
+            {% include "partials/_micro_tagline.html" %}
             <p class="lead">{{ tool.description }}</p>
             {% if callout_message %}
             <div class="tool-note" role="note">{{ callout_message }}</div>
@@ -89,6 +90,15 @@
                     </div>
                 </div>
             </div>
+            {% set _tool_is_plus = is_plus_user() if is_plus_user is defined and is_plus_user is callable else (is_plus_user if is_plus_user is defined else False) %}
+            {% if not _tool_is_plus %}
+            <div class="peak-plus-holder" data-peak-plus-panel style="display:none;">
+                {% include "partials/_peak_plus_panel.html" with title="Save this for later?" body="Plus unlocks history, exports, and multiple share links." primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="Keep using free" secondary_href="#" %}
+            </div>
+            <div class="tool-free-plus" data-free-plus-tools {% if not saved_output %}style="display:none;"{% endif %}>
+                {% include "partials/_free_vs_plus.html" %}
+            </div>
+            {% endif %}
         </div>
     </div>
 </section>

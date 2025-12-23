@@ -820,6 +820,10 @@ def session_guess():
     if is_correct:
         sess.score += 1
     db.session.commit()
+    try:
+        mark_free_roulette_used(_local_today())
+    except Exception:
+        pass
 
     return jsonify({"ok": True, "correct_index": correct, "is_correct": is_correct, "score": sess.score})
 

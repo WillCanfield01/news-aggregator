@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import os, hashlib, secrets
 from random import Random
-from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort
+from flask import Blueprint, jsonify, request, render_template, current_app, redirect, url_for, abort, session
 
 from app.extensions import db
 from app.subscriptions import current_user_has_plus
@@ -25,6 +25,7 @@ from .core import (
     get_today_key,
     attach_daily_minis,   # <-- we will call this correctly
 )
+from app.daily_status import ESCAPE_COMPLETE_KEY
 
 def _rng_for_date(date_key: str) -> Random:
     """Deterministic RNG per date using server secret (+ optional salt)."""
@@ -492,6 +493,11 @@ def init_routes(bp: Blueprint):
         )
         db.session.add(attempt)
         db.session.commit()
+        if success:
+            try:
+                session[ESCAPE_COMPLETE_KEY] = date_key
+            except Exception:
+                pass
 
         return jsonify({
             "ok": True,

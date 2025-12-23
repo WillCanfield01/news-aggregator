@@ -14,6 +14,10 @@
   const plusCopyEl = document.getElementById("roulettePlusCopy");
   const plusCtaEl = document.getElementById("roulettePlusCta");
   const plusSecondaryEl = document.getElementById("roulettePlusSecondary");
+  const freePlusBlock = document.getElementById("rouletteFreePlus");
+  const peakPanel = document.getElementById("roulettePeakPanel");
+  const shareBtn = document.getElementById("rouletteShareBtn");
+  const shareStatus = document.getElementById("rouletteShareStatus");
   const HAS_PLUS = window.rrHasPlus === true || window.rrHasPlus === "true";
 
   let state = { step: 1, score: 0, payload: null, locked: false };
@@ -64,6 +68,7 @@
     nextBtn.style.display = "none";
     restartBtn.style.display = "none";
     sessionScore.textContent = "Score: 0/0";
+    hideFreePlus();
     state.locked = true;
 
     if (plusCard) {
@@ -100,12 +105,57 @@
     dateNoteEl.textContent = payload.date_label ? payload.date_label : "";
   }
 
+  const showFreePlus = () => {
+    if (freePlusBlock) freePlusBlock.style.display = "block";
+  };
+
+  const hideFreePlus = () => {
+    if (freePlusBlock) freePlusBlock.style.display = "none";
+  };
+
+  const showPeakPanel = () => {
+    if (HAS_PLUS) return;
+    if (peakPanel) peakPanel.style.display = "block";
+  };
+
+  const hidePeakPanel = () => {
+    if (peakPanel) peakPanel.style.display = "none";
+  };
+
+  const copyShare = async (text) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      if (shareStatus) {
+        shareStatus.textContent = "Copied";
+        setTimeout(() => (shareStatus.textContent = ""), 2000);
+      }
+    } catch (e) {
+      if (shareStatus) {
+        shareStatus.textContent = "Copy failed";
+        setTimeout(() => (shareStatus.textContent = ""), 2000);
+      }
+    }
+  };
+
   function renderCards(payload) {
     payload = sanitizeImages(payload);
     cardsEl.innerHTML = "";
     sourceLink.style.display = "none";
     resultEl.classList.remove("is-visible");
     resultEl.textContent = "";
+    hideFreePlus();
+    hidePeakPanel();
+    if (shareBtn) shareBtn.style.display = "none";
+    if (shareStatus) shareStatus.textContent = "";
     state.locked = false;
     const type = payload.type;
 
@@ -183,10 +233,13 @@
 
   async function fetchSession() {
     let res;
+    hideFreePlus();
+    hidePeakPanel();
     try {
       res = await fetch("/roulette/session");
     } catch (e) {
       promptEl.textContent = "Unable to start game right now.";
+      showFreePlus();
       return;
     }
     let data = {};
@@ -202,11 +255,14 @@
       }
       promptEl.textContent = "Unable to start game right now.";
       subheadEl.textContent = "Pick the real one.";
+      showFreePlus();
+      hidePeakPanel();
       return;
     }
     if (plusCard) {
       plusCard.style.display = "none";
     }
+    hidePeakPanel();
     state.step = data.step;
     state.score = data.score;
     state.payload = data.payload;
@@ -242,6 +298,18 @@
         const msg = data.is_correct ? "You got it." : "Good try - the real pick is highlighted.";
         resultEl.textContent = msg;
         resultEl.classList.add("is-visible");
+        if (data.is_correct) {
+          showPeakPanel();
+          if (shareBtn) {
+            const shareText = `I spotted the real headline on Timeline Roulette today. ${window.location.origin}/roulette`;
+            shareBtn.style.display = "inline-flex";
+            shareBtn.onclick = () => copyShare(shareText);
+          }
+        } else {
+          hidePeakPanel();
+          if (shareBtn) shareBtn.style.display = "none";
+        }
+        showFreePlus();
         state.score = data.score;
         sessionScore.textContent = `Score: ${Math.min(state.score, 3)}/${Math.min(state.step, 3)}`;
         if (state.payload && state.payload.source_url) {
@@ -253,6 +321,9 @@
     } catch (e) {
       resultEl.textContent = "Unable to record that pick.";
       resultEl.classList.add("is-visible");
+      showFreePlus();
+      hidePeakPanel();
+      if (shareBtn) shareBtn.style.display = "none";
     }
   }
 
@@ -318,6 +389,8 @@
     nextBtn.style.display = "none";
     restartBtn.style.display = "inline-flex";
     sourceLink.style.display = "none";
+    showFreePlus();
+    hidePeakPanel();
   }
 
   restartBtn.addEventListener("click", async () => {

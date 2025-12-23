@@ -6,7 +6,7 @@ import difflib
 import requests
 from datetime import datetime, date, timedelta
 import openai
-from flask import Blueprint, render_template, jsonify
+from flask import Blueprint, render_template, jsonify, session
 from markdown2 import markdown
 from unidecode import unidecode
 from app.models import CommunityArticle
@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import hashlib
 from app.subscriptions import current_user_is_plus
 import json
+from app.daily_status import BRIEF_SEEN_KEY
 
 # ------------------------------
 # Config & constants
@@ -188,6 +189,47 @@ def _build_preview(article, md_text: str) -> tuple[str, list[str]]:
     summary = re.sub(r"[-*•]\s+", "", summary)
     clean_summary = _sentence_limited_summary(summary, max_chars=340)
     return clean_summary.strip(), []
+
+
+def _clean_overview(md_text: str) -> str:
+    skip_headings = {"what happened", "what to do", "why it matters", "remediation", "key actions"}
+    lines: list[str] = []
+    for raw_line in (md_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("photo by"):
+            continue
+        if re.match(r"^\s*[-*•]\s+", line):
+            continue
+        if re.match(r"^#{1,6}\s+", line):
+            heading = re.sub(r"^#{1,6}\s+", "", line).strip().lower()
+            if heading in skip_headings:
+                continue
+            else:
+                continue
+        lower = line.lower()
+        if any(lower.startswith(h) for h in skip_headings):
+            continue
+        lines.append(line)
+
+    text = " ".join(lines)
+    text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+    text = re.sub(r"!\[[^\]]*\]\([^\)]+\)", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    if sentences:
+        overview = " ".join(sentences[:4])
+    else:
+        overview = text[:240].rstrip(" .,!?:;")
+    if not overview.endswith((".", "!", "?")):
+        last_period = overview.rfind(".")
+        if last_period > 80:
+            overview = overview[: last_period + 1]
+        elif len(overview) > 0 and len(overview) >= 240:
+            overview = overview[:240].rstrip(" .,!?:;") + "…"
+    return overview.strip()
 
 # Topic/vendor helpers
 VENDOR_HINTS = [
@@ -1073,24 +1115,32 @@ def read_article(filename):
     cleaned_md = remove_first_heading(article.content or "")
     hero_url, hero_credit = _extract_hero_info(article.content or "")
     preview_summary, preview_bullets = _build_preview(article, cleaned_md)
+    overview_text = _clean_overview(cleaned_md)
     html_content = markdown(cleaned_md, extras=["tables"]) if is_plus else None
 
     meta_title = article.meta_title or article.title
     if article.meta_description:
         meta_description = article.meta_description
     else:
-        meta_description = preview_summary[:160]
+        meta_description = overview_text[:160]
 
     # NEW: fetch newest article to power the CTA
     latest_article = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+
+    if article.date and article.date == date.today():
+        try:
+            session[BRIEF_SEEN_KEY] = article.date.isoformat()
+        except Exception:
+            pass
 
     return render_template(
         "single_article.html",
         title=article.title,
         date=article.date,
         content_full=html_content if is_plus else None,
-        preview_summary=preview_summary,
-        preview_bullets=preview_bullets,
+        preview_summary=overview_text,
+        preview_bullets=[],
+        overview_text=overview_text,
         hero_url=hero_url,
         hero_credit=hero_credit,
         meta_title=meta_title,

@@ -65,6 +65,48 @@
       font-size: 14px;
     }
 
+    .micro-tagline {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.95rem;
+      line-height: 1.4;
+      color: var(--micro-tagline-color, rgba(229, 231, 235, 0.78));
+      letter-spacing: 0.01em;
+      margin: 4px 0 2px;
+    }
+
+    .micro-tagline span {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .peak-plus-panel.dark {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 38px rgba(0, 0, 0, 0.35);
+      color: #e2e8f0;
+    }
+
+    .peak-plus-panel.dark .peak-plus-title {
+      color: #f8fafc;
+    }
+
+    .peak-plus-panel.dark .peak-plus-text {
+      color: rgba(226, 232, 240, 0.9);
+    }
+
+    .peak-plus-panel.dark .peak-plus-secondary {
+      border-color: rgba(255, 255, 255, 0.14);
+      color: #e2e8f0;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .peak-plus-panel.dark .peak-plus-secondary:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
     .progress {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -684,6 +726,9 @@
     <header>
       <div>
         <div class="brand">Daily Escape</div>
+        <div style="--micro-tagline-color: rgba(229, 231, 235, 0.82);">
+          {% include "partials/_micro_tagline.html" %}
+        </div>
         <div class="meta"><span id="todayMeta"></span> • <span class="timer" id="globalTimer">0:00</span></div>
       </div>
       <div class="row">
@@ -721,16 +766,15 @@
         <div class="row center" style="justify-content:center;">
           <div id="shareBlock" class="share"></div>
         </div>
+        <div class="row center" style="justify-content:center;gap:10px;margin-top:8px;">
+          <button id="escapeShareCopy" class="btn btn-secondary">Copy share</button>
+          <span id="escapeShareStatus" class="muted"></span>
+        </div>
         <div style="height:10px;"></div>
         <a href="/escape/leaderboard" class="btn">See Leaderboard</a>
         {% if not _has_plus %}
-        <div id="escapePlusPanel" style="margin-top:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;color:#e2e8f0;">
-          <div style="font-weight:800;margin-bottom:4px;">Nice escape 👏</div>
-          <p style="margin:0 0 8px;color:#cbd5e1;">Want to try Easy mode, replay today’s puzzle, or explore past escapes?</p>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <a href="/plus" class="btn btn-primary">Unlock Plus · $2.99/mo</a>
-            <a href="/" class="btn btn-secondary">Back tomorrow</a>
-          </div>
+        <div id="escapePlusPanel">
+          {% include "partials/_peak_plus_panel.html" with title="Nice escape." body="Want to try Easy mode, replay today’s puzzle, or explore past escapes?" primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="Back tomorrow" secondary_href="/escape/today?mode=normal" class_name="dark" %}
         </div>
         {% endif %}
       </div>
@@ -864,6 +908,30 @@
 
       // Global UI flash timing (scaled in easy mode)
       const getUiTiming = () => applyDifficulty({ flashMs: 220 });
+
+      async function copyShareText(text, statusEl) {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          if (statusEl) {
+            statusEl.textContent = "Copied";
+            setTimeout(() => statusEl.textContent = "", 2000);
+          }
+        } catch (e) {
+          if (statusEl) {
+            statusEl.textContent = "Copy failed";
+            setTimeout(() => statusEl.textContent = "", 2000);
+          }
+        }
+      }
 
       function persistMode(mode, { reload = false, replace = false } = {}) {
         const m = parseMode(mode) || "normal";
@@ -1157,7 +1225,20 @@
 
         const cleared = Object.keys(state.answers || {}).length;
         const share = document.getElementById("shareBlock");
-        if (share) share.textContent = `Daily Escape ${state.dateKey}\n${cleared}/3 cleared`;
+        const shareCopyBtn = document.getElementById("escapeShareCopy");
+        const shareStatus = document.getElementById("escapeShareStatus");
+        if (share) {
+          const shareText = `I beat today’s Daily Escape in ${mm}:${String(ss).padStart(2, "0")} on The Real Roundup. ${window.location.origin}/escape/today`;
+          share.textContent = shareText;
+          if (shareCopyBtn) {
+            if (success) {
+              shareCopyBtn.style.display = "inline-flex";
+              shareCopyBtn.onclick = () => copyShareText(shareText, shareStatus);
+            } else {
+              shareCopyBtn.style.display = "none";
+            }
+          }
+        }
         if (!HAS_PLUS) {
           const panel = document.getElementById("escapePlusPanel");
           if (panel) panel.style.display = "block";

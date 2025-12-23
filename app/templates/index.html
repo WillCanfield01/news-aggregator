@@ -159,6 +159,117 @@
         font-size: 0.9rem;
     }
 
+    .today-section {
+        margin: 32px 0 10px;
+    }
+
+    .today-card {
+        background: #fff;
+        border-radius: 16px;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+        padding: 18px 18px 6px;
+    }
+
+    .today-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 6px;
+    }
+
+    .today-eyebrow {
+        margin: 0;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        color: #6b7280;
+    }
+
+    .today-title {
+        margin: 4px 0 2px;
+        font-size: 1.3rem;
+        font-weight: 800;
+        color: #0f1b2d;
+    }
+
+    .today-note {
+        color: #6b7280;
+        font-size: 0.95rem;
+        max-width: 300px;
+        line-height: 1.4;
+    }
+
+    .today-list {
+        display: grid;
+        gap: 6px;
+        margin-top: 4px;
+    }
+
+    .today-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        text-decoration: none;
+        padding: 12px 0;
+        color: #0f1b2d;
+        border-top: 1px solid #eef1f6;
+    }
+
+    .today-row:first-of-type {
+        border-top: none;
+        padding-top: 6px;
+    }
+
+    .today-label {
+        font-weight: 750;
+        font-size: 1rem;
+    }
+
+    .today-sub {
+        margin-top: 4px;
+        color: #6b7280;
+        font-size: 0.95rem;
+    }
+
+    .today-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 0.95rem;
+        border: 1px solid #e5e7eb;
+        background: #f8fafc;
+        color: #475569;
+        white-space: nowrap;
+        min-width: 138px;
+        justify-content: center;
+    }
+
+    .today-pill.is-done {
+        color: #166534;
+        background: #ecfdf3;
+        border-color: #bbf7d0;
+    }
+
+    .today-check {
+        font-size: 1.05rem;
+        line-height: 1;
+    }
+
+    .today-row:hover .today-label {
+        text-decoration: underline;
+    }
+
+    .today-pill.is-pending {
+        border-style: dashed;
+    }
+
     .cta-inline {
         font-weight: 700;
         color: var(--brand);
@@ -306,6 +417,19 @@
         .home-shell {
             padding-bottom: 112px;
         }
+
+        .today-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .today-pill {
+            width: 100%;
+        }
+
+        .today-row {
+            align-items: flex-start;
+        }
     }
 
     .below {
@@ -345,6 +469,7 @@
     <div class="hero-wrap">
         <section class="hero container">
             <h1 class="site-title">The Real Roundup</h1>
+            {% include "partials/_micro_tagline.html" %}
             <div class="subtext">
                 Daily security briefings, interactive games, and practical tools to keep your skills sharp.
             </div>
@@ -359,6 +484,56 @@
     </div>
 
     <main class="container">
+        {% set statuses = today_status or {} %}
+        {% set escape_done = statuses.get('escape', False) %}
+        {% set roulette_done = statuses.get('roulette', False) %}
+        {% set brief_done = statuses.get('brief', False) %}
+        {% set brief_href = url_for('all_articles.published_articles') %}
+        {% if latest %}
+        {% set brief_href = url_for('all_articles.read_article', filename=latest.filename) %}
+        {% endif %}
+
+        <section class="today-section" aria-labelledby="todayHeading">
+            <div class="today-card">
+                <div class="today-header">
+                    <div>
+                        <p class="today-eyebrow">Daily loop</p>
+                        <h2 class="today-title" id="todayHeading">Today</h2>
+                    </div>
+                    <div class="today-note">Quick checklist to keep your brief, game, and tools streak moving.</div>
+                </div>
+                <div class="today-list">
+                    <a class="today-row" href="/escape/today">
+                        <div>
+                            <div class="today-label">Daily Escape is live</div>
+                            <div class="today-sub">Three quick puzzles, fresh today.</div>
+                        </div>
+                        <span class="today-pill {{ 'is-done' if escape_done else 'is-pending' }}">
+                            {% if escape_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
+                        </span>
+                    </a>
+                    <a class="today-row" href="/roulette">
+                        <div>
+                            <div class="today-label">Timeline Roulette</div>
+                            <div class="today-sub">Pick the real event to keep your streak.</div>
+                        </div>
+                        <span class="today-pill {{ 'is-done' if roulette_done else 'is-pending' }}">
+                            {% if roulette_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
+                        </span>
+                    </a>
+                    <a class="today-row" href="{{ brief_href }}">
+                        <div>
+                            <div class="today-label">Cyber Brief</div>
+                            <div class="today-sub">Open today’s briefing or latest edition.</div>
+                        </div>
+                        <span class="today-pill {{ 'is-done' if brief_done else 'is-pending' }}">
+                            {% if brief_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
+                        </span>
+                    </a>
+                </div>
+            </div>
+        </section>
+
         <section class="products">
             <div class="product-grid">
                 <div class="product-card">
