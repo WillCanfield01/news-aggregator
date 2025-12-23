@@ -774,7 +774,14 @@
         <a href="/escape/leaderboard" class="btn">See Leaderboard</a>
         {% if not _has_plus %}
         <div id="escapePlusPanel">
-          {% include "partials/_peak_plus_panel.html" with title="Nice escape." body="Want to try Easy mode, replay today’s puzzle, or explore past escapes?" primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="Back tomorrow" secondary_href="/escape/today?mode=normal" class_name="dark" %}
+          {% set title = "Nice escape." %}
+          {% set body = "Want to try Easy mode, replay today’s puzzle, or explore past escapes?" %}
+          {% set primary_label = "Unlock Plus · $2.99/mo" %}
+          {% set primary_href = plus_checkout_url() %}
+          {% set secondary_label = "Back tomorrow" %}
+          {% set secondary_href = "/escape/today?mode=normal" %}
+          {% set class_name = "dark" %}
+          {% include "partials/_peak_plus_panel.html" %}
         </div>
         {% endif %}
       </div>

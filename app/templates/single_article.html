@@ -240,7 +240,7 @@
     <div style="margin: 10px 0 18px;">
         <img src="{{ hero_url }}" alt="" style="width:100%;height:auto;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,0.08);">
     </div>
-    {% if hero_credit and is_plus %}
+    {% if hero_credit %}
     <div class="hero-credit">{{ hero_credit }}</div>
     {% endif %}
     {% endif %}
@@ -260,7 +260,13 @@
         <span id="briefShareStatus" class="article-date" style="margin-left:8px;"></span>
     </div>
     {% if not is_plus %}
-    {% include "partials/_peak_plus_panel.html" with title="Want the full breakdown?" body="Plus includes deep dive briefings, remediation steps, and exports." primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="Back to briefs" secondary_href=url_for('all_articles.published_articles') %}
+    {% set title = "Want the full breakdown?" %}
+    {% set body = "Plus includes deep dive briefings, remediation steps, and exports." %}
+    {% set primary_label = "Unlock Plus · $2.99/mo" %}
+    {% set primary_href = plus_checkout_url() %}
+    {% set secondary_label = "Back to briefs" %}
+    {% set secondary_href = url_for('all_articles.published_articles') %}
+    {% include "partials/_peak_plus_panel.html" %}
     {% endif %}
     {% include "partials/_free_vs_plus.html" %}
     {% include "partials/plus_lock_card.html" %}

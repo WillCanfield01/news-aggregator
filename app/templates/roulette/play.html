@@ -35,7 +35,13 @@
         {% include "partials/_free_vs_plus.html" %}
     </div>
     <div id="roulettePeakPanel" style="display:none;">
-        {% include "partials/_peak_plus_panel.html" with title="Good pick." body="Want more rounds, streak protection, and past days?" primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="View leaderboard" secondary_href="/roulette/leaderboard" %}
+        {% set title = "Good pick." %}
+        {% set body = "Want more rounds, streak protection, and past days?" %}
+        {% set primary_label = "Unlock Plus · $2.99/mo" %}
+        {% set primary_href = plus_checkout_url() %}
+        {% set secondary_label = "View leaderboard" %}
+        {% set secondary_href = "/roulette/leaderboard" %}
+        {% include "partials/_peak_plus_panel.html" %}
     </div>
     {% endif %}
 

@@ -93,7 +93,13 @@
             {% set _tool_is_plus = is_plus_user() if is_plus_user is defined and is_plus_user is callable else (is_plus_user if is_plus_user is defined else False) %}
             {% if not _tool_is_plus %}
             <div class="peak-plus-holder" data-peak-plus-panel style="display:none;">
-                {% include "partials/_peak_plus_panel.html" with title="Save this for later?" body="Plus unlocks history, exports, and multiple share links." primary_label="Unlock Plus · $2.99/mo" primary_href=plus_checkout_url() secondary_label="Keep using free" secondary_href="#" %}
+                {% set title = "Save this for later?" %}
+                {% set body = "Plus unlocks history, exports, and multiple share links." %}
+                {% set primary_label = "Unlock Plus · $2.99/mo" %}
+                {% set primary_href = plus_checkout_url() %}
+                {% set secondary_label = "Keep using free" %}
+                {% set secondary_href = "#" %}
+                {% include "partials/_peak_plus_panel.html" %}
             </div>
             <div class="tool-free-plus" data-free-plus-tools {% if not saved_output %}style="display:none;"{% endif %}>
                 {% include "partials/_free_vs_plus.html" %}
