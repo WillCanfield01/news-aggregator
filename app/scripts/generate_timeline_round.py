@@ -13,6 +13,7 @@ from app.roulette.models import TimelineRound, TimelineGuess
 import pytz
 import requests
 from sqlalchemy import select
+from openai import OpenAI
 
 from app.extensions import db
 try:
@@ -29,6 +30,7 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
 
 OAI_URL = "https://api.openai.com/v1/chat/completions"  # works with o3-mini/gpt-4o-mini, etc.
 OAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+HEADLINE_MODEL = os.getenv("HEADLINE_MODEL", "gpt-4.1-mini")
 
 WIKI_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{m}/{d}"
 
@@ -269,6 +271,137 @@ QUOTE_LIBRARY: list[dict[str, str]] = [
 def _today_local_date():
     return datetime.now(TZ).date()
 
+TIMELINE_HEADLINE_SYSTEM = """
+You write newspaper style headlines for a history guessing game.
+
+The game shows players three headlines about one date. Exactly one is true. The other two are fake but plausible.
+
+Rules:
+- Use clear, specific, natural English.
+- One short sentence per headline. End with a period.
+- Include concrete details. Prefer numbers, named places, offices, or titles.
+- Never use generic phrases like "draws attention", "major outlets", "review of tech services".
+- Never trail off with "..." or end mid phrase.
+- Each headline must describe a different event or angle. No copying or shallow rewrites.
+- Headlines should feel like they could be from a wire service or major newspaper.
+
+Output strict JSON with keys:
+  "real_headline"
+  "fake_headline_1"
+  "fake_headline_2"
+"""
+
+def build_timeline_headline_user_prompt(event_date_str: str, real_title: str, real_summary: str) -> str:
+    return f"""
+    You are given one real historical event and its date.
+
+    Date: {event_date_str}
+    Real event title: {real_title}
+
+    Short description of the real event:
+    {real_summary}
+
+    Write three headlines as JSON.
+
+    Requirements for the REAL headline:
+    - It must describe the real event above.
+    - Include the place or institution if known, or the country or city.
+    - Include at least one concrete detail such as a number, named group, or specific policy.
+    - Length between 10 and 22 words.
+
+    Requirements for the TWO FAKE headlines:
+    - They must be completely made up.
+    - They must fit the same general era and "vibe" as the real event.
+    - Each must focus on a different plausible situation, not a minor variation of the same idea.
+    - Include specific entities, numbers, or places so they feel real.
+    - Length between 10 and 22 words.
+    - They must not reuse long phrases from the real headline or from each other.
+
+    Respond with JSON only, no commentary.
+    """
+
+def call_timeline_headlines_model(event_date_str: str, real_title: str, real_summary: str) -> Optional[dict]:
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        user_prompt = build_timeline_headline_user_prompt(event_date_str, real_title, real_summary)
+        resp = client.chat.completions.create(
+            model=HEADLINE_MODEL,
+            messages=[
+                {"role": "system", "content": TIMELINE_HEADLINE_SYSTEM},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=320,
+            temperature=0.8,
+        )
+        content = resp.choices[0].message.content
+        return json.loads(content) if content else None
+    except Exception:
+        return None
+
+GENERIC_BITS = [
+    "draws attention",
+    "review of tech services",
+    "outlined next steps",
+    "major outlets",
+    "regional board",
+    "civic officials outline next steps",
+]
+
+def _headline_ok(text: str) -> bool:
+    if not text:
+        return False
+    t = text.strip()
+    if not t.endswith("."):
+        return False
+    if "..." in t:
+        return False
+    words = t.split()
+    if len(words) < 10 or len(words) > 24:
+        return False
+    lowered = t.lower()
+    if any(bit in lowered for bit in GENERIC_BITS):
+        return False
+    return True
+
+def _distinct_enough(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    if a.strip().lower() == b.strip().lower():
+        return False
+    a_words = a.lower().split()
+    b_words = b.lower().split()
+    a_shingles = {" ".join(a_words[i:i+4]) for i in range(len(a_words) - 3)} if len(a_words) >= 4 else {a.lower()}
+    b_shingles = {" ".join(b_words[i:i+4]) for i in range(len(b_words) - 3)} if len(b_words) >= 4 else {b.lower()}
+    overlap = a_shingles.intersection(b_shingles)
+    return len(overlap) == 0
+
+def validate_timeline_headlines(h: dict) -> bool:
+    real_h = h.get("real_headline", "")
+    f1 = h.get("fake_headline_1", "")
+    f2 = h.get("fake_headline_2", "")
+    if not (_headline_ok(real_h) and _headline_ok(f1) and _headline_ok(f2)):
+        return False
+    if not _distinct_enough(real_h, f1):
+        return False
+    if not _distinct_enough(real_h, f2):
+        return False
+    if not _distinct_enough(f1, f2):
+        return False
+    return True
+
+def generate_headlines_for_round(event_date: datetime, real_title: str, real_summary: str) -> Optional[dict]:
+    date_str = event_date.strftime("%B %d, %Y")
+    headlines = call_timeline_headlines_model(date_str, real_title, real_summary)
+    if headlines and validate_timeline_headlines(headlines):
+        return headlines
+    # retry with nudge
+    headlines = call_timeline_headlines_model(date_str, real_title, real_summary + "\nBe extra concrete and specific in all three headlines.")
+    if headlines and validate_timeline_headlines(headlines):
+        return headlines
+    return None
 
 def _http_get_json(url: str, headers: dict | None = None, params: dict | None = None) -> dict:
     r = requests.get(url, headers=headers or {}, params=params or {}, timeout=(5, 45))
@@ -1371,21 +1504,27 @@ def ensure_today_round(force: int = 0) -> bool:
     real_soft = _soften_real_title(real_raw)
     domain = _infer_domain(real_soft)
 
-    real_soft = _normalize_choice(real_soft, 14, 22)
-    real_soft = _finalize_headline(real_soft)
-    if not _validate_headline(real_soft):
-        real_soft = _normalize_choice(real_raw, 14, 22)
+    # Try headline generation via model
+    headlines = generate_headlines_for_round(today, real_soft, real_raw) if OPENAI_API_KEY else None
+    if headlines:
+        real_soft = _finalize_headline(headlines["real_headline"])
+        fake1 = _finalize_headline(headlines["fake_headline_1"])
+        fake2 = _finalize_headline(headlines["fake_headline_2"])
+    else:
+        real_soft = _normalize_choice(real_soft, 14, 22)
         real_soft = _finalize_headline(real_soft)
         if not _validate_headline(real_soft):
-            real_soft = _normalize_choice("Historic event covered by major outlets draws attention.", 14, 22)
-    real_len = _wlen(real_soft)
-    fake_min = max(14, real_len - 3)
-    fake_max = min(22, real_len + 3)
-
-    year_hint = real_year or _extract_year_hint(real_raw) or _extract_year_hint(real_soft)
-    decoy1, decoy2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max, year_hint=year_hint)
-    fake1 = decoy1["decoy_headline"]
-    fake2 = decoy2["decoy_headline"]
+            real_soft = _normalize_choice(real_raw, 14, 22)
+            real_soft = _finalize_headline(real_soft)
+            if not _validate_headline(real_soft):
+                real_soft = _normalize_choice("Historic event covered by major outlets draws attention.", 14, 22)
+        real_len = _wlen(real_soft)
+        fake_min = max(14, real_len - 3)
+        fake_max = min(22, real_len + 3)
+        year_hint = real_year or _extract_year_hint(real_raw) or _extract_year_hint(real_soft)
+        decoy1, decoy2 = _openai_fakes_from_real(real_soft, month_name, domain, fake_min, fake_max, year_hint=year_hint)
+        fake1 = decoy1["decoy_headline"]
+        fake2 = decoy2["decoy_headline"]
 
     def _normalize_target(text: str) -> str:
         normalized = _normalize_choice(text, fake_min, fake_max)
@@ -1433,19 +1572,20 @@ def ensure_today_round(force: int = 0) -> bool:
             normalized = _normalize_choice(normalized, fake_min, fake_max)
         return normalized
 
-    fake1 = _normalize_target(fake1)
-    fake2 = _normalize_target(fake2)
+    if not headlines:
+        fake1 = _normalize_target(fake1)
+        fake2 = _normalize_target(fake2)
 
-    headlines = [real_soft, fake1, fake2]
-    regen_attempts = 0
-    while (not _unique_headlines(headlines) or any(not _validate_headline(h) for h in headlines)) and regen_attempts < 3:
-        # regenerate decoys via fallback templates
-        fallback_a = _normalize_choice(f"A city agency unveils updated plan after review of {domain or 'public'} services.", fake_min, fake_max)
-        fallback_b = _normalize_choice(f"Regional board announces phased changes to {domain or 'community'} programs following hearings.", fake_min, fake_max)
-        fake1 = _finalize_headline(fallback_a)
-        fake2 = _finalize_headline(fallback_b)
-        headlines = [real_soft, fake1, fake2]
-        regen_attempts += 1
+        headlines_list = [real_soft, fake1, fake2]
+        regen_attempts = 0
+        while (not _unique_headlines(headlines_list) or any(not _validate_headline(h) for h in headlines_list)) and regen_attempts < 3:
+            # regenerate decoys via fallback templates
+            fallback_a = _normalize_choice(f"A city agency unveils updated plan after review of {domain or 'public'} services.", fake_min, fake_max)
+            fallback_b = _normalize_choice(f"Regional board announces phased changes to {domain or 'community'} programs following hearings.", fake_min, fake_max)
+            fake1 = _finalize_headline(fallback_a)
+            fake2 = _finalize_headline(fallback_b)
+            headlines_list = [real_soft, fake1, fake2]
+            regen_attempts += 1
     if current_app:
         try:
             current_app.logger.info("[roulette] headlines: real=%s | fake1=%s | fake2=%s", real_soft, fake1, fake2)

@@ -6,6 +6,7 @@ from app.scripts.generate_timeline_round import (
     _unique_headlines,
     _finalize_headline,
     _normalize_choice,
+    validate_timeline_headlines,
 )
 
 
@@ -43,3 +44,15 @@ def test_generation_like_loop():
         assert _validate_headline(fake2)
         assert _unique_headlines([real, fake1, fake2])
         headlines.append((real, fake1, fake2))
+
+
+def test_validate_timeline_headlines():
+    payload = {
+        "real_headline": "City port authority approves expanded late-night ferry schedule after council vote.",
+        "fake_headline_1": "National museum unveils rare maritime exhibit featuring restored passenger liner in capital city.",
+        "fake_headline_2": "Regional transit board delays coastal rail upgrade citing safety review and winter storms.",
+    }
+    assert validate_timeline_headlines(payload)
+    bad = payload.copy()
+    bad["fake_headline_2"] = "Regional transit board delays coastal rail upgrade citing safety review and winter storms..."
+    assert not validate_timeline_headlines(bad)
