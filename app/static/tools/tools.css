@@ -14,18 +14,6 @@
     color: var(--tools-ink);
 }
 
-.tools-back {
-    display: inline-block;
-    margin-bottom: 12px;
-    color: #6b46c1;
-    text-decoration: none;
-    font-weight: 700;
-}
-
-.tools-back:hover {
-    text-decoration: underline;
-}
-
 .tools-hero {
     background: var(--tools-card);
     border: 1px solid var(--tools-border);

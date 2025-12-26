@@ -19,16 +19,6 @@
   font-family: 'Manrope', 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 
-.roulette-back {
-  color: var(--roulette-accent);
-  text-decoration: none;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
 .roulette-header h1 {
   margin: 6px 0;
   font-size: clamp(1.65rem, 2.3vw, 2.1rem);
