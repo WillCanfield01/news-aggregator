@@ -29,10 +29,42 @@
             left: 0;
             right: 0;
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
             align-items: center;
             padding: 12px 16px;
             pointer-events: none;
+        }
+
+        .top-nav {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            pointer-events: auto;
+        }
+
+        .nav-brand {
+            font-weight: 800;
+            color: #0f172a;
+            text-decoration: none;
+            font-size: 1rem;
+            letter-spacing: -0.01em;
+        }
+
+        .nav-links {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-link {
+            color: #334155;
+            text-decoration: none;
+            font-weight: 650;
+            font-size: 0.95rem;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
         }
 
         .plus-pill-trigger a,
@@ -318,6 +350,13 @@
 <body>
     <div class="site" style="position:relative;">
         <div class="global-plus-header">
+            <div class="top-nav">
+                <a class="nav-brand" href="/">The Real Roundup</a>
+                <div class="nav-links">
+                    <a class="nav-link" href="/tools">Tools</a>
+                    <a class="nav-link" href="/hub">Daily hub</a>
+                </div>
+            </div>
             <div class="plus-pill-trigger" style="position:relative;">
                 <a href="/plus" id="plusHeaderPill" style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.7);color:#e2e8f0;font-weight:700;font-size:0.95rem;text-decoration:none;border:1px solid rgba(148,163,184,0.35);">
                     <span id="plusPillText">{{ 'Plus active' if has_plus() else 'Plus · $2.99/mo' }}</span>

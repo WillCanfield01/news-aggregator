@@ -263,6 +263,16 @@ def create_app():
             today_status=get_today_status(),
         )
 
+    @app.route("/hub")
+    def hub_page():
+        latest = CommunityArticle.query.order_by(CommunityArticle.date.desc()).first()
+        return render_template(
+            "hub.html",
+            year=datetime.now().year,
+            latest=latest,
+            today_status=get_today_status(),
+        )
+
     @app.route("/plus")
     def plus_landing():
         return render_template("plus.html")

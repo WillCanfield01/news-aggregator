@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}The Real Roundup – Briefings, Games, and Tools{% endblock %}
-{% block description %}Daily security briefings plus interactive games and productivity tools for security-minded teams.{% endblock %}
+{% block title %}The Real Roundup – Workflow Helpers and Tools{% endblock %}
+{% block description %}Workflow helpers to speed up your day. Smart utilities for writing, planning, and tracking, all under 5 minutes.{% endblock %}
 {% block canonical %}https://therealroundup.com/{% endblock %}
 
 {% block head %}
@@ -30,7 +30,10 @@
         padding: 0 24px;
     }
 
-    /* Hero */
+    .home-shell {
+        padding-bottom: 72px;
+    }
+
     .hero-wrap {
         background: linear-gradient(120deg, var(--brand-2) 0%, #e9eef5 100%);
         border-radius: 0 0 28px 28px;
@@ -38,14 +41,14 @@
     }
 
     .hero {
-        padding: 64px 0 56px;
+        padding: 72px 0 56px;
         text-align: center;
     }
 
     .site-title {
         font-weight: 800;
         letter-spacing: -.02em;
-        margin: 0 0 12px;
+        margin: 0 0 8px;
         font-size: clamp(2.2rem, 2.5vw + 1.6rem, 3.25rem);
     }
 
@@ -67,6 +70,13 @@
         color: #1a46c7;
         font-weight: 700;
         font-size: 0.92rem;
+    }
+
+    .subtitle {
+        font-size: clamp(1.15rem, .5vw + 1rem, 1.35rem);
+        font-weight: 750;
+        margin: 6px 0 6px;
+        color: #0f1b2d;
     }
 
     .subtext {
@@ -119,230 +129,131 @@
         border-color: rgba(31, 87, 255, .55);
     }
 
-    /* Product highlights */
-    .products {
-        margin: 36px 0 10px;
-        display: grid;
-        gap: 18px;
+    .page-section {
+        margin: 42px 0 20px;
     }
 
-    .home-shell {
-        padding-bottom: 72px;
-    }
-
-    .product-grid {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    }
-
-    .product-card {
-        background: #fff;
-        border-radius: 16px;
-        border: 1px solid #e5e7eb;
-        padding: 18px;
-        box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+    .section-header {
         display: flex;
         flex-direction: column;
-        height: 100%;
-        min-height: 230px;
+        gap: 6px;
+        margin-bottom: 20px;
     }
 
-    .product-card h3 {
-        margin: 0 0 8px;
-        font-size: 1.2rem;
+    .section-title {
+        margin: 0;
+        font-size: clamp(1.5rem, 1vw + 1.25rem, 1.9rem);
+        font-weight: 800;
         color: #0f1b2d;
     }
 
-    .product-card p {
-        margin: 0 0 12px;
+    .section-subtitle {
+        margin: 0;
         color: var(--muted);
+        font-size: 1rem;
         line-height: 1.5;
     }
 
-    .product-meta {
+    .tools-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1fr;
+    }
+
+    .tool-card {
         display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-        margin-bottom: 12px;
-    }
-
-    .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 10px;
-        background: #eef3ff;
-        color: #1a46c7;
-        border-radius: 999px;
-        font-weight: 700;
-        font-size: 0.9rem;
-    }
-
-    .today-section {
-        margin: 32px 0 10px;
-    }
-
-    .today-card {
+        flex-direction: column;
+        gap: 12px;
+        padding: 18px;
         background: #fff;
         border-radius: 16px;
         border: 1px solid #e5e7eb;
         box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
-        padding: 18px 18px 6px;
-    }
-
-    .today-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 12px;
-        margin-bottom: 6px;
-    }
-
-    .today-eyebrow {
-        margin: 0;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        color: #6b7280;
-    }
-
-    .today-title {
-        margin: 4px 0 2px;
-        font-size: 1.3rem;
-        font-weight: 800;
-        color: #0f1b2d;
-    }
-
-    .today-note {
-        color: #6b7280;
-        font-size: 0.95rem;
-        max-width: 300px;
-        line-height: 1.4;
-    }
-
-    .today-list {
-        display: grid;
-        gap: 6px;
-        margin-top: 4px;
-    }
-
-    .today-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 14px;
         text-decoration: none;
-        padding: 12px 0;
         color: #0f1b2d;
-        border-top: 1px solid #eef1f6;
+        transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
     }
 
-    .today-row:first-of-type {
-        border-top: none;
-        padding-top: 6px;
+    .tool-card:hover {
+        transform: translateY(-2px);
+        border-color: #dbe4ff;
+        box-shadow: 0 14px 28px rgba(17, 24, 39, 0.08);
     }
 
-    .today-label {
+    .tool-title {
+        margin: 0;
+        font-size: 1.12rem;
         font-weight: 750;
-        font-size: 1rem;
     }
 
-    .today-sub {
-        margin-top: 4px;
-        color: #6b7280;
-        font-size: 0.95rem;
+    .tool-desc {
+        margin: 6px 0 0;
+        color: #5c6b80;
+        line-height: 1.5;
+        font-size: 0.99rem;
     }
 
-    .today-meta {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-        color: #6b7280;
-        font-size: 0.92rem;
-    }
-
-    .today-pill {
+    .tool-cta {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        padding: 8px 12px;
-        border-radius: 999px;
         font-weight: 700;
-        font-size: 0.95rem;
-        border: 1px solid #e5e7eb;
-        background: #f8fafc;
-        color: #475569;
-        white-space: nowrap;
-        min-width: 138px;
-        justify-content: center;
+        color: var(--brand);
+        margin-top: auto;
+        font-size: 0.98rem;
     }
 
-    .today-pill.is-done {
-        color: #166534;
-        background: #ecfdf3;
-        border-color: #bbf7d0;
+    .tools-foot {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 12px;
     }
 
-    .today-check {
-        font-size: 1.05rem;
-        line-height: 1;
+    .inline-link {
+        font-weight: 700;
+        color: var(--brand);
+        text-decoration: none;
     }
 
-    .today-row:hover .today-label {
+    .inline-link:hover {
         text-decoration: underline;
     }
 
-    .today-pill.is-pending {
-        border-style: dashed;
+    .daily-teaser {
+        margin-top: 36px;
+        padding: 16px 18px;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        box-shadow: 0 6px 14px rgba(17, 24, 39, 0.05);
+        display: grid;
+        gap: 6px;
     }
 
-    .cta-inline {
-        font-weight: 700;
-        color: var(--brand);
-        text-decoration: none;
-        margin-top: auto;
-        display: inline-block;
-    }
-
-    .headline {
-        font-size: clamp(1.35rem, 1.1vw + 1.1rem, 2rem);
-        font-weight: 800;
-        line-height: 1.25;
-        margin: 4px 0 10px;
-    }
-
-    .summary {
-        color: var(--muted);
+    .teaser-title {
+        margin: 0;
+        font-weight: 750;
+        color: #0f1b2d;
         font-size: 1.05rem;
-        line-height: 1.7;
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        margin-bottom: 14px;
     }
 
-    .cta-secondary {
-        display: inline-block;
+    .teaser-text {
+        margin: 0;
+        color: #5c6b80;
+        line-height: 1.5;
+        font-size: 0.98rem;
+    }
+
+    .teaser-link {
         font-weight: 700;
         color: var(--brand);
         text-decoration: none;
-        padding: 10px 16px;
-        border-radius: 12px;
-        background: #eef3ff;
-        transition: background .12s ease, transform .12s ease;
     }
 
-    .cta-secondary:hover {
-        background: #e3ebff;
-        transform: translateY(-1px);
+    .teaser-link:hover {
+        text-decoration: underline;
     }
 
-    /* Mobile tuning */
     @media (max-width: 768px) {
         .container {
             padding: 0 16px;
@@ -352,42 +263,12 @@
             padding: 46px 0 34px;
         }
 
-        .cta-row {
-            gap: 8px;
-        }
-
         .site-title {
             font-size: clamp(1.8rem, 5vw + 1rem, 2.4rem);
         }
 
         .subtext {
             font-size: 1rem;
-        }
-
-        .product-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .product-card {
-            min-height: auto;
-            padding: 16px;
-        }
-
-        .product-card h3 {
-            font-size: 1.1rem;
-        }
-
-        .product-card p {
-            font-size: 0.98rem;
-            line-height: 1.45;
-        }
-
-        .products {
-            margin-top: 20px;
-        }
-
-        .home-shell {
-            padding-bottom: 64px;
         }
     }
 
@@ -396,82 +277,29 @@
             padding: 52px 0 40px;
         }
 
-        .home-page .products {
-            margin: 28px 0 24px;
-            gap: 26px;
-        }
-
-        .home-page .product-grid {
-            gap: 28px;
-        }
-
-        .home-page .product-card {
-            padding: 24px 20px 26px;
-            margin-bottom: 18px;
-        }
-
-        .home-page .product-card h3 {
-            margin: 0 0 14px;
-        }
-
-        .home-page .product-card p {
-            margin-top: 0;
-            margin-bottom: 18px;
-        }
-
-        .home-page .cta-inline {
-            margin-top: 20px;
-            padding-bottom: 6px;
-        }
-
-        .home-page .product-card:last-child {
-            margin-bottom: 0;
-        }
-
         .home-shell {
             padding-bottom: 112px;
         }
 
-        .today-header {
-            flex-direction: column;
-            align-items: flex-start;
-        }
-
-        .today-pill {
+        .cta-row {
             width: 100%;
         }
 
-        .today-row {
-            align-items: flex-start;
+        .cta-row a {
+            width: 100%;
+            text-align: center;
         }
     }
 
-    .below {
-        text-align: center;
-        margin: 32px 0 14px;
+    @media (min-width: 680px) {
+        .tools-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
     }
 
-    .main-btn {
-        text-decoration: none;
-        background: #1a73e8;
-        /* consistent blue */
-        color: #fff;
-        border-radius: 12px;
-        padding: 12px 18px;
-        font-weight: 600;
-        display: inline-block;
-        margin: 0 6px;
-        transition: background 0.2s ease;
-    }
-
-    .main-btn:hover {
-        background: #1669c1;
-        /* slightly darker on hover */
-    }
-
-    @media (min-width: 960px) {
-        .feature {
-            padding: 36px 40px;
+    @media (min-width: 992px) {
+        .tools-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
         }
     }
 </style>
@@ -486,115 +314,77 @@
                 <h1 class="site-title">The Real Roundup</h1>
                 {% include "partials/daily_badge.html" %}
             </div>
+            <div class="subtitle">Workflow helpers to speed up your day.</div>
             <div class="subtext">
-                Daily security briefings, interactive games, and practical tools to keep your skills sharp.
+                Smart utilities for writing, planning, and tracking, all under 5 minutes.
             </div>
             <div class="cta-row">
-                <a href="#today" class="cta-primary">Start today</a>
-                <a href="/hub" class="cta-ghost">Explore everything</a>
-
+                <a href="/tools" class="cta-primary">Browse tools</a>
+                <a href="/hub" class="cta-ghost">See daily hub</a>
             </div>
         </section>
     </div>
 
     <main class="container">
-        {% set statuses = today_status or {} %}
-        {% set escape_done = statuses.get('escape', False) %}
-        {% set roulette_done = statuses.get('roulette', False) %}
-        {% set brief_done = statuses.get('brief', False) %}
-        {% set brief_href = url_for('all_articles.published_articles') %}
-        {% if latest %}
-        {% set brief_href = url_for('all_articles.read_article', filename=latest.filename) %}
-        {% endif %}
-
-        <section class="today-section" id="today" aria-labelledby="todayHeading">
-            <div class="today-card">
-                <div class="today-header">
+        <section class="page-section tools-section" aria-labelledby="featuredToolsHeading">
+            <div class="section-header">
+                <h2 class="section-title" id="featuredToolsHeading">Tools Hub</h2>
+                <p class="section-subtitle">Pick a tool and get something useful done in under 5 minutes.</p>
+            </div>
+            <div class="tools-grid">
+                <a class="tool-card" href="/tools/resume">
                     <div>
-                        <p class="today-eyebrow">Daily loop</p>
-                        <h2 class="today-title" id="todayHeading">Today</h2>
+                        <h3 class="tool-title">Resume Bullet Improver</h3>
+                        <p class="tool-desc">Sharpen your resume bullets instantly.</p>
                     </div>
-                    <div class="today-note">Quick checklist to keep your brief, game, and tools streak moving.</div>
-                </div>
-                <div class="today-list">
-                    <a class="today-row" href="/escape/today">
-                        <div>
-                            <div class="today-label">Daily Escape is live</div>
-                            <div class="today-meta">
-                                <span class="today-sub">Three quick puzzles, fresh today.</span>
-                                <span class="today-sub">Daily · Under 5 min</span>
-                            </div>
-                        </div>
-                        <span class="today-pill {{ 'is-done' if escape_done else 'is-pending' }}">
-                            {% if escape_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
-                        </span>
-                    </a>
-                    <a class="today-row" href="/roulette">
-                        <div>
-                            <div class="today-label">Timeline Roulette</div>
-                            <div class="today-meta">
-                                <span class="today-sub">Pick the real event to keep your streak.</span>
-                                <span class="today-sub">Daily · Under 2 min</span>
-                            </div>
-                        </div>
-                        <span class="today-pill {{ 'is-done' if roulette_done else 'is-pending' }}">
-                            {% if roulette_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
-                        </span>
-                    </a>
-                    <a class="today-row" href="{{ brief_href }}">
-                        <div>
-                            <div class="today-label">Cyber Brief</div>
-                            <div class="today-meta">
-                                <span class="today-sub">Open today’s briefing or latest edition.</span>
-                                <span class="today-sub">Daily · Under 5 min</span>
-                            </div>
-                        </div>
-                        <span class="today-pill {{ 'is-done' if brief_done else 'is-pending' }}">
-                            {% if brief_done %}<span class="today-check" aria-hidden="true">✓</span>Completed{% else %}Not played yet{% endif %}
-                        </span>
-                    </a>
-                </div>
+                    <span class="tool-cta">Open tool →</span>
+                </a>
+                <a class="tool-card" href="/tools/habit">
+                    <div>
+                        <h3 class="tool-title">Daily Habit Check-In</h3>
+                        <p class="tool-desc">Log progress and keep your streak alive.</p>
+                    </div>
+                    <span class="tool-cta">Open tool →</span>
+                </a>
+                <a class="tool-card" href="/tools/language">
+                    <div>
+                        <h3 class="tool-title">Daily Language Phrase</h3>
+                        <p class="tool-desc">Pick up a fresh phrase in seconds.</p>
+                    </div>
+                    <span class="tool-cta">Open tool →</span>
+                </a>
+                <a class="tool-card" href="/tools/countdown">
+                    <div>
+                        <h3 class="tool-title">Countdown</h3>
+                        <p class="tool-desc">Track time to a launch, trip, or deadline.</p>
+                    </div>
+                    <span class="tool-cta">Open tool →</span>
+                </a>
+                <a class="tool-card" href="/tools/grocery">
+                    <div>
+                        <h3 class="tool-title">Grocery List</h3>
+                        <p class="tool-desc">Organize the essentials before you head out.</p>
+                    </div>
+                    <span class="tool-cta">Open tool →</span>
+                </a>
+                <a class="tool-card" href="/tools/trip">
+                    <div>
+                        <h3 class="tool-title">Trip Planner</h3>
+                        <p class="tool-desc">Map the basics for your next getaway fast.</p>
+                    </div>
+                    <span class="tool-cta">Open tool →</span>
+                </a>
+            </div>
+            <div class="tools-foot">
+                <a class="inline-link" href="/tools">View all tools →</a>
             </div>
         </section>
 
-        <section class="products">
-            <div class="product-grid">
-                <div class="product-card">
-                    <div class="product-meta">
-                        <span class="pill">Briefings</span>
-                    </div>
-                    <h3>Daily Security Briefing</h3>
-                    <p>Clear, daily cybersecurity rundown with the key incidents, CVEs, and takeaways for your org.</p>
-                    <a class="cta-inline" href="/all-articles/articles">Learn more →</a>
-                </div>
-                <div class="product-card">
-                    <div class="product-meta">
-                        <span class="pill">Game</span>
-                        <span class="pill">Daily</span>
-                    </div>
-                    <h3>Daily Escape</h3>
-                    <p>Crack today’s security-themed mini escape room in just a few guesses. Fresh puzzle every day.</p>
-                    <a class="cta-inline" href="/escape/play">Learn more →</a>
-                </div>
-                <div class="product-card">
-                    <div class="product-meta">
-                        <span class="pill">Trivia</span>
-                    </div>
-                    <h3>Timeline Roulette</h3>
-                    <p>Spot the real historical event among two fakes. Keep your streak alive and climb the leaderboard.</p>
-                    <a class="cta-inline" href="/roulette">Learn more →</a>
-                </div>
-                <div class="product-card">
-                    <div class="product-meta">
-                        <span class="pill">Tools</span>
-                    </div>
-                    <h3>Tools Hub</h3>
-                    <p>Purpose-built utilities for your workflow—resume polishers, habit trackers, and more to come.</p>
-                    <a class="cta-inline" href="/tools">Learn more →</a>
-                </div>
-            </div>
+        <section class="daily-teaser" aria-labelledby="dailyHubTeaser">
+            <h3 class="teaser-title" id="dailyHubTeaser">Daily hub</h3>
+            <p class="teaser-text">Prefer daily challenges? Visit the hub for the cyber brief, escape game, and Timeline Roulette.</p>
+            <a class="teaser-link" href="/hub">Open daily hub →</a>
         </section>
-
     </main>
 </div>
 </div>

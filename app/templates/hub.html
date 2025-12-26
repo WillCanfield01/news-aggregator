@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}Daily Hub – The Real Roundup{% endblock %}
+{% block description %}Quick daily challenges and briefings to keep your skills sharp.{% endblock %}
+{% block canonical %}https://therealroundup.com/hub{% endblock %}
+
+{% block head %}
+<style>
+    :root {
+        --brand: #1f57ff;
+        --brand-2: #58bbff;
+        --ink: #0f1b2d;
+        --muted: #5c6b80;
+        --card: #ffffff;
+        --bg: #f6f9fb;
+    }
+
+    body {
+        background: var(--bg);
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        color: var(--ink);
+        overflow-y: auto;
+    }
+
+    .container {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 0 24px;
+    }
+
+    .hub-shell {
+        padding-bottom: 72px;
+    }
+
+    .hero-wrap {
+        background: linear-gradient(115deg, var(--brand-2) 0%, #e9eef5 100%);
+        border-radius: 0 0 24px 24px;
+        box-shadow: 0 10px 30px rgba(22, 33, 68, .08) inset;
+    }
+
+    .hero {
+        padding: 64px 0 48px;
+        text-align: center;
+    }
+
+    .hero h1 {
+        margin: 0 0 10px;
+        font-size: clamp(2.1rem, 2vw + 1.6rem, 3rem);
+        font-weight: 800;
+        letter-spacing: -.02em;
+    }
+
+    .hero p {
+        margin: 6px 0 18px;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.5;
+    }
+
+    .cta-primary {
+        display: inline-block;
+        padding: 13px 20px;
+        background: var(--brand);
+        color: #fff;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 750;
+        box-shadow: 0 10px 20px rgba(31, 87, 255, .18);
+        transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+    }
+
+    .cta-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 24px rgba(31, 87, 255, .22);
+    }
+
+    .daily-section {
+        margin: 36px 0 20px;
+        display: grid;
+        gap: 16px;
+    }
+
+    .daily-card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+        padding: 18px 18px 16px;
+    }
+
+    .daily-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+
+    .daily-copy h3 {
+        margin: 0 0 4px;
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: #0f1b2d;
+    }
+
+    .daily-copy p {
+        margin: 0;
+        color: #5c6b80;
+        line-height: 1.5;
+        font-size: 1rem;
+    }
+
+    .daily-meta {
+        margin-top: 6px;
+        font-weight: 700;
+        color: #475569;
+        font-size: 0.95rem;
+    }
+
+    .daily-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 0.94rem;
+        border: 1px solid #e5e7eb;
+        background: #f8fafc;
+        color: #475569;
+        white-space: nowrap;
+    }
+
+    .status-pill.is-done {
+        color: #166534;
+        background: #ecfdf3;
+        border-color: #bbf7d0;
+    }
+
+    .link-row {
+        margin-top: 6px;
+        font-weight: 700;
+    }
+
+    .link-row a {
+        color: var(--brand);
+        text-decoration: none;
+    }
+
+    .link-row a:hover {
+        text-decoration: underline;
+    }
+
+    @media (max-width: 640px) {
+        .container {
+            padding: 0 16px;
+        }
+
+        .hero {
+            padding: 52px 0 36px;
+        }
+
+        .daily-row {
+            align-items: flex-start;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set statuses = today_status or {} %}
+{% set escape_done = statuses.get('escape', False) %}
+{% set roulette_done = statuses.get('roulette', False) %}
+{% set brief_done = statuses.get('brief', False) %}
+{% set brief_href = url_for('all_articles.published_articles') %}
+{% if latest %}
+{% set brief_href = url_for('all_articles.read_article', filename=latest.filename) %}
+{% endif %}
+
+<div class="hub-page">
+    <div class="hub-shell">
+        <div class="hero-wrap">
+            <section class="hero container">
+                <h1>Daily Hub</h1>
+                <p>Quick daily challenges and briefings to keep your skills sharp.</p>
+                <a href="/tools" class="cta-primary">Back to tools</a>
+            </section>
+        </div>
+
+        <main class="container">
+            <section class="daily-section" aria-labelledby="dailyItems">
+                <div class="daily-card" id="dailyItems">
+                    <div class="daily-row">
+                        <div class="daily-copy">
+                            <h3>Daily Escape</h3>
+                            <p>Crack today’s mini escape room in a few quick puzzles.</p>
+                            <div class="daily-meta">Daily · Under 5 min</div>
+                        </div>
+                        <div class="daily-actions">
+                            <a class="cta-primary" href="/escape/today">Play today’s escape</a>
+                            <span class="status-pill {{ 'is-done' if escape_done else '' }}">
+                                {% if escape_done %}Completed{% else %}Not played yet{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="daily-card">
+                    <div class="daily-row">
+                        <div class="daily-copy">
+                            <h3>Timeline Roulette</h3>
+                            <p>Pick the real historical headline and keep your streak.</p>
+                            <div class="daily-meta">Daily · Under 2 min</div>
+                        </div>
+                        <div class="daily-actions">
+                            <a class="cta-primary" href="/roulette">Play Timeline Roulette</a>
+                            <span class="status-pill {{ 'is-done' if roulette_done else '' }}">
+                                {% if roulette_done %}Completed{% else %}Not played yet{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="daily-card">
+                    <div class="daily-row">
+                        <div class="daily-copy">
+                            <h3>Daily Cybersecurity Briefing</h3>
+                            <p>Open today’s cyber briefing or browse recent editions.</p>
+                            <div class="daily-meta">Daily · Under 5 min</div>
+                        </div>
+                        <div class="daily-actions">
+                            <a class="cta-primary" href="{{ brief_href }}">View today’s briefing</a>
+                            <span class="status-pill {{ 'is-done' if brief_done else '' }}">
+                                {% if brief_done %}Completed{% else %}Not played yet{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="link-row">
+                <a href="/tools">Back to tools hub →</a>
+            </div>
+        </main>
+    </div>
+</div>
+{% endblock %}
