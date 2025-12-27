@@ -12,6 +12,7 @@ from app.subscriptions import current_user_is_plus
 from sqlalchemy import text, func
 from app.plus import get_plus_checkout_url
 from app.affiliates import amazon_url, get_tool_picks, TOOL_PICKS
+from app.top_picks import TOP_PICKS_BUCKETS
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -286,42 +287,8 @@ def create_app():
     def top_picks():
         """
         Lightweight page listing curated Amazon picks grouped by use case.
-        This route is discoverable from the daily hub and tools footer bar, not the main nav.
         """
-        sections = [
-            {
-                "key": "resume",
-                "title": "Better work setup",
-                "subtitle": "For resumes, deep work, and clear calls.",
-                "items": TOOL_PICKS.get("resume", []),
-            },
-            {
-                "key": "habit",
-                "title": "Habit & focus helpers",
-                "subtitle": "Stay on track with visible reminders.",
-                "items": TOOL_PICKS.get("habit", []),
-            },
-            {
-                "key": "trip",
-                "title": "Travel essentials",
-                "subtitle": "Make trips smoother and bags easier to manage.",
-                "items": TOOL_PICKS.get("trip", []),
-            },
-            {
-                "key": "grocery",
-                "title": "Kitchen & prep basics",
-                "subtitle": "Make planning meals and groceries easier.",
-                "items": TOOL_PICKS.get("grocery", []),
-            },
-            {
-                "key": "language",
-                "title": "Language helpers",
-                "subtitle": "Small tools to boost your practice.",
-                "items": TOOL_PICKS.get("language", []),
-            },
-        ]
-        sections = [section for section in sections if section.get("items")]
-        return render_template("top_picks.html", sections=sections)
+        return render_template("top_picks.html", buckets=TOP_PICKS_BUCKETS)
 
     @app.route("/plus")
     def plus_landing():
