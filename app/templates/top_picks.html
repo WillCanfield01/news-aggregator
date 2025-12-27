@@ -23,40 +23,30 @@
       <section class="top-picks-bucket">
         <h2 class="top-picks-bucket-title">{{ bucket.title }}</h2>
         {% if bucket.subtitle %}
-          <p class="top-picks-bucket-subtitle">{{ bucket.subtitle }}</p>
+          <p class="top-picks-bucket-tagline">{{ bucket.subtitle }}</p>
         {% endif %}
 
-        <div class="top-picks-grid">
+        <div class="top-picks-card-grid">
           {% for item in bucket["items"] %}
-            <article class="top-pick-card">
+            <div class="top-picks-card">
               {% if item.image %}
-                <div class="top-pick-image-wrap">
-                  <img
-                    src="{{ item.image }}"
-                    alt="{{ item.name }}"
-                    loading="lazy"
-                  />
+                <div class="top-picks-card-image">
+                  <img src="{{ item.image }}" alt="{{ item.name }}" loading="lazy">
                 </div>
               {% endif %}
-
-              <div class="top-pick-body">
-                <h3 class="top-pick-name">{{ item.name }}</h3>
-                <p class="top-pick-description">{{ item.description }}</p>
-                <p class="top-pick-meta">
-                  <span class="top-pick-price">{{ item.price }}</span>
-                  <span class="top-pick-dot">·</span>
-                  <span class="top-pick-reviews">{{ item.reviews }}</span>
+              <div class="top-picks-card-content">
+                <h3 class="top-picks-card-title">{{ item.name }}</h3>
+                <p class="top-picks-card-tagline">{{ item.description }}</p>
+                <p class="top-picks-card-meta">
+                  <span class="top-picks-card-price">{{ item.price }}</span>
+                  <span class="top-picks-card-dot">•</span>
+                  <span class="top-picks-card-reviews">{{ item.reviews }}</span>
                 </p>
-                <a
-                  class="top-pick-button"
-                  href="{{ item.url }}"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href="{{ item.url }}" class="top-picks-card-btn" target="_blank" rel="noopener noreferrer">
                   View on Amazon
                 </a>
               </div>
-            </article>
+            </div>
           {% endfor %}
         </div>
       </section>

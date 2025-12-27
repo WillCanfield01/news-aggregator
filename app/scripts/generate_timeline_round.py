@@ -5,9 +5,11 @@ import os
 import re
 import random
 import time
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple, Dict, Any, Optional
+from textwrap import dedent
 from flask import current_app
 from app.roulette.models import TimelineRound, TimelineGuess
 import pytz
@@ -271,6 +273,64 @@ QUOTE_LIBRARY: list[dict[str, str]] = [
 def _today_local_date():
     return datetime.now(TZ).date()
 
+TIMELINE_HEADLINE_PROMPT = """
+You help generate multiple-choice headlines for a daily trivia game called Timeline Roulette.
+
+The game shows THREE headlines for the SAME calendar date (month + day, from any year).
+Exactly ONE headline describes a real historical event. The other TWO are fake but plausible.
+
+You are given:
+- the calendar date for the round
+- a short summary of the REAL event for that date
+
+Your job:
+1) Write ONE real headline that clearly describes the real event.
+2) Write TWO fake headlines that are detailed, weirdly specific, and *could* be real for that date, but are NOT the real event.
+
+Strong rules for ALL headlines:
+- Must be a single, complete sentence, with no trailing comma or ellipsis.
+- 80–140 characters long.
+- Include at least two concrete details:
+  - specific people, organizations, cities, countries, or regions
+  - AND/OR numbers (year, counts, percentages, dollar amounts, distances, scores).
+- No vague endings like "draws attention", "updated plan", "review of services".
+- Avoid generic verbs like "draws attention", "makes headlines", "sparks reaction".
+- No duplicate or near-duplicate headlines.
+- All three must sound like news published the same day, but about different events.
+
+Extra rules for the REAL headline:
+- Must accurately describe the given real event summary.
+- Include the YEAR and at least one of:
+  - main person / organization
+  - country / city / region
+  - concrete outcome (e.g., "passes $700B rescue bill", "wins 4–2 series").
+- Do NOT mention that it is "real", "true", "actual", etc.
+
+Extra rules for each FAKE headline:
+- Must describe a different event than the real one and different from each other.
+- Should be oddly specific, in a way that makes people wonder if it really happened:
+  - strange but plausible combinations
+  - specific committees, agencies, sports scores, or dollar amounts.
+- Must NOT contradict basic history (no "Mars landing in 1920", etc.).
+- Never talk about magic, aliens, or obviously fictional stuff.
+
+Output JSON only. No prose, no explanation.
+
+Use this exact schema:
+
+{
+  "real_headline": "string, 80-140 chars",
+  "fake_headlines": [
+    "string, 80-140 chars",
+    "string, 80-140 chars"
+  ]
+}
+
+Inputs:
+- date: "{date_str}"
+- real_event_summary: "{event_summary}"
+"""
+
 TIMELINE_HEADLINE_SYSTEM = """
 You write newspaper style headlines for a history guessing game.
 
@@ -290,6 +350,34 @@ Output strict JSON with keys:
   "fake_headline_1"
   "fake_headline_2"
 """
+
+def _clean_headline_text(text: str) -> str:
+    """
+    Normalize a headline:
+    - strip whitespace
+    - remove trailing '...', '…', comma, colon, semicolon
+    - ensure it ends with a period if it has no terminal punctuation
+    - squash internal newlines.
+    """
+    if not text:
+        return ""
+
+    t = " ".join(str(text).split())  # collapse whitespace/newlines
+
+    # Remove trailing junk characters
+    while t and t[-1] in [",", ":", ";"]:
+        t = t[:-1].rstrip()
+
+    # Remove ellipsis variants at the end
+    for dots in ["...", "…"]:
+        if t.endswith(dots):
+            t = t[:-len(dots)].rstrip()
+
+    # If it has no terminal punctuation, add a period
+    if t and t[-1] not in [".", "!", "?"]:
+        t = t + "."
+
+    return t
 
 def build_timeline_headline_user_prompt(event_date_str: str, real_title: str, real_summary: str) -> str:
     return f"""
@@ -321,23 +409,63 @@ def build_timeline_headline_user_prompt(event_date_str: str, real_title: str, re
     """
 
 def call_timeline_headlines_model(event_date_str: str, real_title: str, real_summary: str) -> Optional[dict]:
+    """
+    Generate real + fake headlines using the structured JSON prompt.
+    Returns a dict with real_headline, fake_headline_1, fake_headline_2.
+    """
     if not OPENAI_API_KEY:
         return None
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
-        user_prompt = build_timeline_headline_user_prompt(event_date_str, real_title, real_summary)
+        prompt = dedent(
+            TIMELINE_HEADLINE_PROMPT.format(
+                date_str=event_date_str,
+                event_summary=(real_summary or "").strip(),
+            )
+        )
         resp = client.chat.completions.create(
             model=HEADLINE_MODEL,
             messages=[
-                {"role": "system", "content": TIMELINE_HEADLINE_SYSTEM},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": "You are an assistant that ONLY returns valid JSON for a trivia game."},
+                {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
-            max_tokens=320,
-            temperature=0.8,
+            max_tokens=400,
+            temperature=0.9,
         )
-        content = resp.choices[0].message.content
-        return json.loads(content) if content else None
+        raw = (resp.choices[0].message.content or "").strip()
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = {
+                "real_headline": (real_summary or real_title or "").strip()[:140],
+                "fake_headlines": [],
+            }
+
+        real_headline = _clean_headline_text(data.get("real_headline") or real_summary or real_title or "")
+        fake_candidates = [
+            _clean_headline_text(h) for h in (data.get("fake_headlines") or []) if isinstance(h, str)
+        ]
+
+        cleaned_fakes: list[str] = []
+        for h in fake_candidates:
+            if h and h.lower() != real_headline.lower() and h not in cleaned_fakes:
+                cleaned_fakes.append(h)
+            if len(cleaned_fakes) == 2:
+                break
+
+        # If we didn't get enough decoys, synthesize simple fallbacks.
+        while len(cleaned_fakes) < 2:
+            fallback = _clean_headline_text(
+                f"Local council approves {event_date_str} budget changes after late-night vote"
+            )
+            if fallback.lower() != real_headline.lower() and fallback not in cleaned_fakes:
+                cleaned_fakes.append(fallback)
+
+        return {
+            "real_headline": real_headline,
+            "fake_headline_1": cleaned_fakes[0],
+            "fake_headline_2": cleaned_fakes[1],
+        }
     except Exception:
         return None
 
@@ -358,8 +486,7 @@ def _headline_ok(text: str) -> bool:
         return False
     if "..." in t:
         return False
-    words = t.split()
-    if len(words) < 10 or len(words) > 24:
+    if len(t) < 80 or len(t) > 140:
         return False
     lowered = t.lower()
     if any(bit in lowered for bit in GENERIC_BITS):
