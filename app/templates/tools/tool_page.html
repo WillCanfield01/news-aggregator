@@ -89,6 +89,14 @@
                     </div>
                 </div>
             </div>
+            {% set _affiliate_initial = saved_output or shared_payload %}
+            {% if affiliate_picks and affiliate_tool_key %}
+            <div class="tool-affiliate-block" data-affiliate-block data-affiliate-visible="{{ '1' if _affiliate_initial else '0' }}" {% if not _affiliate_initial %}style="display:none;"{% endif %}>
+                {% set tool_key = affiliate_tool_key %}
+                {% set picks = affiliate_picks %}
+                {% include "partials/_affiliate_tool_picks.html" %}
+            </div>
+            {% endif %}
             {% set _tool_is_plus = is_plus_user() if is_plus_user is defined and is_plus_user is callable else (is_plus_user if is_plus_user is defined else False) %}
             {% if not _tool_is_plus %}
             <div class="peak-plus-holder" data-peak-plus-panel style="display:none;">

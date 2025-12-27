@@ -11,6 +11,7 @@ from app.security import generate_csrf_token
 from app.subscriptions import current_user_is_plus
 from sqlalchemy import text, func
 from app.plus import get_plus_checkout_url
+from app.affiliates import amazon_url, get_tool_picks, TOOL_PICKS
 # escape feature
 from app.escape.core import schedule_daily_generation
 from app.escape import create_escape_bp
@@ -171,6 +172,7 @@ def create_app():
     db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
     asset_version = _compute_asset_version()
     app.config["ASSET_VERSION"] = asset_version
+    app.config["AMAZON_ASSOC_TAG"] = os.getenv("AMAZON_ASSOC_TAG", "therealroundu-20")
 
     # Normalize to psycopg v3 driver
     if db_url.startswith("postgres://"):
@@ -213,6 +215,13 @@ def create_app():
             "has_plus": current_user_is_plus,
             "is_plus_user": current_user_is_plus,
             "plus_checkout_url": get_plus_checkout_url,
+        }
+
+    @app.context_processor
+    def affiliate_context():
+        return {
+            "amazon_url": amazon_url,
+            "get_tool_picks": get_tool_picks,
         }
 
     # ---- Import models so SQLAlchemy knows them, then (optionally) create tables ----
@@ -272,6 +281,47 @@ def create_app():
             latest=latest,
             today_status=get_today_status(),
         )
+
+    @app.route("/top-picks")
+    def top_picks():
+        """
+        Lightweight page listing curated Amazon picks grouped by use case.
+        This route is discoverable from the daily hub and tools footer bar, not the main nav.
+        """
+        sections = [
+            {
+                "key": "resume",
+                "title": "Better work setup",
+                "subtitle": "For resumes, deep work, and clear calls.",
+                "items": TOOL_PICKS.get("resume", []),
+            },
+            {
+                "key": "habit",
+                "title": "Habit & focus helpers",
+                "subtitle": "Stay on track with visible reminders.",
+                "items": TOOL_PICKS.get("habit", []),
+            },
+            {
+                "key": "trip",
+                "title": "Travel essentials",
+                "subtitle": "Make trips smoother and bags easier to manage.",
+                "items": TOOL_PICKS.get("trip", []),
+            },
+            {
+                "key": "grocery",
+                "title": "Kitchen & prep basics",
+                "subtitle": "Make planning meals and groceries easier.",
+                "items": TOOL_PICKS.get("grocery", []),
+            },
+            {
+                "key": "language",
+                "title": "Language helpers",
+                "subtitle": "Small tools to boost your practice.",
+                "items": TOOL_PICKS.get("language", []),
+            },
+        ]
+        sections = [section for section in sections if section.get("items")]
+        return render_template("top_picks.html", sections=sections)
 
     @app.route("/plus")
     def plus_landing():

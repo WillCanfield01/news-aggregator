@@ -338,6 +338,49 @@
             font-weight: 800;
             font-size: 0.9rem;
         }
+
+        .helpful-picks-bar {
+            position: fixed;
+            inset-inline: 0;
+            bottom: 16px;
+            z-index: 40;
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+            padding: 0 16px;
+        }
+
+        .helpful-picks-pill {
+            pointer-events: auto;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            border-radius: 999px;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 10px 14px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+            font-size: 0.9rem;
+        }
+
+        .helpful-picks-pill .hint {
+            color: #cbd5e1;
+            font-size: 0.85rem;
+        }
+
+        .helpful-picks-link {
+            margin-left: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            color: #0f172a;
+            font-weight: 750;
+            text-decoration: none;
+        }
+
+        .helpful-picks-link:hover {
+            background: #ffffff;
+        }
     </style>
 
     <script>
@@ -377,6 +420,40 @@
             This site may contain affiliate links. Content is for informational purposes only.
             <div class="footer-build" aria-hidden="true">Build {{ asset_version }}</div>
         </footer>
+
+        {% if request.path.startswith('/tools') %}
+        <div
+          id="helpful-picks-footer"
+          class="helpful-picks-bar hidden"
+        >
+          <div class="helpful-picks-pill">
+            <span style="font-size:1.1rem;">🛍</span>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <div class="font-semibold" style="font-weight:750;">Helpful picks · No ads</div>
+              <div class="hint">Top-rated products people actually buy.</div>
+            </div>
+            <a
+              href="{{ url_for('top_picks') }}"
+              class="helpful-picks-link"
+            >
+              View picks
+            </a>
+          </div>
+        </div>
+        <script>
+            document.addEventListener("DOMContentLoaded", function () {
+                const bar = document.getElementById("helpful-picks-footer");
+                if (!bar) return;
+                if (window.sessionStorage.getItem("rr_helpful_picks_shown") === "1") {
+                    return;
+                }
+                setTimeout(function () {
+                    bar.classList.remove("hidden");
+                    window.sessionStorage.setItem("rr_helpful_picks_shown", "1");
+                }, 5000);
+            });
+        </script>
+        {% endif %}
     </div>
 
     {% if not has_plus() %}

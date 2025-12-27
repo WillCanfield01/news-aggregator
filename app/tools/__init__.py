@@ -34,6 +34,7 @@ from app.tools.handlers import (
 from app.tools.models import SharedExpenseEvent, SharedToolLink, default_expiry
 from app.tools.registry import get_enabled_tools, get_tool_by_slug
 from app.subscriptions import current_user_has_plus
+from app.affiliates import get_tool_picks
 import logging
 import string
 import random
@@ -154,6 +155,21 @@ def _error_response(code: str, message: str, request_id: str, status: int = 400)
     return _build_response(False, data=None, error={"code": code, "message": message}, request_id=request_id), status
 
 
+AFFILIATE_SLUG_MAP: Dict[str, str] = {
+    "resume-bullets": "resume",
+    "daily-checkin": "habit",
+    "trip-planner": "trip",
+    "grocery-list": "grocery",
+    "daily-phrase": "language",
+}
+
+
+def _affiliate_context(slug: str) -> Dict[str, Any]:
+    tool_key = AFFILIATE_SLUG_MAP.get(slug)
+    picks = get_tool_picks(tool_key) if tool_key else []
+    return {"affiliate_tool_key": tool_key, "affiliate_picks": picks}
+
+
 def _validate_input_against_schema(tool: Dict[str, Any], payload: Dict[str, Any], request_id: str):
     """Validate input payload against the tool schema and enforce per-field limits."""
     if not isinstance(payload, dict):
@@ -224,6 +240,7 @@ def expense_splitter_view(token: str):
             tool=tool,
             error_message="This shared expense could not be found or has expired.",
             view_mode=True,
+            **_affiliate_context(tool.get("slug", "")),
         ), 404
 
     payload = event.to_payload()
@@ -245,6 +262,7 @@ def expense_splitter_view(token: str):
         share_url=url_for("tools.expense_splitter_view", token=token),
         token=token,
         callout_message="We moved this into Trip Planner. Use Copy to new to switch.",
+        **_affiliate_context(tool.get("slug", "")),
     )
 
 
@@ -299,6 +317,7 @@ def grocery_share_view(token: str):
         view_mode=False,
         share_url=_grocery_share_url(token),
         callout_message="This list is shared. Changes auto-save for anyone with the link.",
+        **_affiliate_context(tool.get("slug", "")),
     )
 
 
@@ -324,6 +343,7 @@ def countdown_share_view(token: str):
             share_url=None,
             shared_payload=None,
             callout_message=None,
+            **_affiliate_context(tool.get("slug", "")),
         ), 404
     payload = link.to_payload()
     share_url = _countdown_share_url(token)
@@ -335,6 +355,7 @@ def countdown_share_view(token: str):
         callout_message="Shared countdown. Save it locally if you want to track it on this device.",
         shared_payload=payload,
         saved_input=json.dumps(payload),
+        **_affiliate_context(tool.get("slug", "")),
     )
 
 
@@ -343,7 +364,12 @@ def tool_page(slug: str):
     tool = get_tool_by_slug(slug)
     if not tool or not tool.get("is_enabled"):
         abort(404)
-    return render_template("tools/tool_page.html", tool=tool, view_mode=False)
+    return render_template(
+        "tools/tool_page.html",
+        tool=tool,
+        view_mode=False,
+        **_affiliate_context(slug),
+    )
 
 
 @api_tools_bp.route("/run", methods=["POST"])
