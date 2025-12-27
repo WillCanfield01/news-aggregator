@@ -27,7 +27,7 @@
         {% endif %}
 
         <div class="top-picks-grid">
-          {% for item in bucket.items %}
+          {% for item in bucket["items"] %}
             <article class="top-pick-card">
               {% if item.image %}
                 <div class="top-pick-image-wrap">
