@@ -32,51 +32,6 @@
         }
     }
 
-    function revealAffiliateBlock() {
-        const block = document.querySelector("[data-affiliate-block]");
-        if (!block) return;
-        block.style.display = "";
-        block.dataset.affiliateVisible = "1";
-    }
-
-    function showAffiliateBlockIfOutputPresent() {
-        const block = document.querySelector("[data-affiliate-block]");
-        if (!block) return;
-        if (block.dataset.affiliateVisible === "1") {
-            block.style.display = "";
-            return;
-        }
-        const outputEl = document.querySelector("[data-tool-output]");
-        if (!outputEl) return;
-        const outputPre = outputEl.querySelector(".tool-output-pre");
-        const hasPre = outputPre && outputPre.textContent && outputPre.textContent.trim().length > 0;
-        const hasCards = outputEl.querySelector(".result-card, .compare-panel, .nudge-panel");
-        if (hasPre || hasCards) {
-            revealAffiliateBlock();
-        }
-    }
-
-    function attachAffiliateBlocks() {
-        document.querySelectorAll("[data-affiliate-toggle='true']").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                const container = btn.closest("[data-affiliate-card]") || btn.closest("div");
-                if (!container) return;
-                const body = container.querySelector("[data-affiliate-body='true']");
-                const label = container.querySelector("[data-affiliate-toggle-label]");
-                if (!body) return;
-                const hidden = body.classList.contains("hidden");
-                if (hidden) {
-                    body.classList.remove("hidden");
-                    if (label) label.textContent = "Hide picks";
-                } else {
-                    body.classList.add("hidden");
-                    if (label) label.textContent = "Show helpful picks";
-                }
-            });
-        });
-        showAffiliateBlockIfOutputPresent();
-    }
-
     // ---- Daily Phrase TTS (client only) ----
     let cachedVoices = [];
     function loadVoices() {
@@ -779,9 +734,6 @@
             shareOpen.disabled = !normalized;
             shareCopy.disabled = !normalized;
             shareFeedback.textContent = "";
-            if (normalized) {
-                revealAffiliateBlock();
-            }
             if (shareCopyTimer) {
                 clearTimeout(shareCopyTimer);
                 shareCopyTimer = null;
@@ -1605,7 +1557,6 @@
         });
 
         if (outputPre) outputPre.textContent = lines.join("\n");
-        revealAffiliateBlock();
         if (typeof window.__showToolsPeakPlus === "function" && outputPre && outputPre.textContent.trim().length > 0) {
             window.__showToolsPeakPlus();
         }
@@ -2609,7 +2560,6 @@
             const isWorthItCard = slug === "worth-it" && data && typeof data === "object" && data.primary && data.primary.metric_display;
             if (isWorthItCard) {
                 renderWorthIt(data);
-                revealAffiliateBlock();
                 return;
             }
 
@@ -2617,14 +2567,12 @@
                 slug === "social-post-polisher" && data && typeof data === "object" && typeof data.polished_post === "string";
             if (isSocialPostPolisher) {
                 renderSocialPostPolisher(data);
-                revealAffiliateBlock();
                 return;
             }
 
             const isShareCard = data && typeof data === "object" && data.share_card;
             if (!isShareCard) {
                 if (outputPre) outputPre.textContent = typeof data === "string" ? data : "";
-                revealAffiliateBlock();
                 return;
             }
 
@@ -2772,8 +2720,6 @@
 
                 outputEl.appendChild(nudgePanel);
             }
-
-            revealAffiliateBlock();
         };
 
         const initWorthItFormUX = () => {
@@ -3009,7 +2955,6 @@
     const initTools = () => {
         attachToolForm();
         attachToolSpecificBehavior();
-        attachAffiliateBlocks();
     };
 
     if (document.readyState === "loading") {

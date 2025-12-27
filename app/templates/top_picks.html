@@ -130,7 +130,7 @@
         <p>{{ section.subtitle }}</p>
       </div>
       <div class="top-picks-grid">
-        {% for item in section.items %}
+        {% for item in section["items"] %}
         <article class="top-picks-card">
           <div>
             <h3>{{ item.name }}</h3>

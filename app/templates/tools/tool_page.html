@@ -5,6 +5,7 @@
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='tools/tools.css') }}">
 <script src="{{ url_for('static', filename='tools/tools.js') }}" defer></script>
+<script src="{{ url_for('static', filename='tools/helpful_picks_inline.js') }}" defer></script>
 {% if tool.slug == "grocery-list" and share_url %}
 <link rel="canonical" href="{{ share_url }}">
 {% endif %}
@@ -12,12 +13,6 @@
 
 {% block content %}
 <section class="tools-shell">
-    <nav class="tool-breadcrumb" aria-label="Breadcrumb">
-        <a href="{{ url_for('tools.tools_home') }}">Tools</a>
-        <span aria-hidden="true">/</span>
-        <span class="crumb-current">{{ tool.title }}</span>
-    </nav>
-
     {% if tool.slug == "daily-checkin" %}
     <div class="tool-note" role="note">
         Data for this habit stays in your browser’s storage only. Clear site data to remove it—no account required.
@@ -32,9 +27,52 @@
 
     <div class="tool-detail">
         <header class="tool-header">
-            <p class="eyebrow">{{ tool.category }}</p>
-            <h1>{{ tool.title }}</h1>
-            <p class="lead">{{ tool.description }}</p>
+            <div class="tool-page-header">
+                <div class="tool-page-header-left">
+                    <p class="eyebrow">{{ tool.category }}</p>
+                </div>
+                <div class="tool-page-header-right">
+                    <button
+                        type="button"
+                        class="helpful-picks-chip"
+                        data-tool-slug="{{ tool.slug }}"
+                    >
+                        🛍 Helpful picks · No ads
+                    </button>
+                </div>
+            </div>
+            <h1 class="tool-title">{{ tool.title }}</h1>
+            <p class="lead tool-subtitle">{{ tool.description }}</p>
+            <div
+                class="helpful-picks-panel"
+                id="helpful-picks-{{ tool.slug }}"
+                hidden
+            >
+                {% if affiliate_picks %}
+                <p class="helpful-picks-title">People who use this tool also buy:</p>
+                <ul class="helpful-picks-list">
+                    {% for item in affiliate_picks %}
+                    <li>
+                        <span class="helpful-picks-name">{{ item.name }}</span>
+                        <span class="helpful-picks-meta">
+                            {{ item.blurb }}
+                            {% if item.reviews_hint %}· {{ item.reviews_hint }}{% endif %}
+                            {% if item.approx_price %}· {{ item.approx_price }}{% endif %}
+                        </span>
+                        <a
+                            href="{{ amazon_url(item.asin) }}"
+                            target="_blank"
+                            rel="nofollow noopener noreferrer"
+                        >
+                            View on Amazon →
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="helpful-picks-empty">Top-rated picks will appear here soon.</p>
+                {% endif %}
+            </div>
             {% if callout_message %}
             <div class="tool-note" role="note">{{ callout_message }}</div>
             {% endif %}
@@ -89,14 +127,6 @@
                     </div>
                 </div>
             </div>
-            {% set _affiliate_initial = saved_output or shared_payload %}
-            {% if affiliate_picks and affiliate_tool_key %}
-            <div class="tool-affiliate-block" data-affiliate-block data-affiliate-visible="{{ '1' if _affiliate_initial else '0' }}" {% if not _affiliate_initial %}style="display:none;"{% endif %}>
-                {% set tool_key = affiliate_tool_key %}
-                {% set picks = affiliate_picks %}
-                {% include "partials/_affiliate_tool_picks.html" %}
-            </div>
-            {% endif %}
             {% set _tool_is_plus = is_plus_user() if is_plus_user is defined and is_plus_user is callable else (is_plus_user if is_plus_user is defined else False) %}
             {% if not _tool_is_plus %}
             <div class="peak-plus-holder" data-peak-plus-panel style="display:none;">
